@@ -7,6 +7,7 @@ from typing import Any, Literal
 from langgraph.graph import END, START, StateGraph
 
 from ..acl import ACLMessage, ACLValidationError, make_reply, validate_acl
+from ..i18n import t
 from ..llm import LLMClient
 from ..rag.vector_store import search
 from ..schemas import RetrievalAnswer
@@ -22,7 +23,11 @@ def _reply(
 ) -> dict[str, Any]:
     request = state.get("request")
     if not request:
-        return {"acl_response": {"error": state.get("error", "нет ACL-запроса")}}
+        return {
+            "acl_response": {
+                "error": state.get("error") or t(state.get("language"), "no_acl")
+            }
+        }
     message = make_reply(
         ACLMessage.model_validate(request),
         performative=performative,
@@ -39,18 +44,22 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
         try:
             message = validate_acl(state.get("acl_request", {}))
         except ACLValidationError as exc:
-            return {"status": "refused", "error": f"Невалидный ACL: {exc}"}
+            return {"status": "refused", "error": t(None, "invalid_acl", error=exc)}
         if message.performative != "request":
+            lang = str(message.content.get("language", "ru"))
             return {
                 "status": "refused",
-                "error": "Retrieval принимает только performative=request",
+                "error": t(lang, "request_only", agent="Retrieval"),
+                "language": lang,
                 "request": message.model_dump(),
             }
         question = str(message.content.get("question", "")).strip()
         if not question:
+            lang = str(message.content.get("language", "ru"))
             return {
                 "status": "refused",
-                "error": "В ACL-запросе нет question",
+                "error": t(lang, "missing_question"),
+                "language": lang,
                 "request": message.model_dump(),
             }
         return {
@@ -58,6 +67,7 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
             "request": message.model_dump(),
             "question": question,
             "auditor_id": str(message.content.get("auditor_id", "")),
+            "language": str(message.content.get("language", "ru")),
             "conversation_id": message.conversation_id,
             "iterations": 0,
             "warnings": [],
@@ -70,18 +80,25 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
             return {
                 "chunks": [],
                 "search_mode": result["mode"],
-                "answer": {"text": EMPTY_ANSWER, "citations": []},
+                "answer": {
+                    "text": t(state.get("language"), "empty_retrieval"),
+                    "citations": [],
+                },
                 "citations": [],
                 "evidence": [],
             }
         return {"chunks": chunks, "search_mode": result["mode"]}
 
-    def _fallback_answer(chunks: list[dict[str, Any]]) -> RetrievalAnswer:
+    def _fallback_answer(
+        chunks: list[dict[str, Any]], language: str | None
+    ) -> RetrievalAnswer:
         top = chunks[0]
         return RetrievalAnswer(
-            text=(
-                f"Наиболее релевантный фрагмент «{top['title']}»: "
-                f"{top['content'][:900]}"
+            text=t(
+                language,
+                "relevant_fragment",
+                title=top["title"],
+                content=top["content"][:900],
             ),
             citations=[top["source_id"]],
         )
@@ -92,10 +109,13 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
                 question=state["question"], chunks=state["chunks"]
             )
         except Exception as exc:
-            return {"status": "failed", "error": f"Не удалось сформировать ответ: {exc}"}
+            return {
+                "status": "failed",
+                "error": t(state.get("language"), "answer_failed", error=exc),
+            }
         text = answer.text.strip().lower()
         if not answer.citations or "corrected text" in text or len(text) < 5:
-            answer = _fallback_answer(state["chunks"])
+            answer = _fallback_answer(state["chunks"], state.get("language"))
         return {"answer": answer.model_dump(), "citations": answer.citations}
 
     def validate_citations(state: RetrievalState) -> dict[str, Any]:
@@ -103,9 +123,21 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
         answer = state.get("answer", {})
         citations = [item for item in answer.get("citations", []) if item in allowed]
         invalid = [item for item in answer.get("citations", []) if item not in allowed]
-        issues = [f"Несуществующие источники: {', '.join(invalid)}"] if invalid else []
+        issues = (
+            [
+                t(
+                    state.get("language"),
+                    "invalid_sources",
+                    ids=", ".join(invalid),
+                )
+            ]
+            if invalid
+            else []
+        )
         if not citations and not invalid and state.get("chunks"):
-            fallback = _fallback_answer(state["chunks"])
+            fallback = _fallback_answer(
+                state["chunks"], state.get("language")
+            )
             return {
                 "answer": fallback.model_dump(),
                 "citations": fallback.citations,
@@ -124,7 +156,10 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
                 question=state["question"], answer=answer, chunks=state["chunks"]
             )
         except Exception as exc:
-            return {"status": "failed", "error": f"Критик недоступен: {exc}"}
+            return {
+                "status": "failed",
+                "error": t(state.get("language"), "critic_failed", error=exc),
+            }
         issues = list(critique.issues) + list(state.get("citation_issues", []))
         if not answer.citations:
             issues.append("В ответе нет ссылок на источники")
@@ -150,7 +185,10 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
                 chunks=state["chunks"],
             )
         except Exception as exc:
-            return {"status": "failed", "error": f"Не удалось переписать ответ: {exc}"}
+            return {
+                "status": "failed",
+                "error": t(state.get("language"), "revise_failed", error=exc),
+            }
         return {
             "answer": rewritten.model_dump(),
             "citations": rewritten.citations,
@@ -166,18 +204,34 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
         if issues:
             answer["text"] = (
                 answer.get("text", "")
-                + "\n\nТребует проверки: "
-                + "; ".join(issues[:5])
+                + "\n\n"
+                + t(
+                    state.get("language"),
+                    "needs_review",
+                    issues="; ".join(issues[:5]),
+                )
             )
         return {"answer": answer, "status": "ok"}
 
     def pack_response(state: RetrievalState) -> dict[str, Any]:
         status = state.get("status")
         if status == "refused":
-            return _reply(state, "refuse", {"reason": state.get("error", "Отклонено")})
+            return _reply(
+                state,
+                "refuse",
+                {
+                    "reason": state.get("error")
+                    or t(state.get("language"), "request_declined")
+                },
+            )
         if status == "failed":
             return _reply(
-                state, "failure", {"reason": state.get("error", "Ошибка выполнения")}
+                state,
+                "failure",
+                {
+                    "reason": state.get("error")
+                    or t(state.get("language"), "run_failed")
+                },
             )
 
         answer = state.get("answer", {})

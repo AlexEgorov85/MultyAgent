@@ -24,6 +24,7 @@ reports/*.json
 dist/
 build/
 *.egg-info/
+*.tsbuildinfo
 
 # материалы задания (не часть проекта)
 course/

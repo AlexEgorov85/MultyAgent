@@ -7,6 +7,7 @@ from typing import Any, Literal
 from langgraph.graph import END, START, StateGraph
 
 from ..acl import ACLMessage, ACLValidationError, make_acl_message, make_reply, validate_acl
+from ..i18n import t
 from ..llm import LLMClient
 from ..schemas import InvestigationAnswer, InvestigationPlan
 from ..state import InvestigationState
@@ -30,7 +31,11 @@ def _reply(
 ) -> dict[str, Any]:
     request = state.get("request")
     if not request:
-        return {"acl_response": {"error": state.get("error", "нет ACL-запроса")}}
+        return {
+            "acl_response": {
+                "error": state.get("error") or t(state.get("language"), "no_acl")
+            }
+        }
     message = make_reply(
         ACLMessage.model_validate(request),
         performative=performative,
@@ -63,12 +68,25 @@ def build_investigation_graph(
         server, retrieval_llm or llm, embeddings=embeddings, top_k=top_k
     )
 
-    def _call(graph, *, sender: str, receiver: str, question: str, conversation_id: str):
+    def _call(
+        graph,
+        *,
+        sender: str,
+        receiver: str,
+        question: str,
+        conversation_id: str,
+        auditor_id: str = "",
+        language: str = "ru",
+    ):
         request = make_acl_message(
             performative="request",
             sender=sender,
             receiver=receiver,
-            content={"question": question, "auditor_id": "AUD-001"},
+            content={
+                "question": question,
+                "auditor_id": auditor_id or "AUD-001",
+                "language": language,
+            },
             conversation_id=conversation_id,
         )
         result = graph.invoke({"acl_request": request.model_dump()})
@@ -79,18 +97,22 @@ def build_investigation_graph(
         try:
             message = validate_acl(state.get("acl_request", {}))
         except ACLValidationError as exc:
-            return {"status": "refused", "error": f"Невалидный ACL: {exc}"}
+            return {"status": "refused", "error": t(None, "invalid_acl", error=exc)}
         if message.performative != "request":
+            lang = str(message.content.get("language", "ru"))
             return {
                 "status": "refused",
-                "error": "Coordinator принимает только performative=request",
+                "error": t(lang, "request_only", agent="Coordinator"),
+                "language": lang,
                 "request": message.model_dump(),
             }
         question = str(message.content.get("question", "")).strip()
         if not question:
+            lang = str(message.content.get("language", "ru"))
             return {
                 "status": "refused",
-                "error": "В ACL-запросе нет question",
+                "error": t(lang, "missing_question"),
+                "language": lang,
                 "request": message.model_dump(),
             }
         return {
@@ -98,6 +120,7 @@ def build_investigation_graph(
             "request": message.model_dump(),
             "question": question,
             "auditor_id": str(message.content.get("auditor_id", "")),
+            "language": str(message.content.get("language", "ru")),
             "conversation_id": message.conversation_id,
             "rounds": 0,
             "acl_log": [],
@@ -111,7 +134,10 @@ def build_investigation_graph(
                 question=state["question"], schema_text=db_tools.get_schema()
             )
         except Exception as exc:
-            return {"status": "failed", "error": f"Не удалось построить план: {exc}"}
+            return {
+                "status": "failed",
+                "error": t(state.get("language"), "plan_failed", error=exc),
+            }
         return {"plan": plan_model.model_dump()}
 
     def round1(state: InvestigationState) -> dict[str, Any]:
@@ -125,6 +151,8 @@ def build_investigation_graph(
             receiver="analytics_agent",
             question=plan_model.analytics_question,
             conversation_id=state["conversation_id"],
+            auditor_id=state.get("auditor_id", ""),
+            language=state.get("language", "ru"),
         )
         r_req, r_resp = _call(
             retrieval_graph,
@@ -132,6 +160,8 @@ def build_investigation_graph(
             receiver="retrieval_agent",
             question=plan_model.retrieval_question,
             conversation_id=state["conversation_id"],
+            auditor_id=state.get("auditor_id", ""),
+            language=state.get("language", "ru"),
         )
         log.extend(
             [
@@ -183,6 +213,8 @@ def build_investigation_graph(
                 receiver="analytics_agent",
                 question=refined.analytics_question,
                 conversation_id=state["conversation_id"],
+                auditor_id=state.get("auditor_id", ""),
+                language=state.get("language", "ru"),
             )
             log.extend(
                 [
@@ -201,6 +233,8 @@ def build_investigation_graph(
                 receiver="retrieval_agent",
                 question=refined.retrieval_question,
                 conversation_id=state["conversation_id"],
+                auditor_id=state.get("auditor_id", ""),
+                language=state.get("language", "ru"),
             )
             log.extend(
                 [
@@ -237,24 +271,43 @@ def build_investigation_graph(
                 rounds=int(state.get("rounds", 0)),
             )
         except Exception as exc:
-            return {"status": "failed", "error": f"Синтез не выполнен: {exc}"}
+            return {
+                "status": "failed",
+                "error": t(
+                    state.get("language"), "synthesis_failed", error=exc
+                ),
+            }
 
         text = answer.text
         causal = answer.causal_claim
         if causal and state.get("missing"):
             causal = False
-            text += "\n\nПричинный вывод не подтверждён: не хватает " + ", ".join(
-                state.get("missing", [])
-            ) + "."
+            text += "\n\n" + t(
+                state.get("language"),
+                "causal_missing",
+                missing=", ".join(state.get("missing", [])),
+            )
         return {"answer": {"text": text, "causal_claim": causal}, "status": "ok"}
 
     def pack_response(state: InvestigationState) -> dict[str, Any]:
         status = state.get("status")
         if status == "refused":
-            return _reply(state, "refuse", {"reason": state.get("error", "Отклонено")})
+            return _reply(
+                state,
+                "refuse",
+                {
+                    "reason": state.get("error")
+                    or t(state.get("language"), "request_declined")
+                },
+            )
         if status == "failed":
             return _reply(
-                state, "failure", {"reason": state.get("error", "Ошибка выполнения")}
+                state,
+                "failure",
+                {
+                    "reason": state.get("error")
+                    or t(state.get("language"), "run_failed")
+                },
             )
         answer = state.get("answer", {})
         return _reply(

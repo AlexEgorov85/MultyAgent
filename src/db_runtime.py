@@ -86,11 +86,47 @@ def ensure_ascii_pg_install() -> Path | None:
 def start_server(pgdata: Path | str | None = None, cleanup_mode: str | None = "stop"):
     """Запускает (или подключается к) PostgreSQL и возвращает handle."""
     import pgserver
+    import pgserver.postgres_server as server_module
 
     ensure_ascii_pg_install()
     path = Path(pgdata or config.PGDATA_DIR)
     path.mkdir(parents=True, exist_ok=True)
-    return pgserver.get_server(path, cleanup_mode=cleanup_mode)
+    try:
+        return pgserver.get_server(path, cleanup_mode=cleanup_mode)
+    except Exception:
+        # pgserver кладёт экземпляр в кэш ДО успешного старта. Если старт
+        # упал (например, таймаут восстановления после жёсткого завершения),
+        # в кэше остаётся handle с _postmaster_info=None, и все последующие
+        # вызовы падают с AssertionError. Убираем его, чтобы retry создал новый.
+        server_module.PostgresServer._instances.pop(path.resolve(), None)
+        raise
+
+
+def stop_server(
+    pgdata: Path | str | None = None,
+    *,
+    mode: str = "fast",
+    timeout: int = 30,
+) -> bool:
+    """Останавливает postmaster, оставшийся от аварийно завершённого процесса.
+
+    Нужен после `taskkill /F`: `atexit`-очистка pgserver не выполняется,
+    сервер продолжает держать каталог данных, и следующий запуск падает
+    по таймауту `pg_ctl start`. Возвращает True, если сервер остановлен.
+    """
+    import pgserver._commands as commands
+
+    ensure_ascii_pg_install()
+    path = Path(pgdata or config.PGDATA_DIR)
+    if not path.exists():
+        return False
+    for stop_mode in (mode, "immediate"):
+        try:
+            commands.pg_ctl(["-w", "-m", stop_mode, "stop"], pgdata=path, timeout=timeout)
+            return True
+        except Exception:  # noqa: BLE001 - сервер мог уже остановиться
+            continue
+    return False
 
 
 def data_uri(server, role: str = ADMIN_ROLE, database: str | None = None) -> str:

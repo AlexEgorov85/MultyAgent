@@ -7,10 +7,13 @@ const API_URL = (process.env.LANGGRAPH_API_URL ?? "http://127.0.0.1:2024").repla
 
 function isAllowedPath(path: string, method: string) {
   const thread = "[a-zA-Z0-9_-]+";
+  const run = "[a-zA-Z0-9_-]+";
   if (method === "GET") {
     return (
       new RegExp(`^threads/${thread}/state$`).test(path) ||
       new RegExp(`^threads/${thread}/history$`).test(path) ||
+      // опрос статуса run после обрыва стрима
+      new RegExp(`^threads/${thread}/runs/${run}$`).test(path) ||
       path === "assistants"
     );
   }
@@ -19,8 +22,9 @@ function isAllowedPath(path: string, method: string) {
     path === "threads" ||
     path === "assistants/search" ||
     new RegExp(
-      `^threads/${thread}/(?:commands|stream/events|history|runs/stream|runs/${thread}/cancel)$`,
-    ).test(path)
+      `^threads/${thread}/(?:commands|stream/events|history|runs/stream|runs/wait)$`,
+    ).test(path) ||
+    new RegExp(`^threads/${thread}/runs/${run}/(?:cancel|join)$`).test(path)
   );
 }
 
@@ -89,7 +93,25 @@ async function handleRequest(req: NextRequest, method: string) {
       responseHeaders.delete(name);
     }
     responseHeaders.set("Cache-Control", "no-store");
-    return new NextResponse(response.body, {
+
+    // SSE проксируем потоком, остальные ответы — буферизуем целиком,
+    // иначе браузер может не увидеть конец тела и `response.json()` зависнет.
+    const streaming =
+      path.endsWith("runs/stream") || path.endsWith("stream/events");
+    if (streaming) {
+      return new NextResponse(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+      });
+    }
+
+    const text = await response.text();
+    responseHeaders.set(
+      "content-length",
+      String(new TextEncoder().encode(text).byteLength),
+    );
+    return new NextResponse(text, {
       status: response.status,
       statusText: response.statusText,
       headers: responseHeaders,

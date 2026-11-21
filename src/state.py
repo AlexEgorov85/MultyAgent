@@ -13,6 +13,7 @@ class AnalyticsState(TypedDict, total=False):
     request: dict[str, Any]
     question: str
     auditor_id: str
+    language: str
     conversation_id: str
     status: str  # ok | refused | failed
     error: str
@@ -39,6 +40,7 @@ class RetrievalState(TypedDict, total=False):
     request: dict[str, Any]
     question: str
     auditor_id: str
+    language: str
     conversation_id: str
     status: str
     error: str
@@ -63,6 +65,7 @@ class ReportState(TypedDict, total=False):
     request: dict[str, Any]
     question: str
     auditor_id: str
+    language: str
     conversation_id: str
     status: str
     error: str
@@ -88,6 +91,7 @@ class InvestigationState(TypedDict, total=False):
     request: dict[str, Any]
     question: str
     auditor_id: str
+    language: str
     conversation_id: str
     status: str
     error: str
@@ -109,6 +113,7 @@ class MainState(TypedDict, total=False):
     messages: Annotated[list[Any], operator.add]
     user_query: str
     auditor_id: str
+    language: str
     conversation_id: str
     route: str
     route_reason: str

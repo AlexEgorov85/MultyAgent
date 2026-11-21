@@ -20,13 +20,34 @@ from .report_graph import build_report_graph
 from .retrieval_graph import build_retrieval_graph
 
 
+def _content_text(content: Any) -> str:
+    """Достаёт текст из строки или списка content-блоков LangChain."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and item.get("type") in ("text", "text_delta"):
+                parts.append(str(item.get("text", "")))
+        return " ".join(part for part in parts if part).strip()
+    return "" if content is None else str(content)
+
+
 def _last_user_text(messages: list[Any]) -> str:
+    """Последнее сообщение пользователя.
+
+    LangGraph API присылает сообщения словарями с `type: "human"`, а прямой
+    вызов графа — объектами LangChain. Поддерживаем оба варианта.
+    """
     for message in reversed(messages):
         if isinstance(message, dict):
-            if message.get("role") == "user":
-                return str(message.get("content", ""))
+            role = message.get("role") or message.get("type")
+            if role in ("user", "human"):
+                return _content_text(message.get("content", ""))
         elif getattr(message, "type", "") in ("human", "user"):
-            return str(getattr(message, "content", ""))
+            return _content_text(getattr(message, "content", ""))
     return ""
 
 
@@ -38,6 +59,10 @@ def _response_text(content: dict[str, Any]) -> str:
         or content.get("error")
         or ""
     )
+
+
+def _pick(state: MainState, ru: str, en: str) -> str:
+    return en if state.get("language") == "en" else ru
 
 
 def build_main_graph(
@@ -84,7 +109,9 @@ def build_main_graph(
         for key, value in facts.items():
             memory_store.save_fact(server, state.get("auditor_id", ""), key, value)
         profile = memory_store.load_profile(server, state.get("auditor_id", ""))
-        answer = "Профиль сохранён: " + memory_store.profile_text(profile)
+        answer = _pick(
+            state, "Профиль сохранён: ", "Profile saved: "
+        ) + memory_store.profile_text(profile)
         return {
             "memory_saved": True,
             "profile": profile,
@@ -169,6 +196,7 @@ def build_main_graph(
             content={
                 "question": _question_with_profile(state),
                 "auditor_id": state.get("auditor_id", ""),
+                "language": state.get("language", "ru"),
             },
             conversation_id=state.get("conversation_id", "conv-main"),
         )
@@ -197,11 +225,23 @@ def build_main_graph(
         route = state.get("route")
         guard = state.get("guardrail", {})
         if guard and not guard.get("safe"):
-            answer = guard.get("final_answer") or guard.get("reason") or "Запрос отклонён."
+            answer = (
+                guard.get("final_answer")
+                or guard.get("reason")
+                or _pick(state, "Запрос отклонён.", "The request was declined.")
+            )
         elif route == "unsafe":
-            answer = "Не могу выполнить запрос: изменение данных запрещено."
+            answer = _pick(
+                state,
+                "Не могу выполнить запрос: изменение данных запрещено.",
+                "I cannot run this request: data modification is not allowed.",
+            )
         else:
-            answer = "Я помогаю только по вопросам внутреннего аудита."
+            answer = _pick(
+                state,
+                "Я помогаю только по вопросам внутреннего аудита.",
+                "I can only help with internal audit questions.",
+            )
         return {"final_answer": answer, "evidence": []}
 
     def guard_answer(state: MainState) -> dict[str, Any]:

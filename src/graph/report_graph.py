@@ -8,6 +8,7 @@ from typing import Any, Literal
 from langgraph.graph import END, START, StateGraph
 
 from ..acl import ACLMessage, ACLValidationError, make_reply, validate_acl
+from ..i18n import t
 from ..llm import LLMClient
 from ..schemas import ReportDraft, ReportReview
 from ..state import ReportState
@@ -23,7 +24,11 @@ def _reply(
 ) -> dict[str, Any]:
     request = state.get("request")
     if not request:
-        return {"acl_response": {"error": state.get("error", "нет ACL-запроса")}}
+        return {
+            "acl_response": {
+                "error": state.get("error") or t(state.get("language"), "no_acl")
+            }
+        }
     message = make_reply(
         ACLMessage.model_validate(request),
         performative=performative,
@@ -40,18 +45,22 @@ def build_report_graph(server, llm: LLMClient):
         try:
             message = validate_acl(state.get("acl_request", {}))
         except ACLValidationError as exc:
-            return {"status": "refused", "error": f"Невалидный ACL: {exc}"}
+            return {"status": "refused", "error": t(None, "invalid_acl", error=exc)}
         if message.performative != "request":
+            lang = str(message.content.get("language", "ru"))
             return {
                 "status": "refused",
-                "error": "Report принимает только performative=request",
+                "error": t(lang, "request_only", agent="Report"),
+                "language": lang,
                 "request": message.model_dump(),
             }
         question = str(message.content.get("question", "")).strip()
         if not question:
+            lang = str(message.content.get("language", "ru"))
             return {
                 "status": "refused",
-                "error": "В ACL-запросе нет question",
+                "error": t(lang, "missing_question"),
+                "language": lang,
                 "request": message.model_dump(),
             }
         return {
@@ -59,6 +68,7 @@ def build_report_graph(server, llm: LLMClient):
             "request": message.model_dump(),
             "question": question,
             "auditor_id": str(message.content.get("auditor_id", "")),
+            "language": str(message.content.get("language", "ru")),
             "conversation_id": message.conversation_id,
             "iterations": 0,
         }
@@ -68,14 +78,16 @@ def build_report_graph(server, llm: LLMClient):
         if not match:
             return {
                 "status": "failed",
-                "error": "В запросе не указан код проверки (AUD-...).",
+                "error": t(state.get("language"), "missing_audit_code"),
             }
         audit_code = match.group(0).upper()
         audit = db_tools.get_audit(server, audit_code)
         if audit is None:
             return {
                 "status": "failed",
-                "error": f"Проверка {audit_code} не найдена.",
+                "error": t(
+                    state.get("language"), "audit_not_found", code=audit_code
+                ),
             }
 
         act = db_tools.get_act(server, audit_code)
@@ -128,7 +140,10 @@ def build_report_graph(server, llm: LLMClient):
                 allowed_ids=state["allowed_ids"],
             )
         except Exception as exc:
-            return {"status": "failed", "error": f"Не удалось подготовить черновик: {exc}"}
+            return {
+                "status": "failed",
+                "error": t(state.get("language"), "draft_failed", error=exc),
+            }
         return {"draft": draft_model.model_dump(), "status": "ok"}
 
     def validate_citations(state: ReportState) -> dict[str, Any]:
@@ -158,7 +173,10 @@ def build_report_graph(server, llm: LLMClient):
                 allowed_ids=state["allowed_ids"],
             )
         except Exception as exc:
-            return {"status": "failed", "error": f"Inspector недоступен: {exc}"}
+            return {
+                "status": "failed",
+                "error": t(state.get("language"), "inspector_failed", error=exc),
+            }
         issues = list(review_model.issues) + list(state.get("citation_issues", []))
         if not draft_model.citations:
             issues.append("В черновике нет ссылок на источники")
@@ -186,7 +204,10 @@ def build_report_graph(server, llm: LLMClient):
                 allowed_ids=state["allowed_ids"],
             )
         except Exception as exc:
-            return {"status": "failed", "error": f"Не удалось исправить черновик: {exc}"}
+            return {
+                "status": "failed",
+                "error": t(state.get("language"), "revise_failed", error=exc),
+            }
         return {
             "draft": revised.model_dump(),
             "citations": revised.citations,
@@ -202,18 +223,34 @@ def build_report_graph(server, llm: LLMClient):
         if issues:
             draft_model["text"] = (
                 draft_model.get("text", "")
-                + "\n\nТребует проверки: "
-                + "; ".join(issues[:5])
+                + "\n\n"
+                + t(
+                    state.get("language"),
+                    "needs_review",
+                    issues="; ".join(issues[:5]),
+                )
             )
         return {"draft": draft_model, "status": "ok"}
 
     def pack_response(state: ReportState) -> dict[str, Any]:
         status = state.get("status")
         if status == "refused":
-            return _reply(state, "refuse", {"reason": state.get("error", "Отклонено")})
+            return _reply(
+                state,
+                "refuse",
+                {
+                    "reason": state.get("error")
+                    or t(state.get("language"), "request_declined")
+                },
+            )
         if status == "failed":
             return _reply(
-                state, "failure", {"reason": state.get("error", "Ошибка выполнения")}
+                state,
+                "failure",
+                {
+                    "reason": state.get("error")
+                    or t(state.get("language"), "run_failed")
+                },
             )
 
         draft_model = state.get("draft", {})

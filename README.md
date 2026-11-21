@@ -218,14 +218,34 @@ npm --prefix ui run dev
 маршрутизация, SQL, retrieval, отчёт, расследование, память и guardrails.
 Ключ LLM остаётся только на backend.
 
-Браузер обращается не напрямую к `:2024`, а к Next-прокси `/api/*`
-(`ui/app/api/[..._path]/route.ts`), поэтому CORS не нужен. Адрес API
-задаётся в `ui/.env.local`:
+> **Важно про язык интерфейса.** `langgraph dev` предлагает
+> **LangGraph Studio** (`smith.langchain.com/studio`) — это сторонний
+> облачный интерфейс LangChain с английскими меню и настройками. Он не
+> входит в проект и не локализуется. Для работы используйте именно
+> `http://localhost:3000`: в нём есть собственные настройки
+> (шестерёнка внизу слева), меню и переключение языка **RU / EN**.
+> Ответы ассистента формируются на языке вопроса.
+>
+> Английский значок внизу слева, который показывал меню `Route Info` /
+> `Preferences`, — это индикатор **Next.js DevTools**. Он отключён в
+> `ui/next.config.ts` (`devIndicators: false`), поэтому вместо него
+> остаётся только русская шестерёнка настроек приложения.
+
+Браузер обращается к API напрямую. LangGraph API по умолчанию отдаёт
+`Access-Control-Allow-Origin: *`, поэтому CORS работает без прокси.
+Адрес API задаётся в `ui/.env.local`:
 
 ```dotenv
-LANGGRAPH_API_URL=http://127.0.0.1:2024
+NEXT_PUBLIC_LANGGRAPH_API_URL=http://127.0.0.1:2024
 NEXT_PUBLIC_LANGGRAPH_ASSISTANT_ID=audit_assistant
 ```
+
+>`NEXT_PUBLIC_*` встраивается в бандл при сборке: после изменения
+> `ui/.env.local` перезапустите `npm run dev`.
+
+В репозитории остался и Next-прокси `ui/app/api/[..._path]/route.ts`
+(белый список путей и методов) — он нужен только если CORS на API
+специально отключён.
 
 > `.env` должен оставаться в ASCII. `langgraph dev` читает его через
 > `python-dotenv` с локальной кодировкой Windows (cp1251), и кириллические

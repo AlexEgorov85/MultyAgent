@@ -10,6 +10,7 @@ import psycopg
 from langgraph.graph import END, START, StateGraph
 
 from ..acl import ACLMessage, ACLValidationError, make_reply, validate_acl
+from ..i18n import t
 from ..llm import LLMClient
 from ..schemas import SQLPlan, ToolPlan
 from ..state import AnalyticsState
@@ -27,7 +28,11 @@ def _reply(
 ) -> dict[str, Any]:
     request = state.get("request")
     if not request:
-        return {"acl_response": {"error": state.get("error", "нет ACL-запроса")}}
+        return {
+            "acl_response": {
+                "error": state.get("error") or t(state.get("language"), "no_acl")
+            }
+        }
     message = make_reply(
         ACLMessage.model_validate(request),
         performative=performative,
@@ -52,20 +57,27 @@ def build_analytics_graph(server, llm: LLMClient):
         try:
             message = validate_acl(state.get("acl_request", {}))
         except ACLValidationError as exc:
-            return {"status": "refused", "error": f"Невалидный ACL: {exc}"}
-
-        if message.performative != "request":
             return {
                 "status": "refused",
-                "error": "Analytics принимает только performative=request",
+                "error": t(None, "invalid_acl", error=exc),
+            }
+
+        if message.performative != "request":
+            lang = str(message.content.get("language", "ru"))
+            return {
+                "status": "refused",
+                "error": t(lang, "request_only", agent="Analytics"),
+                "language": lang,
                 "request": message.model_dump(),
             }
 
         question = str(message.content.get("question", "")).strip()
         if not question:
+            lang = str(message.content.get("language", "ru"))
             return {
                 "status": "refused",
-                "error": "В ACL-запросе нет question",
+                "error": t(lang, "missing_question"),
+                "language": lang,
                 "request": message.model_dump(),
             }
 
@@ -74,6 +86,7 @@ def build_analytics_graph(server, llm: LLMClient):
             "request": message.model_dump(),
             "question": question,
             "auditor_id": str(message.content.get("auditor_id", "")),
+            "language": str(message.content.get("language", "ru")),
             "conversation_id": message.conversation_id,
             "retries": 0,
             "evidence": [],
@@ -99,7 +112,11 @@ def build_analytics_graph(server, llm: LLMClient):
                 templates=db_tools.list_script_templates(server),
             )
         except Exception as exc:
-            return _fail(state, f"Не удалось построить план: {exc}")
+            detail = str(exc).strip() or repr(exc)
+            return _fail(
+                state,
+                t(state.get("language"), "plan_failed", error=detail),
+            )
         if plan.strategy == "script" and not plan.template_key.strip():
             return _fail(state, "Модель выбрала шаблон, но не указала template_key")
         if plan.strategy == "generated" and not plan.sql.strip():
@@ -172,7 +189,10 @@ def build_analytics_graph(server, llm: LLMClient):
                 schema_text=db_tools.get_schema(),
             )
         except Exception as exc:
-            return _fail(state, f"Не удалось исправить SQL: {exc}")
+            return _fail(
+                state,
+                t(state.get("language"), "repair_failed", error=exc),
+            )
         return {"plan": plan.model_dump(), "strategy": "generated"}
 
     def drilldown(state: AnalyticsState) -> dict[str, Any]:
@@ -181,14 +201,25 @@ def build_analytics_graph(server, llm: LLMClient):
             return _fail(state, "Не найден код проверки")
         audit_code = code.group(0).upper()
         items = db_tools.get_act_items(server, audit_code, limit=50)
+        english = str(state.get("language")).lower() == "en"
         if not items:
             return {
-                "answer": f"По проверке {audit_code} пункты не найдены.",
+                "answer": (
+                    f"No items were found for audit {audit_code}."
+                    if english
+                    else f"По проверке {audit_code} пункты не найдены."
+                ),
                 "rows": [],
                 "columns": [],
                 "evidence": [],
             }
-        lines = [f"По проверке {audit_code} найдено пунктов: {len(items)}."]
+        lines = [
+            (
+                f"Audit {audit_code}: {len(items)} items found."
+                if english
+                else f"По проверке {audit_code} найдено пунктов: {len(items)}."
+            )
+        ]
         for item in items[:5]:
             lines.append(
                 f"{item['item_number']} — {item['title']} "
@@ -210,7 +241,10 @@ def build_analytics_graph(server, llm: LLMClient):
                 question=state["question"], tools_text=TOOL_SPECS
             )
         except Exception as exc:
-            return _fail(state, f"Не удалось выбрать инструменты: {exc}")
+            return _fail(
+                state,
+                t(state.get("language"), "tools_failed", error=exc),
+            )
 
         calls: list[dict[str, Any]] = []
         evidence: list[dict[str, Any]] = []
@@ -259,22 +293,88 @@ def build_analytics_graph(server, llm: LLMClient):
             "strategy": "multi_tool",
         }
 
-    def _format_rows(rows: list[dict[str, Any]], columns: list[str]) -> str:
+    COLUMN_LABELS = {
+        "year": "год",
+        "period_year": "год",
+        "theme_code": "тема",
+        "status": "статус",
+        "audit_code": "проверка",
+        "audit_count": "Проверок",
+        "completed_audits_count": "Завершённых проверок",
+        "count": "Всего",
+        "total": "Всего",
+        "items_count": "Пунктов",
+        "total_items": "Всего пунктов",
+        "deviations_count": "Отклонений",
+        "overdue_open_items": "Просроченных открытых пунктов",
+        "overdue_open_items_count": "Просроченных открытых пунктов",
+        "critical_open_count": "Критичных открытых пунктов",
+        "overdue_share_pct": "Доля просроченных, %",
+    }
+    HEADLINE_COLUMNS = (
+        "completed_audits_count",
+        "audit_count",
+        "overdue_open_items_count",
+        "critical_open_count",
+        "deviations_count",
+        "items_count",
+        "total_items",
+        "count",
+        "total",
+    )
+
+    def _format_rows(
+        rows: list[dict[str, Any]],
+        columns: list[str],
+        language: str | None = None,
+    ) -> str:
+        english = str(language).lower() == "en"
+
+        def label(column: str) -> str:
+            return (
+                column.replace("_", " ").capitalize()
+                if english
+                else COLUMN_LABELS.get(column, column)
+            )
+
         if not rows:
-            return "По заданным условиям ничего не найдено."
+            return (
+                "No rows match the given conditions."
+                if english
+                else "По заданным условиям ничего не найдено."
+            )
         if len(rows) == 1:
-            parts = []
-            for column in columns:
-                value = rows[0].get(column)
-                if value is not None:
-                    parts.append(f"{column}: {value}")
+            row = rows[0]
+            headline = next(
+                (
+                    key
+                    for key in HEADLINE_COLUMNS
+                    if key in row and row[key] is not None
+                ),
+                None,
+            )
+            if headline is not None:
+                text = f"{label(headline)}: {row[headline]}"
+                details = [
+                    f"{label(column)}: {row[column]}"
+                    for column in columns
+                    if column != headline and row.get(column) is not None
+                ]
+                if details:
+                    text += " (" + ", ".join(details) + ")"
+                return text + "."
+            parts = [
+                f"{label(column)}: {rows[0].get(column)}"
+                for column in columns
+                if rows[0].get(column) is not None
+            ]
             if parts:
-                return "Результат — " + ", ".join(parts) + "."
+                return t(language, "result", body=", ".join(parts))
         preview = "; ".join(
             ", ".join(f"{column}={row.get(column)}" for column in columns)
             for row in rows[:5]
         )
-        return f"Найдено строк: {len(rows)}. Первые: {preview}."
+        return t(language, "found_rows", count=len(rows), preview=preview)
 
     def summarize(state: AnalyticsState) -> dict[str, Any]:
         if state.get("status") in ("refused", "failed"):
@@ -284,7 +384,9 @@ def build_analytics_graph(server, llm: LLMClient):
             return {}
 
         rows = state.get("rows", [])
-        answer = _format_rows(rows, state.get("columns", []))
+        answer = _format_rows(
+            rows, state.get("columns", []), state.get("language")
+        )
         return {"answer": answer}
 
     def pack_response(state: AnalyticsState) -> dict[str, Any]:
@@ -293,13 +395,19 @@ def build_analytics_graph(server, llm: LLMClient):
             return _reply(
                 state,
                 "refuse",
-                {"reason": state.get("error", "Запрос отклонён")},
+                {
+                    "reason": state.get("error")
+                    or t(state.get("language"), "request_declined")
+                },
             )
         if status == "failed":
             return _reply(
                 state,
                 "failure",
-                {"reason": state.get("error", "Не удалось выполнить запрос")},
+                {
+                    "reason": state.get("error")
+                    or t(state.get("language"), "request_failed")
+                },
             )
 
         content: dict[str, Any] = {
