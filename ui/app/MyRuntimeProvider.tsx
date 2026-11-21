@@ -149,7 +149,7 @@ export function MyRuntimeProvider({
         }
 
         let response = await send(threadId);
-        if (response.status === 404) {
+        if ([404, 410, 502].includes(response.status)) {
           // Нить могла исчезнуть после перезапуска сервера — создаём новую.
           threadId = await createThread(language);
           setBackendThreadId(chatId, threadId);
@@ -157,9 +157,16 @@ export function MyRuntimeProvider({
         }
 
         if (!response.ok) {
+          let detail = "";
+          try {
+            detail = (await response.text()).slice(0, 240);
+          } catch {
+            // тело ошибки недоступно
+          }
+          const suffix = detail ? ` — ${detail}` : "";
           answer = ru
-            ? `Ошибка API: ${response.status} ${response.statusText}`
-            : `API error: ${response.status} ${response.statusText}`;
+            ? `Ошибка API: ${response.status} ${response.statusText}${suffix}`
+            : `API error: ${response.status} ${response.statusText}${suffix}`;
         } else {
           const state = await response.json();
           answer =

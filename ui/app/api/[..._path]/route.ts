@@ -72,7 +72,6 @@ async function handleRequest(req: NextRequest, method: string) {
     method,
     headers,
     redirect: "manual",
-    signal: req.signal,
   };
   if (["POST", "PUT", "PATCH"].includes(method)) {
     options.body = await req.text();
@@ -94,24 +93,9 @@ async function handleRequest(req: NextRequest, method: string) {
     }
     responseHeaders.set("Cache-Control", "no-store");
 
-    // SSE проксируем потоком, остальные ответы — буферизуем целиком,
-    // иначе браузер может не увидеть конец тела и `response.json()` зависнет.
-    const streaming =
-      path.endsWith("runs/stream") || path.endsWith("stream/events");
-    if (streaming) {
-      return new NextResponse(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: responseHeaders,
-      });
-    }
-
-    const text = await response.text();
-    responseHeaders.set(
-      "content-length",
-      String(new TextEncoder().encode(text).byteLength),
-    );
-    return new NextResponse(text, {
+    // Все ответы проксируем потоком: `runs/wait` может отвечать десятки
+    // секунд, и буферизация в route handler приводит к обрыву соединения.
+    return new NextResponse(response.body, {
       status: response.status,
       statusText: response.statusText,
       headers: responseHeaders,

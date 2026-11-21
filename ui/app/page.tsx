@@ -9,6 +9,7 @@ import {
 } from "@assistant-ui/react";
 import { useCallback, useState } from "react";
 import { AgentTrace } from "./AgentTrace";
+import { MarkdownText } from "./MarkdownText";
 import { ChatSidebar } from "./ChatSidebar";
 import { useChats } from "./chats";
 import { SettingsDialog } from "./SettingsDialog";
@@ -139,7 +140,7 @@ function AssistantMessage() {
         ) : null}
         <div className="app-assistant-bubble app-bubble app-round min-w-0 border shadow-sm">
           <div className="aui-text app-chat-text">
-            <MessagePrimitive.Parts />
+            <MessagePrimitive.Parts components={{ Text: MarkdownText }} />
           </div>
           <MessagePrimitive.Error>
             <div className="app-danger app-round-sm mt-2 border px-3 py-2 text-xs leading-relaxed">

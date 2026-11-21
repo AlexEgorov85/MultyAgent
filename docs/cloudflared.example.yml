@@ -1,0 +1,17 @@
+# Пример config.yml для named-туннеля Cloudflare.
+# Скопируйте в %USERPROFILE%\.cloudflared\config.yml и замените:
+#   <TUNNEL-ID>       — UUID из вывода `cloudflared tunnel create audit-demo`
+#   demo.example.com  — ваш hostname в зоне Cloudflare
+#
+# Cloudflare Access настраивается не здесь, а в дашборде Zero Trust
+# (Access → Applications). См. docs/share_ui.md.
+
+tunnel: audit-demo
+credentials-file: C:/Users/<you>/.cloudflared/<TUNNEL-ID>.json
+
+ingress:
+  # Браузер → туннель → Next.js :3000 → /api → LangGraph :2024
+  - hostname: demo.example.com
+    service: http://localhost:3000
+  # Всё, что не совпало с hostname, закрываем.
+  - service: http_status:404

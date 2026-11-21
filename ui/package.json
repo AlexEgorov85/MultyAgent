@@ -12,10 +12,12 @@
   "dependencies": {
     "@assistant-ui/react": "0.15.37",
     "@assistant-ui/react-langgraph": "0.14.41",
+    "@assistant-ui/react-markdown": "^0.14.26",
     "@langchain/langgraph-sdk": "^1.9.20",
     "next": "16.4.6",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.0",

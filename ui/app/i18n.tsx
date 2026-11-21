@@ -50,6 +50,10 @@ export type Dictionary = {
   errorHint: string;
   assistantInitial: string;
   agentPath: string;
+  agentPathShowSql: string;
+  agentPathHideSql: string;
+  agentPathSeconds: string;
+  agentPathWarnings: string;
   chats: string;
   chatsHint: string;
   openChats: string;
@@ -190,7 +194,11 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     errorTitle: "Не удалось получить ответ",
     errorHint: "Проверьте, что LangGraph API запущен, и повторите запрос.",
     assistantInitial: "А",
-    agentPath: "Путь работы агента",
+    agentPath: "Как получен ответ",
+    agentPathShowSql: "Показать SQL",
+    agentPathHideSql: "Скрыть SQL",
+    agentPathSeconds: "{seconds} с",
+    agentPathWarnings: "Замечаний: {count}",
     chats: "Чаты",
     chatsHint: "История диалогов",
     openChats: "Открыть список чатов",
@@ -263,8 +271,8 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     showSuggestionsHint: "Показывать карточки с примерами вопросов.",
     showOnline: "Статус «онлайн»",
     showOnlineHint: "Индикатор доступности в шапке.",
-    showAgentTrace: "Путь работы агента",
-    showAgentTraceHint: "Показывать раскрываемый список шагов под ответом.",
+    showAgentTrace: "Как получен ответ",
+    showAgentTraceHint: "Показывать раскрываемую цепочку шагов под ответом.",
     enterToSend: "Enter отправляет сообщение",
     enterToSendHint:
       "Если выключено, Enter переносит строку, а отправка — Ctrl+Enter.",
@@ -330,7 +338,11 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     errorTitle: "Could not get an answer",
     errorHint: "Make sure the LangGraph API is running and try again.",
     assistantInitial: "A",
-    agentPath: "Agent run path",
+    agentPath: "How the answer was built",
+    agentPathShowSql: "Show SQL",
+    agentPathHideSql: "Hide SQL",
+    agentPathSeconds: "{seconds} s",
+    agentPathWarnings: "Warnings: {count}",
     chats: "Chats",
     chatsHint: "Conversation history",
     openChats: "Open chat list",
@@ -403,8 +415,8 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     showSuggestionsHint: "Show example question cards on the empty screen.",
     showOnline: "Online status",
     showOnlineHint: "Availability indicator in the header.",
-    showAgentTrace: "Agent run path",
-    showAgentTraceHint: "Show a collapsible list of steps under the answer.",
+    showAgentTrace: "How the answer was built",
+    showAgentTraceHint: "Show a collapsible chain of steps under the answer.",
     enterToSend: "Enter sends the message",
     enterToSendHint:
       "When off, Enter inserts a newline and Ctrl+Enter sends.",

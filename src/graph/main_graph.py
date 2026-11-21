@@ -252,12 +252,10 @@ def build_main_graph(
             extract_sql(state.get("acl_response")),
             is_domain=route != "out_of_domain",
         )
+        update: dict[str, Any] = {"answer_guardrail": result.model_dump()}
         if not result.safe:
-            return {
-                "final_answer": result.final_answer,
-                "guardrail": result.model_dump(),
-            }
-        return {"guardrail": result.model_dump()}
+            update["final_answer"] = result.final_answer
+        return update
 
     def finalize(state: MainState) -> dict[str, Any]:
         answer = state.get("final_answer", "")

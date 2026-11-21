@@ -97,7 +97,8 @@ def test_table_answer_has_no_raw_column_names():
     assert presentation["kind"] == "table"
     assert presentation["text"].startswith("Найдено строк: 2.")
     assert "audit_code" not in presentation["text"]
-    assert "проверка: AUD-1" in presentation["text"]
+    assert "| проверка |" in presentation["text"]
+    assert "| AUD-1 |" in presentation["text"]
 
 
 def test_text_report_and_refusal_pass_through():

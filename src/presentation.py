@@ -126,8 +126,74 @@ _LABELS_EN: dict[str, str] = {
 }
 
 
+_ROUTE_KEYS = {
+    "analytics": "route_analytics",
+    "retrieval": "route_retrieval",
+    "report": "route_report",
+    "investigation": "route_investigation",
+    "memory": "route_memory",
+    "unsafe": "route_unsafe",
+    "out_of_domain": "route_out_of_domain",
+}
+
+_AGENT_KEYS = {
+    "orchestrator": "agent_orchestrator",
+    "memory": "agent_memory",
+    "guardrail": "agent_guard",
+    "guardrails": "agent_guard",
+    "analytics_agent": "agent_analytics",
+    "retrieval_agent": "agent_retrieval",
+    "report_agent": "agent_report",
+    "investigation_coordinator": "agent_investigation",
+    "investigation_agent": "agent_investigation",
+    "inspector": "agent_inspector",
+}
+
+_PERFORMATIVE_KEYS = {
+    "request": "performative_request",
+    "inform": "performative_inform",
+    "refuse": "performative_refuse",
+    "failure": "performative_failure",
+}
+
+_VERDICT_KEYS = {
+    "ok": "verdict_ok",
+    "rewrite": "verdict_rewrite",
+    "revise": "verdict_revise",
+}
+
+
 def _lang(state: dict[str, Any]) -> str:
     return str(state.get("language") or "ru")
+
+
+def _route_label(lang: str, route: str) -> str:
+    key = _ROUTE_KEYS.get(str(route or "").strip().lower())
+    return t(lang, key) if key else (str(route or "").strip() or "—")
+
+
+def _agent_label(lang: str, value: str) -> str:
+    key = _AGENT_KEYS.get(str(value or "").strip().lower())
+    return t(lang, key) if key else str(value or "").strip()
+
+
+def _performative_label(lang: str, value: str) -> str:
+    key = _PERFORMATIVE_KEYS.get(str(value or "").strip().lower())
+    return t(lang, key) if key else str(value or "").strip()
+
+
+def _verdict_label(lang: str, value: str) -> str:
+    key = _VERDICT_KEYS.get(str(value or "").strip().lower())
+    return t(lang, key) if key else str(value or "").strip()
+
+
+def _chips(*pairs: tuple[str, Any]) -> list[dict[str, str]]:
+    """Компактные пары «подпись — значение» для строки шага."""
+    return [
+        {"label": label, "value": str(value)}
+        for label, value in pairs
+        if value is not None and str(value).strip()
+    ]
 
 
 def _english(state: dict[str, Any]) -> bool:
@@ -201,6 +267,11 @@ def _acl(state: dict[str, Any]) -> dict[str, Any]:
 def _truncate(text: str, limit: int = 1200) -> str:
     clean = " ".join(str(text).split())
     return clean if len(clean) <= limit else clean[: limit - 1].rstrip() + "…"
+
+
+def _escape_md(value: str) -> str:
+    """Экранирует значение для ячейки Markdown-таблицы."""
+    return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
 
 
 def _contextual_count_label(state: dict[str, Any], fallback: str) -> str:
@@ -290,18 +361,21 @@ def _present_analytics(state: dict[str, Any]) -> dict[str, Any]:
                     "sql": sql,
                 }
 
-        shown_columns = [column for column in columns if column][:4]
-        lines = [t(_lang(state), "present_table_title", count=len(rows))]
-        for row in rows[:5]:
-            cells = [
-                f"{_label(column, state)}: {_fmt(row.get(column), column, state)}"
-                for column in shown_columns
-                if row.get(column) is not None
-            ]
-            if cells:
-                lines.append("• " + "; ".join(cells))
-        if len(rows) > 5:
-            lines.append(t(_lang(state), "present_table_more", count=len(rows) - 5))
+        shown_columns = [column for column in columns if column][:5]
+        lines = [t(_lang(state), "present_table_title", count=len(rows)), ""]
+        if shown_columns:
+            headers = [_label(column, state) for column in shown_columns]
+            lines.append("| " + " | ".join(_escape_md(item) for item in headers) + " |")
+            lines.append("| " + " | ".join("---" for _ in headers) + " |")
+            for row in rows[:5]:
+                cells = [
+                    _escape_md(_fmt(row.get(column), column, state))
+                    for column in shown_columns
+                ]
+                lines.append("| " + " | ".join(cells) + " |")
+            if len(rows) > 5:
+                lines.append("")
+                lines.append(t(_lang(state), "present_table_more", count=len(rows) - 5))
         return {
             "kind": "table",
             "text": "\n".join(lines),
@@ -431,64 +505,98 @@ def _memory_facts(profile: dict[str, Any] | None) -> str:
 
 
 def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dict[str, Any]]:
-    """Пошаговый путь работы агента для раскрываемого блока в UI."""
+    """Пошаговый путь работы агента для раскрываемого блока в UI.
+
+    Каждый шаг кроме текста получает сведения для визуальной цепочки:
+    ``agent`` (кто выполнял), ``kind`` (иконка), ``chips`` (короткие метрики)
+    и, для SQL, отдельное поле ``code``.
+    """
     lang = _lang(state)
     acl = _acl(state)
     content = _content(state)
     steps: list[dict[str, Any]] = []
 
-    sender = acl.get("sender")
-    performative = acl.get("performative")
+    route = str(state.get("route") or "")
+    route_label = _route_label(lang, route)
+
+    sender = str(acl.get("sender") or "")
+    performative = str(acl.get("performative") or "")
     if sender or performative:
+        sender_label = _agent_label(lang, sender)
+        receiver_label = _agent_label(
+            lang, str(acl.get("receiver") or "orchestrator")
+        )
+        detail = " → ".join(
+            part for part in (sender_label, receiver_label) if part
+        )
+        performative_label = _performative_label(lang, performative)
         steps.append(
             {
                 "step": "acl",
                 "title": t(lang, "trace_acl"),
-                "detail": " · ".join(
-                    part for part in (str(sender or ""), str(performative or "")) if part
-                ),
+                "detail": detail or performative_label,
                 "status": "ok",
+                "agent": sender_label or t(lang, "agent_orchestrator"),
+                "kind": "message",
+                "chips": _chips(
+                    (t(lang, "trace_performative"), performative_label)
+                ),
             }
         )
 
-    route = str(state.get("route") or "—")
     reason = _truncate(str(state.get("route_reason") or ""), 240)
     confidence = state.get("route_confidence")
-    route_detail = f"{route} · {reason}" if reason else route
-    if isinstance(confidence, (int, float)):
-        route_detail += f" · {confidence:.2f}"
+    route_detail = f"{route_label} — {reason}" if reason else route_label
+    confidence_chip = None
+    if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
+        confidence_chip = f"{confidence * 100:.0f}%"
     steps.append(
         {
             "step": "route",
             "title": t(lang, "trace_route"),
             "detail": route_detail,
             "status": "ok",
+            "agent": t(lang, "agent_orchestrator"),
+            "kind": "route",
+            "route": route,
+            "route_label": route_label,
+            "chips": _chips((t(lang, "trace_confidence"), confidence_chip)),
         }
     )
 
     profile = state.get("profile") or {}
+    profile_size = len(profile)
     steps.append(
         {
             "step": "memory",
             "title": t(lang, "trace_memory"),
             "detail": t(lang, "trace_memory_detail", count=_memory_facts(profile)),
             "status": "ok",
+            "agent": t(lang, "agent_memory"),
+            "kind": "memory",
+            "chips": _chips((t(lang, "trace_facts"), profile_size)),
         }
     )
 
     guardrail = state.get("guardrail") or {}
-    steps.append(
-        {
-            "step": "guard_request",
-            "title": t(lang, "trace_guard"),
-            "detail": t(lang, "trace_safe") if guardrail.get("safe", True) else str(
-                guardrail.get("reason") or t(lang, "trace_failed_generic")
-            ),
-            "status": "ok" if guardrail.get("safe", True) else "warn",
-        }
-    )
+    if guardrail:
+        request_safe = bool(guardrail.get("safe", True))
+        steps.append(
+            {
+                "step": "guard_request",
+                "title": t(lang, "trace_guard"),
+                "detail": t(lang, "trace_safe")
+                if request_safe
+                else str(
+                    guardrail.get("reason") or t(lang, "trace_failed_generic")
+                ),
+                "status": "ok" if request_safe else "warn",
+                "agent": t(lang, "agent_guard"),
+                "kind": "shield",
+            }
+        )
 
-    if str(state.get("route")) == "analytics":
+    if route == "analytics":
         sql = content.get("sql")
         if sql:
             steps.append(
@@ -496,7 +604,10 @@ def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dic
                     "step": "sql",
                     "title": t(lang, "trace_sql"),
                     "detail": _truncate(str(sql), 1500),
+                    "code": _truncate(str(sql), 1500),
                     "status": "ok",
+                    "agent": t(lang, "agent_analytics"),
+                    "kind": "database",
                 }
             )
         rows = content.get("rows") or []
@@ -517,11 +628,20 @@ def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dic
                 "title": t(lang, "trace_result"),
                 "detail": detail,
                 "status": "ok" if rows else "warn",
+                "agent": t(lang, "agent_analytics"),
+                "kind": "table",
+                "chips": _chips(
+                    (t(lang, "trace_rows"), len(rows)),
+                    (t(lang, "trace_columns"), len(columns)),
+                    (t(lang, "trace_retries_short"), retries or None),
+                ),
             }
         )
 
-    if str(state.get("route")) == "retrieval":
+    if route == "retrieval":
         citations = content.get("citations") or []
+        chunks = int((content.get("metrics") or {}).get("chunks") or 0)
+        search_mode = str(content.get("search_mode") or "—")
         steps.append(
             {
                 "step": "retrieval",
@@ -529,10 +649,16 @@ def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dic
                 "detail": t(
                     lang,
                     "trace_retrieval_detail",
-                    mode=str(content.get("search_mode") or "—"),
-                    chunks=int((content.get("metrics") or {}).get("chunks") or 0),
+                    mode=search_mode,
+                    chunks=chunks,
                 ),
                 "status": "ok",
+                "agent": t(lang, "agent_retrieval"),
+                "kind": "search",
+                "chips": _chips(
+                    (t(lang, "trace_mode"), search_mode),
+                    (t(lang, "trace_chunks"), chunks),
+                ),
             }
         )
         steps.append(
@@ -541,19 +667,27 @@ def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dic
                 "title": t(lang, "trace_citations"),
                 "detail": t(lang, "trace_citations_detail", count=len(citations)),
                 "status": "ok" if citations else "warn",
+                "agent": t(lang, "agent_retrieval"),
+                "kind": "book",
+                "chips": _chips((t(lang, "trace_found"), len(citations))),
             }
         )
 
-    if str(state.get("route")) == "report":
+    if route == "report":
         citations = content.get("citations") or []
         review = content.get("review") or {}
         iterations = int((content.get("metrics") or {}).get("inspector_iterations") or 0)
+        verdict = str(review.get("verdict") or "—")
+        verdict_label = _verdict_label(lang, verdict)
         steps.append(
             {
                 "step": "report",
                 "title": t(lang, "trace_report"),
                 "detail": t(lang, "trace_report_detail", count=len(citations)),
                 "status": "ok",
+                "agent": t(lang, "agent_report"),
+                "kind": "file",
+                "chips": _chips((t(lang, "trace_links"), len(citations))),
             }
         )
         steps.append(
@@ -563,14 +697,20 @@ def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dic
                 "detail": t(
                     lang,
                     "trace_inspector_detail",
-                    verdict=str(review.get("verdict") or "—"),
+                    verdict=verdict_label,
                     iterations=iterations,
                 ),
-                "status": "ok" if str(review.get("verdict") or "ok") == "ok" else "warn",
+                "status": "ok" if verdict == "ok" else "warn",
+                "agent": t(lang, "agent_inspector"),
+                "kind": "check",
+                "chips": _chips(
+                    (t(lang, "trace_verdict"), verdict_label),
+                    (t(lang, "trace_iterations"), iterations),
+                ),
             }
         )
 
-    if str(state.get("route")) == "investigation":
+    if route == "investigation":
         content_rounds = int(content.get("rounds") or 0)
         evidence = content.get("evidence") or []
         steps.append(
@@ -584,19 +724,32 @@ def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dic
                     evidence=len(evidence),
                 ),
                 "status": "ok",
+                "agent": t(lang, "agent_investigation"),
+                "kind": "compass",
+                "chips": _chips(
+                    (t(lang, "trace_rounds"), content_rounds),
+                    (t(lang, "trace_evidence"), len(evidence)),
+                ),
             }
         )
 
-    steps.append(
-        {
-            "step": "guard_answer",
-            "title": t(lang, "trace_answer"),
-            "detail": t(lang, "trace_passed")
-            if (state.get("guardrail") or {}).get("safe", True)
-            else t(lang, "trace_not_passed"),
-            "status": "ok" if (state.get("guardrail") or {}).get("safe", True) else "warn",
-        }
-    )
+    answer_guard = state.get("answer_guardrail") or guardrail
+    if answer_guard:
+        answer_safe = bool(answer_guard.get("safe", True))
+        steps.append(
+            {
+                "step": "guard_answer",
+                "title": t(lang, "trace_answer"),
+                "detail": t(lang, "trace_passed")
+                if answer_safe
+                else str(
+                    answer_guard.get("reason") or t(lang, "trace_not_passed")
+                ),
+                "status": "ok" if answer_safe else "warn",
+                "agent": t(lang, "agent_guard"),
+                "kind": "shield",
+            }
+        )
 
     metrics = state.get("metrics") or {}
     started = metrics.get("started_at")
@@ -608,6 +761,9 @@ def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dic
                 "title": t(lang, "trace_latency"),
                 "detail": t(lang, "trace_latency_detail", seconds=f"{seconds:.1f}"),
                 "status": "ok",
+                "agent": t(lang, "agent_orchestrator"),
+                "kind": "clock",
+                "duration_s": round(seconds, 1),
             }
         )
 

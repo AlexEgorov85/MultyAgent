@@ -251,21 +251,35 @@ npm --prefix ui run dev
 
 Настройки сохраняются в `localStorage` браузера и применяются сразу.
 
-Браузер обращается к API напрямую. LangGraph API по умолчанию отдаёт
-`Access-Control-Allow-Origin: *`, поэтому CORS работает без прокси.
-Адрес API задаётся в `ui/.env.local`:
+Браузер обращается к LangGraph через собственный прокси интерфейса:
+`NEXT_PUBLIC_LANGGRAPH_API_URL=/api` → `ui/app/api/[..._path]/route.ts`
+(белый список путей и методов) → `LANGGRAPH_API_URL`. Так одинаково
+работают и `http://localhost:3000`, и публичная ссылка: браузеру не нужен
+доступ к порту 2024 и не нужен CORS.
 
 ```dotenv
-NEXT_PUBLIC_LANGGRAPH_API_URL=http://127.0.0.1:2024
+NEXT_PUBLIC_LANGGRAPH_API_URL=/api
 NEXT_PUBLIC_LANGGRAPH_ASSISTANT_ID=audit_assistant
+LANGGRAPH_API_URL=http://127.0.0.1:2024
 ```
 
->`NEXT_PUBLIC_*` встраивается в бандл при сборке: после изменения
-> `ui/.env.local` перезапустите `npm run dev`.
+> `NEXT_PUBLIC_*` встраивается в бандл при сборке: после изменения
+> `ui/.env.local` перезапустите `npm run dev` (в production — пересоберите UI).
 
-В репозитории остался и Next-прокси `ui/app/api/[..._path]/route.ts`
-(белый список путей и методов) — он нужен только если CORS на API
-специально отключён.
+### Показать интерфейс по ссылке
+
+Один туннель на порт 3000 — и ссылку можно открыть с другого компьютера:
+
+```powershell
+winget install --id Cloudflare.cloudflared   # один раз
+powershell -ExecutionPolicy Bypass -File scripts\share_ui.ps1
+```
+
+Скрипт поднимает API и UI, открывает туннель и печатает адрес
+`https://<...>.trycloudflare.com`. Пароль на ссылку задаётся переменной
+`SHARE_BASIC_AUTH_PASSWORD` в `ui/.env.local`. Если нужен постоянный адрес
+и вход через Cloudflare Access (по email), см. вариант 2 в
+`docs/share_ui.md` и запуск с `-TunnelName <имя> -Hostname <домен>`.
 
 > `.env` должен оставаться в ASCII. `langgraph dev` читает его через
 > `python-dotenv` с локальной кодировкой Windows (cp1251), и кириллические
@@ -299,6 +313,7 @@ scripts/run_report.py     CLI Report-агента
 scripts/run_investigation.py CLI расследования (A7)
 scripts/run_chat.py       интерактивный чат основного графа
 scripts/build_index.py    построение RAG-индекса
+scripts/share_ui.ps1      API + UI + туннель одной командой (docs/share_ui.md)
 ui/                       assistant-ui (Next.js) поверх LangGraph API
 data/knowledge/           методические документы для RAG
 data/seed/                сгенерированные CSV (не коммитятся)
