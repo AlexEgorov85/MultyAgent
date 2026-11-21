@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "./i18n";
 import { useSettings } from "./SettingsProvider";
 import {
@@ -155,6 +155,11 @@ export function SettingsDialog({
   const { settings, setSetting, resetSettings } = useSettings();
   const [tab, setTab] = useState<TabId>("appearance");
   const [auditorId, setAuditorId] = useState(settings.auditorId);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 });
+  }, [tab]);
 
   useEffect(() => {
     if (open) setAuditorId(settings.auditorId);
@@ -247,9 +252,10 @@ export function SettingsDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
-        className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden border app-card"
+        style={{ height: "min(90vh, 720px)" }}
+        className="relative flex w-full max-w-[680px] flex-col overflow-hidden border app-card"
       >
-        <div className="flex items-center justify-between border-b app-border app-settings-pad py-4">
+        <div className="flex items-center justify-between border-b app-border px-5 py-4">
           <h2 id="settings-title" className="text-base font-semibold app-text">
             {t.settings}
           </h2>
@@ -267,7 +273,7 @@ export function SettingsDialog({
         <div
           role="tablist"
           aria-label={t.settings}
-          className="flex gap-1 overflow-x-auto border-b app-border app-settings-pad py-2"
+          className="flex gap-1 overflow-x-auto border-b app-border px-5 py-2"
         >
           {TABS.map((item) => (
             <button
@@ -287,7 +293,10 @@ export function SettingsDialog({
           ))}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto app-settings-pad py-5">
+        <div
+          ref={contentRef}
+          className="min-h-0 flex-1 overflow-y-auto px-5 py-5"
+        >
           {tab === "appearance" ? (
             <div className="space-y-5">
               <SettingRow title={t.theme} hint={t.themeHint}>
@@ -598,7 +607,7 @@ export function SettingsDialog({
           ) : null}
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t app-border app-surface-2 app-settings-pad py-3">
+        <div className="flex items-center justify-between gap-3 border-t app-border app-surface-2 px-5 py-3">
           <span className="text-[0.7rem] app-muted">
             {t.preferencesSaved}
           </span>
