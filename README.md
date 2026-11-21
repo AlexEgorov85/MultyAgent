@@ -24,6 +24,7 @@
 | Investigation (A7) | ✅ Coordinator, два раунда ACL, факт vs гипотеза |
 | Основной граф | ✅ Router + ACL-ветки + `thread_id`-память + профиль аудитора |
 | Guardrails | ✅ блокировка изменения данных, PII, prompt injection, проверка SQL |
+| Веб-интерфейс | ✅ assistant-ui + LangGraph API (`ui/`) |
 | Тесты | ✅ 88 passed |
 | Остальные агенты | ⏳ report, investigation |
 | Чат-интерфейс (assistant-ui) | ⏳ следующий этап |
@@ -146,6 +147,24 @@ Copy-Item .env.example .env
 .venv\Scripts\python.exe scripts\run_chat.py --auditor-id AUD-001 --thread-id demo-001
 ```
 
+## Веб-интерфейс
+
+Готовый чат на `assistant-ui` (Next.js) находится в `ui/`.
+
+```powershell
+# 1. API-сервер графа
+.venv\Scripts\langgraph.exe dev --port 2024 --no-browser
+
+# 2. во втором терминале — интерфейс
+Copy-Item ui\.env.local.example ui\.env.local
+npm --prefix ui install
+npm --prefix ui run dev
+```
+
+Откройте `http://localhost:3000`. Интерфейс работает с тем же графом:
+маршрутизация, SQL, retrieval, отчёт, расследование, память и guardrails.
+Ключ LLM остаётся только на backend; frontend обращается к LangGraph API.
+
 `init_db.py` поднимает встроенный PostgreSQL 16 через `pgserver`,
 применяет миграции и создаёт read-only роль `audit_ro`.
 
@@ -173,6 +192,7 @@ scripts/run_report.py     CLI Report-агента
 scripts/run_investigation.py CLI расследования (A7)
 scripts/run_chat.py       интерактивный чат основного графа
 scripts/build_index.py    построение RAG-индекса
+ui/                       assistant-ui (Next.js) поверх LangGraph API
 data/knowledge/           методические документы для RAG
 data/seed/                сгенерированные CSV (не коммитятся)
 data/pg/                  кластер PostgreSQL (не коммитится)

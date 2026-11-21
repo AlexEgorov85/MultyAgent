@@ -185,7 +185,7 @@ def build_main_graph(
     def finalize(state: MainState) -> dict[str, Any]:
         answer = state.get("final_answer", "")
         return {
-            "messages": [{"role": "assistant", "content": answer}],
+            "messages": [{"type": "ai", "content": answer}],
             "final_answer": answer,
         }
 

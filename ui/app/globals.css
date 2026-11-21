@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    "Segoe UI", "Inter", system-ui, -apple-system, "Helvetica Neue", Arial,
+    sans-serif;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #dbeafe 0%, transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, #ede9fe 0%, transparent 45%),
+    #f8fafc;
+  color: #0f172a;
+}
+
+.aui-text p {
+  margin: 0 0 0.55rem;
+}
+
+.aui-text p:last-child {
+  margin-bottom: 0;
+}
+
+.aui-text ul,
+.aui-text ol {
+  margin: 0.4rem 0 0.6rem 1.1rem;
+}
+
+.aui-text li {
+  margin: 0.15rem 0;
+}
+
+.aui-text code {
+  background: #f1f5f9;
+  border-radius: 0.35rem;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.85em;
+}
+
+.aui-text pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 0.9rem;
+  border-radius: 0.75rem;
+  overflow-x: auto;
+  font-size: 0.82rem;
+  margin: 0.5rem 0;
+}
+
+.aui-text pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.aui-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.aui-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}

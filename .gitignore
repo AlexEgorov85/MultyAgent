@@ -32,3 +32,6 @@ course/
 # node_modules для будущего UI
 node_modules/
 .next/
+ui/.env.local
+ui/.next/
+.langgraph_api/
