@@ -88,6 +88,24 @@ class ReportDraft(BaseModel):
     citations: list[str] = Field(default_factory=list)
 
 
+class InvestigationPlan(BaseModel):
+    """План расследования: подвопросы и обязательные доказательства."""
+
+    analytics_question: str = Field(min_length=1)
+    retrieval_question: str = Field(min_length=1)
+    required_evidence: list[str] = Field(
+        default_factory=lambda: ["sql_result", "item"]
+    )
+    reason: str = ""
+
+
+class InvestigationAnswer(BaseModel):
+    """Итог расследования с явным признаком причинного утверждения."""
+
+    text: str = Field(min_length=1)
+    causal_claim: bool = False
+
+
 class GuardrailResult(BaseModel):
     """Результат финальной проверки."""
 

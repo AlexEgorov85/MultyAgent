@@ -21,7 +21,8 @@
 | Analytics-агент | ✅ LangGraph: NL→SQL, шаблоны, drill-down, multi-tool |
 | Retrieval-агент | ✅ индекс методичек/пунктов/актов, гибридный поиск, цитаты, критик |
 | Report + Inspector | ✅ проект акта, проверка ID и evidence, до 2 исправлений |
-| Тесты | ✅ 70 passed |
+| Investigation (A7) | ✅ Coordinator, два раунда ACL, факт vs гипотеза |
+| Тесты | ✅ 73 passed |
 | Остальные агенты | ⏳ report, investigation |
 | Чат-интерфейс (assistant-ui) | ⏳ следующий этап |
 
@@ -131,6 +132,12 @@ Copy-Item .env.example .env
 .venv\Scripts\python.exe scripts\run_report.py --question "Сформируй раздел акта по AUD-2026-MORTGAGE-03"
 ```
 
+Провести расследование:
+
+```powershell
+.venv\Scripts\python.exe scripts\run_investigation.py --question "Почему в ипотеке в 2026 году выросла доля просроченных пунктов?"
+```
+
 `init_db.py` поднимает встроенный PostgreSQL 16 через `pgserver`,
 применяет миграции и создаёт read-only роль `audit_ro`.
 
@@ -155,6 +162,7 @@ scripts/run_db.py         живой PostgreSQL для ручной провер
 scripts/run_analytics.py  CLI Analytics-агента
 scripts/run_retrieval.py  CLI Retrieval-агента
 scripts/run_report.py     CLI Report-агента
+scripts/run_investigation.py CLI расследования (A7)
 scripts/build_index.py    построение RAG-индекса
 data/knowledge/           методические документы для RAG
 data/seed/                сгенерированные CSV (не коммитятся)

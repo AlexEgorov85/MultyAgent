@@ -8,6 +8,8 @@ from typing import Any, Protocol
 from .schemas import (
     AnswerDraft,
     Critique,
+    InvestigationAnswer,
+    InvestigationPlan,
     ReportDraft,
     ReportReview,
     RetrievalAnswer,
@@ -89,6 +91,31 @@ class LLMClient(Protocol):
         facts_text: str,
         allowed_ids: list[str],
     ) -> "ReportDraft": ...
+
+    def plan_investigation(
+        self,
+        *,
+        question: str,
+        schema_text: str,
+    ) -> "InvestigationPlan": ...
+
+    def refine_investigation(
+        self,
+        *,
+        question: str,
+        plan: "InvestigationPlan",
+        missing: list[str],
+    ) -> "InvestigationPlan": ...
+
+    def synthesize_investigation(
+        self,
+        *,
+        question: str,
+        analytics: dict[str, Any],
+        retrieval: dict[str, Any],
+        missing: list[str],
+        rounds: int,
+    ) -> "InvestigationAnswer": ...
 
 
 class OpenAILLM:
@@ -363,4 +390,69 @@ class OpenAILLM:
                 "Верни исправленный ReportDraft."
             ),
             schema=ReportDraft,
+        )
+
+    def plan_investigation(
+        self,
+        *,
+        question: str,
+        schema_text: str,
+    ) -> InvestigationPlan:
+        return self._parse(
+            system=(
+                "Ты — координатор аудиторского расследования. Разбей вопрос "
+                "на количественную часть для Analytics и смысловую для Retrieval. "
+                "Укажи, какие доказательства обязательны."
+            ),
+            user=(
+                f"Вопрос: {question}\nСхема:\n{schema_text}\n\n"
+                "Верни InvestigationPlan: analytics_question, retrieval_question, "
+                "required_evidence, reason."
+            ),
+            schema=InvestigationPlan,
+        )
+
+    def refine_investigation(
+        self,
+        *,
+        question: str,
+        plan: InvestigationPlan,
+        missing: list[str],
+    ) -> InvestigationPlan:
+        return self._parse(
+            system=(
+                "Ты уточняешь план расследования, если не хватает доказательств. "
+                "Не повторяй уже выполненный запрос без изменений."
+            ),
+            user=(
+                f"Вопрос: {question}\nПлан: {plan.model_dump_json()}\n"
+                f"Не хватает: {', '.join(missing)}\n\n"
+                "Верни обновлённый InvestigationPlan."
+            ),
+            schema=InvestigationPlan,
+        )
+
+    def synthesize_investigation(
+        self,
+        *,
+        question: str,
+        analytics: dict[str, Any],
+        retrieval: dict[str, Any],
+        missing: list[str],
+        rounds: int,
+    ) -> InvestigationAnswer:
+        return self._parse(
+            system=(
+                "Ты синтезируешь итог расследования. Отделяй подтверждённый факт "
+                "от гипотезы. Причинное утверждение допустимо только при наличии "
+                "и количественных, и текстовых доказательств. Если доказательств "
+                "не хватает — скажи об этом прямо."
+            ),
+            user=(
+                f"Вопрос: {question}\nРаундов: {rounds}\n"
+                f"Analytics: {analytics}\nRetrieval: {retrieval}\n"
+                f"Не хватает: {', '.join(missing) or 'ничего'}\n\n"
+                "Верни InvestigationAnswer: text, causal_claim."
+            ),
+            schema=InvestigationAnswer,
         )

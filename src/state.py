@@ -80,8 +80,31 @@ class ReportState(TypedDict, total=False):
     metrics: dict[str, Any]
 
 
+class InvestigationState(TypedDict, total=False):
+    """Состояние Coordinator расследования (A7)."""
+
+    acl_request: dict[str, Any]
+    request: dict[str, Any]
+    question: str
+    auditor_id: str
+    conversation_id: str
+    status: str
+    error: str
+    plan: dict[str, Any]
+    rounds: int
+    acl_log: list[dict[str, Any]]
+    analytics_content: dict[str, Any]
+    retrieval_content: dict[str, Any]
+    missing: list[str]
+    answer: dict[str, Any]
+    evidence: list[dict[str, Any]]
+    acl_response: dict[str, Any]
+    metrics: dict[str, Any]
+
+
 class MainState(TypedDict, total=False):
     """Состояние основного графа."""
+
     messages: list[Any]
     user_query: str
     auditor_id: str
