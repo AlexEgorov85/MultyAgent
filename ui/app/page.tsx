@@ -90,7 +90,25 @@ function AssistantMessage() {
       ),
   );
 
-  if (emptyRunning) return null;
+  if (emptyRunning) {
+    return (
+      <MessagePrimitive.Root className="mr-auto max-w-[92%]">
+        <div className="flex gap-3">
+          {settings.showAvatars ? (
+            <div className="app-accent-gradient mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold shadow">
+              {t.assistantInitial}
+            </div>
+          ) : null}
+          <div className="app-assistant-bubble app-bubble app-round min-w-0 border px-4 py-3 shadow-sm">
+            <div className="flex items-center gap-2 text-xs app-muted">
+              <span>{t.thinking}</span>
+              <ThinkingDots />
+            </div>
+          </div>
+        </div>
+      </MessagePrimitive.Root>
+    );
+  }
 
   return (
     <MessagePrimitive.Root className="mr-auto max-w-[92%]">
@@ -156,21 +174,13 @@ function EmptyState() {
   );
 }
 
-function ThinkingStatus() {
-  const { t } = useI18n();
-  const running = useAuiState((state) => state.thread.isRunning);
-
-  if (!running) return null;
-
+function ThinkingDots() {
   return (
-    <div className="mb-2 flex items-center justify-center gap-2 text-xs app-accent-text">
-      <span>{t.thinking}</span>
-      <span className="flex items-center gap-1" aria-hidden="true">
-        <span className="app-thinking-dot app-accent-dot h-1.5 w-1.5 rounded-full" />
-        <span className="app-thinking-dot app-accent-dot h-1.5 w-1.5 rounded-full" />
-        <span className="app-thinking-dot app-accent-dot h-1.5 w-1.5 rounded-full" />
-      </span>
-    </div>
+    <span className="flex items-center gap-1" aria-hidden="true">
+      <span className="app-thinking-dot app-accent-dot h-1.5 w-1.5 rounded-full" />
+      <span className="app-thinking-dot app-accent-dot h-1.5 w-1.5 rounded-full" />
+      <span className="app-thinking-dot app-accent-dot h-1.5 w-1.5 rounded-full" />
+    </span>
   );
 }
 
@@ -309,7 +319,6 @@ export default function Home() {
 
         <ThreadPrimitive.ViewportFooter className="app-footer app-glass border-t px-4 app-footer-pad">
           <div className="app-shell mx-auto">
-            <ThinkingStatus />
             <ComposerPrimitive.Root className="app-surface app-border app-composer-pad app-round app-ring flex items-end gap-2 border shadow-sm">
               <ComposerPrimitive.Input
                 placeholder={t.placeholder}
