@@ -182,6 +182,24 @@ Copy-Item .env.example .env
 Документация: `docs/architecture.md`, `docs/metrics.md`,
 `docs/sql_safety.md`, `docs/screencast_script.md`.
 
+## Проверка чистого клона
+
+```powershell
+# базовая проверка: клон, зависимости, БД, seed, индекс, QA, тесты, API
+python scripts/verify_clean_clone.py
+
+# плюс production-сборка UI
+python scripts/verify_clean_clone.py --with-ui
+
+# плюс живой LLM-запрос (расходует лимит провайдера)
+python scripts/verify_clean_clone.py --with-live --index openai
+```
+
+Скрипт клонирует `origin/main` в отдельный каталог, поднимает БД,
+проверяет идемпотентность seed, строит индекс, запускает QA/pytest,
+проверяет API и (опционально) UI. Клон удаляется после проверки;
+`--keep` оставляет его для разбора.
+
 ## Веб-интерфейс
 
 Готовый чат на `assistant-ui` (Next.js) находится в `ui/`.
