@@ -591,18 +591,40 @@ export function SettingsDialog({
                 <p className="mt-1 text-xs leading-relaxed app-muted">
                   {t.aboutDescription}
                 </p>
-                <p className="mt-2 text-xs leading-relaxed app-muted">
-                  {t.aboutStudio}
-                </p>
               </div>
-              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs app-muted">
+
+              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs app-muted">
+                <dt>{t.systemLabel}</dt>
+                <dd className="app-text">{t.appTitle}</dd>
+                <dt>{t.agentVersionLabel}</dt>
+                <dd className="app-text">{t.agentVersionValue}</dd>
+                <dt>{t.interfaceVersionLabel}</dt>
+                <dd className="app-text">{t.interfaceVersionValue}</dd>
                 <dt>{t.stackLabel}</dt>
-                <dd className="app-text">
-                  Next.js · assistant-ui · LangGraph
+                <dd className="app-text">{t.stackValue}</dd>
+                <dt>{t.modelLabel}</dt>
+                <dd className="break-all font-mono app-text">
+                  {t.modelValue}
                 </dd>
-                <dt>{t.versionLabel}</dt>
-                <dd className="app-text">{t.versionValue}</dd>
+                <dt>{t.dataAccessLabel}</dt>
+                <dd className="app-text">{t.dataAccessValue}</dd>
               </dl>
+
+              <div className="border-t app-border pt-4">
+                <h4 className="text-xs font-medium app-text">
+                  {t.aboutCapabilities}
+                </h4>
+                <ul className="mt-2 space-y-1 text-xs leading-relaxed app-muted">
+                  {t.aboutCapabilitiesList.map((item) => (
+                    <li key={item} className="flex gap-2">
+                      <span aria-hidden="true">•</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <p className="text-[0.7rem] app-muted">{t.aboutNote}</p>
             </div>
           ) : null}
         </div>

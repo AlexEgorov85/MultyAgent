@@ -34,10 +34,20 @@ export type Dictionary = {
   auditorHint: string;
   aboutTitle: string;
   aboutDescription: string;
-  aboutStudio: string;
+  systemLabel: string;
+  agentVersionLabel: string;
+  agentVersionValue: string;
+  interfaceVersionLabel: string;
+  interfaceVersionValue: string;
+  modelLabel: string;
+  modelValue: string;
   stackLabel: string;
-  versionLabel: string;
-  versionValue: string;
+  stackValue: string;
+  dataAccessLabel: string;
+  dataAccessValue: string;
+  aboutCapabilities: string;
+  aboutCapabilitiesList: string[];
+  aboutNote: string;
   preferencesSaved: string;
   emptyTitle: string;
   emptyDescription: string;
@@ -158,12 +168,26 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     auditorHint: "Профиль и память загружаются по этому идентификатору.",
     aboutTitle: "О системе",
     aboutDescription:
-      "Ассистент отвечает по данным аудиторской базы: проверки, акты, находки и отклонения.",
-    aboutStudio:
-      "LangGraph Studio (smith.langchain.com) — служебный англоязычный инструмент LangChain. Он не входит в интерфейс ассистента.",
+      "Мультиагентная система для внутреннего аудита. Отвечает на вопросы по проверкам, актам и находкам, строит безопасные SQL-запросы и готовит проекты разделов акта.",
+    systemLabel: "Система",
+    agentVersionLabel: "Версия агента",
+    agentVersionValue: "0.1.0",
+    interfaceVersionLabel: "Версия интерфейса",
+    interfaceVersionValue: "0.1.0",
+    modelLabel: "Модель",
+    modelValue: "qwen3.6-35b-a3b-noreason",
     stackLabel: "Стек",
-    versionLabel: "Версия",
-    versionValue: "0.1.0",
+    stackValue: "LangGraph · PostgreSQL · FIPA-ACL",
+    dataAccessLabel: "Доступ к данным",
+    dataAccessValue: "Только чтение",
+    aboutCapabilities: "Возможности",
+    aboutCapabilitiesList: [
+      "Аналитика по проверкам, актам и находкам",
+      "Поиск подтверждений в актах и методических документах",
+      "Подготовка проекта раздела акта со ссылками на источники",
+      "Расследование отклонений по нескольким источникам",
+    ],
+    aboutNote: "Учебный проект. Все данные синтетические.",
     preferencesSaved: "Изменения сохраняются сразу",
     emptyTitle: "Ассистент внутреннего аудитора",
     emptyDescription:
@@ -302,12 +326,26 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     auditorHint: "The profile and memory are loaded by this identifier.",
     aboutTitle: "About",
     aboutDescription:
-      "The assistant answers from the audit database: audits, acts, findings and deviations.",
-    aboutStudio:
-      "LangGraph Studio (smith.langchain.com) is a service-level English-only LangChain tool. It is not part of the assistant interface.",
+      "A multi-agent internal audit system. It answers questions about audits, acts and findings, builds safe SQL queries and drafts act sections.",
+    systemLabel: "System",
+    agentVersionLabel: "Agent version",
+    agentVersionValue: "0.1.0",
+    interfaceVersionLabel: "Interface version",
+    interfaceVersionValue: "0.1.0",
+    modelLabel: "Model",
+    modelValue: "qwen3.6-35b-a3b-noreason",
     stackLabel: "Stack",
-    versionLabel: "Version",
-    versionValue: "0.1.0",
+    stackValue: "LangGraph · PostgreSQL · FIPA-ACL",
+    dataAccessLabel: "Data access",
+    dataAccessValue: "Read-only",
+    aboutCapabilities: "Capabilities",
+    aboutCapabilitiesList: [
+      "Analytics across audits, acts and findings",
+      "Evidence search in acts and methodology documents",
+      "Drafting act sections with source citations",
+      "Investigation of deviations across multiple sources",
+    ],
+    aboutNote: "Training project. All data is synthetic.",
     preferencesSaved: "Changes are saved instantly",
     emptyTitle: "Internal Audit Assistant",
     emptyDescription:
