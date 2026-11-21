@@ -79,6 +79,16 @@ cloudflared tunnel --url http://localhost:3000
 `https://quiet-river-1234.trycloudflare.com` — его и отправляйте зрителю.
 Ссылка живёт, пока запущен `cloudflared`; после перезапуска она другая.
 
+Если вместо ссылки в логах `connection with edge closed`, а страница отдаёт
+`530`/`1033`, попробуйте другой edge и HTTP/2:
+
+```powershell
+cloudflared tunnel --url http://localhost:3000 --region us --protocol http2
+```
+
+Если и это не помогло — сеть режет Cloudflare-туннели, переходите на
+вариант 3 (Serveo).
+
 Одной командой (сам поднимет API, соберёт и запустит UI, откроет туннель):
 
 ```powershell
@@ -182,18 +192,30 @@ cloudflared service install
 Служба поднимет туннель при старте Windows, но API и UI всё равно нужно
 запускать отдельно.
 
-## Вариант 3. Без установки: SSH-туннель
+## Вариант 3. Serveo: без установки, если Cloudflare не регистрируется
 
-Подходит, если нельзя ставить программы. Нужен только `ssh` (в Windows
-уже есть).
+В некоторых сетях (в том числе в этой) quick tunnel Cloudflare отдаёт
+`530`/`1033`, а в логах — `connection with edge closed` или
+`Register tunnel error ... context deadline exceeded`. Serveo идёт по SSH
+и обычно работает там, где Cloudflare-туннель рвётся.
 
 ```powershell
-ssh -R 80:localhost:3000 nokey@localhost.run
+ssh -o StrictHostKeyChecking=accept-new -R 80:localhost:3000 serveo.net
 ```
 
-В выводе будет адрес `https://<...>.localhost.run`. Бесплатный туннель
-живёт около часа и закрывается вместе с SSH-сессией. Это сторонний сервис:
-не используйте его для чего-либо, кроме синтетического демо.
+В выводе будет адрес вида
+`https://<id>-<ip-с-дефисами>.serveousercontent.com`. Туннель живёт, пока
+открыта SSH-сессия, и меняется после перезапуска.
+
+То же через скрипт (поднимет API, UI и туннель):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\share_ui.ps1 -Serveo
+```
+
+Ограничения: бесплатный сервис, без SLA, возможен баннер-заглушка для
+некоторых браузеров; ссылка содержит ваш публичный IP. Для учебного демо
+с синтетическими данными это приемлемо.
 
 ## Вариант 4. ngrok
 
@@ -206,21 +228,48 @@ ngrok http 3000
 Адрес будет в строке `Forwarding`. Для dev-режима hostname уже разрешён в
 `ui/next.config.ts` (`allowedDevOrigins`).
 
-## Пароль на ссылку
+## Пароль: включение и отключение
 
-Это альтернатива Cloudflare Access для быстрого туннеля, когда домена нет.
-По умолчанию ссылку может открыть любой, кто её получил. Чтобы закрыть
-демо паролем, добавьте в `ui/.env.local`:
+Пароль проверяет `ui/proxy.ts`. Есть три уровня управления, по приоритету:
 
-```dotenv
-SHARE_BASIC_AUTH_USER=demo
-SHARE_BASIC_AUTH_PASSWORD=придумайте-пароль
+### 1. Горячо, без перезапуска
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\share_auth.ps1 -Off
+powershell -ExecutionPolicy Bypass -File scripts\share_auth.ps1 -On
+powershell -ExecutionPolicy Bypass -File scripts\share_auth.ps1 -Status
 ```
 
-и перезапустите UI. Пароль проверяет `ui/proxy.ts`: без него браузер
-получит `401` и стандартное окно входа. Basic Auth передаёт пароль только
-по HTTPS — туннели выше дают HTTPS, локальный `http://localhost` тоже
-безопасен.
+Скрипт пишет `ui/.share-auth.json`, а прокси читает его на каждом запросе:
+изменение действует сразу. Логин и пароль берутся из `ui/.env.local`; можно
+задать и в файле: `-On -User demo -Password 'новый-пароль'`.
+
+### 2. На один запуск
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\share_ui.ps1 -Serveo -NoAuth
+```
+
+`-NoAuth` выставляет `SHARE_AUTH_ENABLED=off` только для этого процесса UI.
+Файл `ui/.share-auth.json` всё равно важнее: если в нём `enabled=true`,
+пароль останется — удалите файл.
+
+### 3. Постоянно, через окружение
+
+```dotenv
+# ui/.env.local
+SHARE_BASIC_AUTH_USER=demo
+SHARE_BASIC_AUTH_PASSWORD=придумайте-пароль   # пусто = пароль выключен
+```
+
+После правки `.env.local` UI нужно перезапустить (в dev-режиме — тоже).
+`SHARE_AUTH_ENABLED=off` в окружении отключает пароль, не трогая файл.
+
+Пока пароль включён, браузер получает `401` и стандартное окно входа.
+Basic Auth передаёт пароль только по HTTPS — туннели выше дают HTTPS,
+локальный `http://localhost` тоже безопасен. Когда пароль выключен,
+ссылку может открыть любой, у кого она есть, и потратить лимит LLM
+(400 запросов / 3 часа), поэтому отключайте его только на время показа.
 
 ## Ограничения и безопасность
 
@@ -248,6 +297,7 @@ SHARE_BASIC_AUTH_PASSWORD=придумайте-пароль
 | `401` по кругу | Неверный `SHARE_BASIC_AUTH_PASSWORD`/`_USER` или UI не перезапущен после правки `.env.local`. |
 | `502` от `/api/...` | LangGraph не запущен или `LANGGRAPH_API_URL` указывает не туда. Проверьте `http://127.0.0.1:2024/ok`. |
 | `524` от Cloudflare | Запрос шёл дольше 100 с (см. раздел про Cloudflare Access). Повторите вопрос или сузьте его. |
+| `530`/`1033` от Cloudflare, в логах `connection with edge closed` | Туннель не держит соединение: запустите с `--region us --protocol http2` или используйте `scripts\share_ui.ps1 -Serveo`. |
 | `403` от Cloudflare Access | Email зрителя не входит в политику `Include → Emails`. |
 | Вход через Access идёт по кругу | Не включён login method (One-time PIN) или политика не сохранилась. |
 | В dev-режиме `Blocked cross-origin request` | Добавьте hostname туннеля в `allowedDevOrigins` в `ui/next.config.ts` (шаблоны `*.trycloudflare.com`, `*.ngrok-free.app`, `*.loca.lt`, `*.localhost.run` уже есть). |

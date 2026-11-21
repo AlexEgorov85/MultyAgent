@@ -40,3 +40,4 @@ reports/metrics.md
 
 # next dev regenerates this file
 ui/AGENTS.md
+ui/.share-auth.json

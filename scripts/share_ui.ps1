@@ -23,6 +23,16 @@ allowedDevOrigins и HMR; для показа лучше production).
 Вместе с -Hostname включает режим постоянного адреса, на который можно
 навесить Cloudflare Access. Требует config.yml (см. -ConfigPath).
 
+.PARAMETER Serveo
+Открыть SSH-туннель через serveo.net вместо Cloudflare. Нужен только ssh.
+Полезно, если quick tunnel Cloudflare не регистрируется в вашей сети
+(ошибки 1033/530, "connection with edge closed").
+
+.PARAMETER NoAuth
+Не требовать логин/пароль на этот запуск (SHARE_AUTH_ENABLED=off для UI).
+Файл ui/.share-auth.json при этом всё равно имеет приоритет: если в нём
+enabled=true, пароль останется.
+
 .PARAMETER Hostname
 Публичный hostname named-туннеля, например demo.example.com.
 Используется для проверки доступности и для сообщения пользователю.
@@ -38,11 +48,15 @@ powershell -ExecutionPolicy Bypass -File scripts\share_ui.ps1 -Dev
 
 .EXAMPLE
 powershell -ExecutionPolicy Bypass -File scripts\share_ui.ps1 -TunnelName audit-demo -Hostname demo.example.com
+.EXAMPLE
+powershell -ExecutionPolicy Bypass -File scripts\share_ui.ps1 -Serveo
 #>
 [CmdletBinding()]
 param(
     [switch]$Dev,
     [switch]$NoBuild,
+    [switch]$Serveo,
+    [switch]$NoAuth,
     [string]$TunnelName,
     [string]$Hostname,
     [string]$ConfigPath = (Join-Path $env:USERPROFILE ".cloudflared\config.yml")
@@ -75,19 +89,28 @@ if ($TunnelName -and -not (Test-Path $ConfigPath)) {
     throw "Не найден конфиг cloudflared: $ConfigPath. Пример — docs/cloudflared.example.yml."
 }
 
-$cloudflaredCmd = (Get-Command cloudflared -ErrorAction SilentlyContinue).Source
-if (-not $cloudflaredCmd) {
-    # winget ставит cloudflared в Program Files (x86), но текущий терминал
-    # может не видеть обновлённый PATH.
-    foreach ($candidate in @(
-            (Join-Path ${env:ProgramFiles(x86)} "cloudflared\cloudflared.exe"),
-            (Join-Path $env:ProgramFiles "cloudflared\cloudflared.exe"),
-            (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\cloudflared.exe"))) {
-        if (Test-Path $candidate) { $cloudflaredCmd = $candidate; break }
+$cloudflaredCmd = $null
+$sshCmd = $null
+if ($Serveo) {
+    $sshCmd = (Get-Command ssh -ErrorAction SilentlyContinue).Source
+    if (-not $sshCmd) {
+        throw "Не найден ssh. В Windows: Параметры → Приложения → Дополнительные компоненты → OpenSSH Client."
     }
-}
-if (-not $cloudflaredCmd) {
-    throw "Не найден cloudflared. Установите: winget install --id Cloudflare.cloudflared  (или см. docs/share_ui.md)."
+} else {
+    $cloudflaredCmd = (Get-Command cloudflared -ErrorAction SilentlyContinue).Source
+    if (-not $cloudflaredCmd) {
+        # winget ставит cloudflared в Program Files (x86), но текущий терминал
+        # может не видеть обновлённый PATH.
+        foreach ($candidate in @(
+                (Join-Path ${env:ProgramFiles(x86)} "cloudflared\cloudflared.exe"),
+                (Join-Path $env:ProgramFiles "cloudflared\cloudflared.exe"),
+                (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\cloudflared.exe"))) {
+            if (Test-Path $candidate) { $cloudflaredCmd = $candidate; break }
+        }
+    }
+    if (-not $cloudflaredCmd) {
+        throw "Не найден cloudflared. Установите: winget install --id Cloudflare.cloudflared  (или запустите с -Serveo)."
+    }
 }
 
 $envLocal = Join-Path $uiDir ".env.local"
@@ -100,6 +123,10 @@ if ($envText -notmatch "(?m)^\s*NEXT_PUBLIC_LANGGRAPH_API_URL\s*=\s*/api\s*$") {
     Write-Warning "В ui\.env.local NEXT_PUBLIC_LANGGRAPH_API_URL должен быть /api, иначе браузер зрителя будет искать API на своём компьютере."
 }
 $hasPassword = $envText -match "(?m)^\s*SHARE_BASIC_AUTH_PASSWORD\s*=\s*\S+"
+if ($NoAuth) {
+    # Наследуется процессом UI; файл .share-auth.json всё равно важнее.
+    $env:SHARE_AUTH_ENABLED = "off"
+}
 
 $logDir = Join-Path ([System.IO.Path]::GetTempPath()) "audit-share-ui"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
@@ -150,7 +177,25 @@ function Read-TunnelUrl {
     return $null
 }
 
+function Read-ServeoUrl {
+    $pattern = "https://[a-z0-9-]+\.serveousercontent\.com"
+    foreach ($file in @($tunnelLog, $tunnelErr)) {
+        if (Test-Path $file) {
+            $match = Select-String -Path $file -Pattern $pattern -AllMatches |
+                Select-Object -First 1
+            if ($match) { return $match.Matches[0].Value }
+        }
+    }
+    return $null
+}
+
 try {
+    foreach ($port in @($ApiPort, $UiPort)) {
+        if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue) {
+            throw "Порт $port уже занят. Скрипт поднимает API и UI сам: остановите старые процессы. Либо откройте только туннель вручную (см. docs/share_ui.md)."
+        }
+    }
+
     if (-not $Dev -and -not $NoBuild) {
         Write-Host "Сборка UI (npm run build)..." -ForegroundColor Cyan
         Push-Location $uiDir
@@ -178,16 +223,26 @@ try {
     Wait-Http "http://127.0.0.1:$ApiPort/ok" 90 "LangGraph API" $apiErr
     Wait-Http "http://127.0.0.1:$UiPort/" 180 "Интерфейс" $uiErr
 
-    if ($TunnelName) {
+    if ($Serveo) {
+        Write-Host "Открываю SSH-туннель serveo.net..." -ForegroundColor Cyan
+        $tunnel = Start-Process -FilePath $sshCmd -ArgumentList @(
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "UserKnownHostsFile=$env:TEMP\audit_known_hosts",
+            "-o", "ServerAliveInterval=30",
+            "-R", "80:localhost:$UiPort",
+            "serveo.net") -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput $tunnelLog -RedirectStandardError $tunnelErr
+    } elseif ($TunnelName) {
         Write-Host "Открываю named-туннель '$TunnelName'..." -ForegroundColor Cyan
-        $tunnelArgs = @("--config", $ConfigPath, "tunnel", "run", $TunnelName)
+        $tunnel = Start-Process -FilePath $cloudflaredCmd -ArgumentList @(
+            "--config", $ConfigPath, "tunnel", "run", $TunnelName) -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput $tunnelLog -RedirectStandardError $tunnelErr
     } else {
         Write-Host "Открываю быстрый туннель..." -ForegroundColor Cyan
-        $tunnelArgs = @("tunnel", "--url", "http://localhost:$UiPort", "--no-autoupdate")
+        $tunnel = Start-Process -FilePath $cloudflaredCmd -ArgumentList @(
+            "tunnel", "--url", "http://localhost:$UiPort", "--no-autoupdate") -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput $tunnelLog -RedirectStandardError $tunnelErr
     }
-    $tunnel = Start-Process -FilePath $cloudflaredCmd `
-        -ArgumentList $tunnelArgs -PassThru -WindowStyle Hidden `
-        -RedirectStandardOutput $tunnelLog -RedirectStandardError $tunnelErr
 
     $publicUrl = $null
     if ($TunnelName) {
@@ -202,9 +257,9 @@ try {
         $deadline = (Get-Date).AddSeconds(60)
         while (-not $publicUrl -and (Get-Date) -lt $deadline) {
             if ($tunnel.HasExited) {
-                throw "cloudflared завершился (код $($tunnel.ExitCode)). Лог: $tunnelErr"
+                throw "Туннель завершился (код $($tunnel.ExitCode)). Лог: $tunnelErr"
             }
-            $publicUrl = Read-TunnelUrl
+            $publicUrl = if ($Serveo) { Read-ServeoUrl } else { Read-TunnelUrl }
             if (-not $publicUrl) { Start-Sleep -Milliseconds 500 }
         }
     }
@@ -214,7 +269,9 @@ try {
 
     Write-Host ""
     Write-Host "  Публичная ссылка: $publicUrl" -ForegroundColor Green
-    if ($hasPassword) {
+    if ($NoAuth) {
+        Write-Host "  Пароль отключён на этот запуск (-NoAuth)." -ForegroundColor Green
+    } elseif ($hasPassword) {
         Write-Host "  Вход по паролю: SHARE_BASIC_AUTH_USER / SHARE_BASIC_AUTH_PASSWORD" -ForegroundColor Yellow
     } elseif ($TunnelName) {
         Write-Host "  Доступ — по политике Cloudflare Access (проверьте её в дашборде)." -ForegroundColor Yellow

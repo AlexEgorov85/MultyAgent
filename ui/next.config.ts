@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
   // открывать `npm run dev` через туннель (см. docs/share_ui.md).
   allowedDevOrigins: [
     "*.trycloudflare.com",
+    "*.serveousercontent.com",
     "*.ngrok-free.app",
     "*.loca.lt",
     "*.localhost.run",

@@ -280,6 +280,8 @@ powershell -ExecutionPolicy Bypass -File scripts\share_ui.ps1
 `SHARE_BASIC_AUTH_PASSWORD` в `ui/.env.local`. Если нужен постоянный адрес
 и вход через Cloudflare Access (по email), см. вариант 2 в
 `docs/share_ui.md` и запуск с `-TunnelName <имя> -Hostname <домен>`.
+Если Cloudflare-туннель в вашей сети не держит соединение (`530`/`1033`),
+запускайте с `-Serveo` — тот же скрипт поднимет SSH-туннель.
 
 > `.env` должен оставаться в ASCII. `langgraph dev` читает его через
 > `python-dotenv` с локальной кодировкой Windows (cp1251), и кириллические
@@ -314,6 +316,7 @@ scripts/run_investigation.py CLI расследования (A7)
 scripts/run_chat.py       интерактивный чат основного графа
 scripts/build_index.py    построение RAG-индекса
 scripts/share_ui.ps1      API + UI + туннель одной командой (docs/share_ui.md)
+scripts/share_auth.ps1    включить/выключить пароль на лету
 ui/                       assistant-ui (Next.js) поверх LangGraph API
 data/knowledge/           методические документы для RAG
 data/seed/                сгенерированные CSV (не коммитятся)
