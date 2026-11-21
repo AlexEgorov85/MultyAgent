@@ -1,7 +1,6 @@
 -- 001_extensions.sql
--- Схема аудита создаётся с нуля: это упрощает повторный запуск init_db.py.
+-- Расширения и схема. Миграция должна быть безопасной при повторном запуске
+-- через реестр public.schema_migrations: DROP SCHEMA здесь запрещён.
 
 CREATE EXTENSION IF NOT EXISTS vector;
-
-DROP SCHEMA IF EXISTS audit CASCADE;
-CREATE SCHEMA audit;
+CREATE SCHEMA IF NOT EXISTS audit;

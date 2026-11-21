@@ -13,9 +13,9 @@
 |---|---|
 | Домен и план | ✅ схема «карманы → проверки → акты → пункты → скрипты» |
 | OpenSpec-спецификации | ✅ 13 возможностей, `openspec validate --specs --strict` |
-| PostgreSQL + миграции | ✅ `db/migrations/001–003` |
-| Генератор данных | ✅ детерминированный, `random.Random(42)` |
-| QA-проверки данных | ✅ `scripts/qa_checks.py` (требует усиления по спецификации) |
+| PostgreSQL + миграции | ✅ `db/migrations/001–005`, реестр `public.schema_migrations` |
+| Генератор данных | ✅ инварианты `data-generation`, детерминированный seed 42 |
+| QA-проверки данных | ✅ `scripts/qa_checks.py`, включая расписание, дубли, шаблоны |
 | LangGraph-агенты | ⏳ следующий этап |
 | Чат-интерфейс (assistant-ui) | ⏳ следующий этап |
 
@@ -51,18 +51,19 @@ openspec list --specs
 
 - **10 карманов**: 5 тем (ипотека, потребкредитование, платежи, карты, вклады)
   × 2 года (2025, 2026).
-- **95 проверок**, **80 актов**, **581 пункт**, **826 скриптов**,
-  **826 запусков**, **2 387 отклонений** — промежуточный baseline seed 42.
+- **95 проверок**, **79 актов**, **600 пунктов**, **949 скриптов**,
+  **949 запусков**, **2 954 отклонения** — baseline seed 42.
 - Находки двух типов: `отклонение` (количественное, есть скрипт и `rows_found > 0`)
   и `проблема` (качественная, скрипт может отсутствовать).
 - 12–15% пунктов 2026 года — повторные находки со ссылкой на пункт 2025 года.
+- У каждого пункта есть `finding_template_key` и `finding_scope`; неразличимых
+  дублей внутри акта нет, проверки одного аудитора не пересекаются по датам.
 - Ловушки для демонстрации: отменённая проверка без акта, акт на согласовании,
   пункт без скрипта, просроченный открытый пункт, запуск со статусом `ошибка`,
   трёхуровневый номер пункта (`5.2.1`).
 
-Текущий baseline **не является финальной приёмкой**: по спецификации
-`data-generation` ещё нужно устранить пересечения расписания и неразличимые
-дубли находок, затем перегенерировать набор и обновить manifest.
+Baseline соответствует спецификациям `data-platform` и `data-generation`.
+Остальные спецификации реализуются поэтапно.
 
 **Языковая политика:** предметные и пользовательские значения в БД — на русском.
 Технические идентификаторы (`PKT-2025-MORTGAGE`, `AUD-2026-CARDS-03`), email,
@@ -83,8 +84,9 @@ python -m uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 
 ```powershell
 .venv\Scripts\python.exe scripts\generate_data.py --deviations
-.venv\Scripts\python.exe scripts\init_db.py --reset --seed
+.venv\Scripts\python.exe scripts\init_db.py --reset-db --yes --seed
 .venv\Scripts\python.exe scripts\qa_checks.py
+.venv\Scripts\python.exe -m pytest -q
 ```
 
 `init_db.py` поднимает встроенный PostgreSQL 16 через `pgserver`,
@@ -101,7 +103,7 @@ python -m uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 
 ```text
 openspec/specs/          целевые спецификации по возможностям
-db/migrations/          001_extensions.sql, 002_schema.sql, 003_views.sql
+db/migrations/          001–005: расширения, схема, views, выравнивание со спеками
 scripts/generate_data.py  детерминированная генерация CSV и методичек
 scripts/init_db.py        pgserver, миграции, read-only роль, загрузка CSV
 scripts/qa_checks.py      проверки качества данных

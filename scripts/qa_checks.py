@@ -9,14 +9,15 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT))
 
-import init_db  # noqa: E402
+from src import db_runtime  # noqa: E402
 
 CHECKS: list[tuple[str, str, str]] = [
     (
@@ -146,6 +147,39 @@ CHECKS: list[tuple[str, str, str]] = [
         "> 0",
     ),
     (
+        "Пункты: маркеры шаблона и области заполнены",
+        "SELECT count(*) FROM audit.act_items "
+        "WHERE finding_template_key IS NULL OR btrim(finding_template_key) = '' "
+        "   OR finding_scope IS NULL OR btrim(finding_scope) = ''",
+        "= 0",
+    ),
+    (
+        "Пункты: нет дублей (акт, шаблон, область)",
+        "SELECT count(*) FROM ("
+        "  SELECT act_id, finding_template_key, finding_scope "
+        "  FROM audit.act_items "
+        "  GROUP BY 1, 2, 3 HAVING count(*) > 1"
+        ") t",
+        "= 0",
+    ),
+    (
+        "Акты: полный текст заполнен",
+        "SELECT count(*) FROM audit.acts "
+        "WHERE full_text IS NULL OR btrim(full_text) = ''",
+        "= 0",
+    ),
+    (
+        "Акты: неутверждённые без утверждающего",
+        "SELECT count(*) FROM audit.acts "
+        "WHERE status <> 'утверждён' AND approved_by IS NOT NULL",
+        "= 0",
+    ),
+    (
+        "Скрипты: есть запуск со статусом ошибка",
+        "SELECT count(*) FROM audit.script_runs WHERE status = 'ошибка'",
+        "> 0",
+    ),
+    (
         "ФИО: 12 аудиторов, email уникальны",
         "SELECT count(DISTINCT email) FROM audit.auditors",
         "= 12",
@@ -193,11 +227,11 @@ def parse_expectation(expr: str) -> tuple[str, int]:
 
 
 def main() -> int:
-    init_db.ensure_ascii_pg_install()
-    server = init_db.start_server()
+    db_runtime.ensure_ascii_pg_install()
+    server = db_runtime.start_server()
     failures = 0
     try:
-        with init_db._admin_conn(server, "audit") as conn:
+        with db_runtime.connect(server, database="audit") as conn:
             for name, sql, expected in CHECKS:
                 value = conn.execute(sql).fetchone()[0]
                 if "числу актов" in expected:
@@ -251,6 +285,59 @@ def main() -> int:
             ).fetchone()[0]
             print(f"[{'OK  ' if gaps == 0 else 'FAIL'}] Иерархия номеров: разрывов {gaps}")
             failures += 1 if gaps else 0
+
+            overlaps = conn.execute(
+                "SELECT count(*) FROM audit.audits a "
+                "JOIN audit.audits b "
+                "  ON a.lead_auditor_id = b.lead_auditor_id "
+                " AND a.audit_id < b.audit_id "
+                " AND a.start_date <= b.end_date "
+                " AND b.start_date <= a.end_date"
+            ).fetchone()[0]
+            print(f"[{'OK  ' if overlaps == 0 else 'FAIL'}] Пересечения проверок у аудитора: {overlaps}")
+            failures += 1 if overlaps else 0
+
+            deviation_share = conn.execute(
+                "SELECT count(*) FILTER (WHERE item_type = 'отклонение')::numeric "
+                "/ nullif(count(*), 0) FROM audit.act_items"
+            ).fetchone()[0]
+            ratio_ok = deviation_share is not None and 0.60 <= float(deviation_share) <= 0.70
+            print(
+                f"[{'OK  ' if ratio_ok else 'FAIL'}] Доля отклонений: "
+                f"{float(deviation_share or 0):.3f} (ожидалось 0.60–0.70)"
+            )
+            failures += 0 if ratio_ok else 1
+
+            repeat_share = conn.execute(
+                "SELECT count(*) FILTER (WHERE is_repeat)::numeric "
+                "/ nullif(count(*), 0) FROM audit.act_items i "
+                "JOIN audit.acts ac ON ac.act_id = i.act_id "
+                "JOIN audit.audits a ON a.audit_id = ac.audit_id "
+                "JOIN audit.audit_pockets p ON p.pocket_id = a.pocket_id "
+                "WHERE p.pocket_year = 2026"
+            ).fetchone()[0]
+            repeat_ok = repeat_share is not None and 0.12 <= float(repeat_share) <= 0.15
+            print(
+                f"[{'OK  ' if repeat_ok else 'FAIL'}] Доля повторов в 2026: "
+                f"{float(repeat_share or 0):.3f} (ожидалось 0.12–0.15)"
+            )
+            failures += 0 if repeat_ok else 1
+
+            # Готовые SQL-шаблоны должны выполняться с bind-параметрами.
+            template_failures = 0
+            templates = conn.execute(
+                "SELECT template_key, sql_template, parameters "
+                "FROM audit.script_templates WHERE is_active"
+            ).fetchall()
+            for key, sql, params in templates:
+                try:
+                    conn.execute(sql, params or {})
+                except Exception as exc:
+                    template_failures += 1
+                    print(f"[FAIL] Шаблон {key}: {type(exc).__name__}: {exc}")
+            if template_failures == 0:
+                print(f"[OK  ] SQL-шаблоны выполняются: {len(templates)}")
+            failures += template_failures
     finally:
         server.cleanup()
 

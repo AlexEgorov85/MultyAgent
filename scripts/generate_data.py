@@ -40,6 +40,14 @@ THEMES: dict[str, dict] = {
         "suffix": "MORTGAGE",
         "tables": ["mortgage.applications", "mortgage.collateral_valuations"],
         "entity": "договор",
+        "scopes": [
+            "договоры, выданные в 2025 году",
+            "договоры, выданные в 2026 году",
+            "филиал «Центральный»",
+            "филиал «Северный»",
+            "продукт «Стандарт»",
+            "продукт «Премиум»",
+        ],
         "findings": [
             {
                 "title": "Просроченная актуализация оценки залога",
@@ -107,6 +115,40 @@ THEMES: dict[str, dict] = {
                 "unit": "платежей",
                 "field": "misallocated_amount",
             },
+            {
+                "title": "Некорректный расчёт страховой премии",
+                "test": "Пересчитать страховую премию по договору и сравнить с тарифом.",
+                "criterion": "п. 4.7 Регламента страхования залога",
+                "metric": "отклонение премии, руб.",
+                "unit": "договоров",
+                "field": "insurance_premium_gap",
+                "kind": "проблема",
+            },
+            {
+                "title": "Отсутствие согласия на уступку прав по кредиту",
+                "test": "Проверить наличие согласия заёмщика на уступку прав требования.",
+                "criterion": "п. 8.2 Регламента сопровождения сделки",
+                "metric": "договоров без согласия, шт.",
+                "unit": "договоров",
+                "field": "assignment_without_consent",
+                "kind": "проблема",
+            },
+            {
+                "title": "Просроченная выдача закладной",
+                "test": "Проверить срок выдачи закладной после государственной регистрации.",
+                "criterion": "п. 5.4 Регламента сопровождения сделки",
+                "metric": "дней до выдачи закладной",
+                "unit": "договоров",
+                "field": "days_to_mortgage_deed",
+            },
+            {
+                "title": "Неверная очерёдность погашения процентов",
+                "test": "Проверить очерёдность списания процентов и основного долга.",
+                "criterion": "п. 7.5 Регламента обслуживания кредитов",
+                "metric": "сумма неверно распределена, руб.",
+                "unit": "платежей",
+                "field": "interest_priority_amount",
+            },
         ],
     },
     "потребкредитование": {
@@ -115,6 +157,14 @@ THEMES: dict[str, dict] = {
         "suffix": "CONSUMER",
         "tables": ["retail.loans", "retail.applications"],
         "entity": "договор",
+        "scopes": [
+            "заявки, поданные онлайн",
+            "заявки, поданные в отделении",
+            "филиал «Центральный»",
+            "филиал «Южный»",
+            "продукт «Наличные»",
+            "продукт «Рефинансирование»",
+        ],
         "findings": [
             {
                 "title": "Превышение предельной долговой нагрузки",
@@ -184,6 +234,39 @@ THEMES: dict[str, dict] = {
                 "field": "missing_restructure_docs",
                 "kind": "проблема",
             },
+            {
+                "title": "Несоблюдение периода охлаждения при отказе от страховки",
+                "test": "Проверить соблюдение срока отказа от дополнительной услуги.",
+                "criterion": "п. 10.1 Регламента продаж",
+                "metric": "дней до отказа",
+                "unit": "договоров",
+                "field": "cooling_off_days",
+                "kind": "проблема",
+            },
+            {
+                "title": "Отсутствие уведомления об изменении ставки",
+                "test": "Проверить направление уведомления до изменения ставки.",
+                "criterion": "п. 6.5 Регламента обслуживания",
+                "metric": "дней без уведомления",
+                "unit": "договоров",
+                "field": "notice_delay_days",
+            },
+            {
+                "title": "Некорректный график платежей",
+                "test": "Сверить график платежей в договоре с расчётом в системе.",
+                "criterion": "п. 5.3 Регламента кредитования",
+                "metric": "расхождений в графике, шт.",
+                "unit": "договоров",
+                "field": "schedule_mismatch",
+            },
+            {
+                "title": "Досрочное погашение с неверным перерасчётом",
+                "test": "Пересчитать проценты при частичном досрочном погашении.",
+                "criterion": "п. 7.4 Регламента обслуживания",
+                "metric": "сумма перерасчёта, руб.",
+                "unit": "платежей",
+                "field": "early_repayment_gap",
+            },
         ],
     },
     "платежи": {
@@ -192,6 +275,14 @@ THEMES: dict[str, dict] = {
         "suffix": "PAYMENTS",
         "tables": ["payments.transactions", "payments.orders"],
         "entity": "транзакция",
+        "scopes": [
+            "переводы физических лиц",
+            "платежи юридических лиц",
+            "внутрибанковские переводы",
+            "филиал «Центральный»",
+            "канал «Мобильный банк»",
+            "канал «Интернет-банк»",
+        ],
         "findings": [
             {
                 "title": "Перевод без полной идентификации плательщика",
@@ -259,6 +350,40 @@ THEMES: dict[str, dict] = {
                 "unit": "операций",
                 "field": "cash_limit_excess",
             },
+            {
+                "title": "Отсутствие контроля санкционных списков",
+                "test": "Проверить обязательную проверку участников операции по санкционным спискам.",
+                "criterion": "п. 9.1 Правил внутреннего контроля",
+                "metric": "операций без проверки, шт.",
+                "unit": "операций",
+                "field": "sanctions_unchecked",
+                "kind": "проблема",
+            },
+            {
+                "title": "Некорректная конвертация валюты",
+                "test": "Сверить применённый курс с курсом на момент операции.",
+                "criterion": "п. 2.9 Тарифов валютных операций",
+                "metric": "отклонение курса, %",
+                "unit": "операций",
+                "field": "fx_rate_gap",
+            },
+            {
+                "title": "Платёж без подтверждения получателя",
+                "test": "Проверить подтверждение реквизитов получателя для новых контрагентов.",
+                "criterion": "п. 4.4 Регламента обработки платежей",
+                "metric": "платежей без подтверждения, шт.",
+                "unit": "платежей",
+                "field": "beneficiary_unconfirmed",
+                "kind": "проблема",
+            },
+            {
+                "title": "Нарушение лимита остатка на счёте",
+                "test": "Проверить соблюдение максимального остатка по счёту.",
+                "criterion": "п. 6.2 Регламента расчётных операций",
+                "metric": "превышение остатка, руб.",
+                "unit": "счетов",
+                "field": "balance_limit_excess",
+            },
         ],
     },
     "карты": {
@@ -267,6 +392,14 @@ THEMES: dict[str, dict] = {
         "suffix": "CARDS",
         "tables": ["cards.accounts", "cards.transactions"],
         "entity": "карта",
+        "scopes": [
+            "дебетовые карты",
+            "кредитные карты",
+            "карты «Премиум»",
+            "филиал «Центральный»",
+            "эквайринг торговых точек",
+            "интернет-эквайринг",
+        ],
         "findings": [
             {
                 "title": "Выпуск карты без полной идентификации клиента",
@@ -335,6 +468,39 @@ THEMES: dict[str, dict] = {
                 "field": "chargeback_delay_days",
                 "kind": "проблема",
             },
+            {
+                "title": "Некорректная блокировка по заявлению клиента",
+                "test": "Проверить срок блокировки карты после заявления клиента.",
+                "criterion": "п. 6.6 Регламента противодействия мошенничеству",
+                "metric": "часов до блокировки",
+                "unit": "заявок",
+                "field": "block_delay_hours",
+            },
+            {
+                "title": "Превышение лимита бесконтактных платежей",
+                "test": "Проверить соблюдение лимита бесконтактных операций без ПИН-кода.",
+                "criterion": "п. 4.8 Тарифов обслуживания карт",
+                "metric": "превышение лимита, руб.",
+                "unit": "операций",
+                "field": "contactless_limit_excess",
+            },
+            {
+                "title": "Ошибка в расчёте льготного периода",
+                "test": "Пересчитать длительность льготного периода по кредитной карте.",
+                "criterion": "п. 5.5 Условий кредитования",
+                "metric": "дней расхождения",
+                "unit": "договоров",
+                "field": "grace_period_gap",
+                "kind": "проблема",
+            },
+            {
+                "title": "Несоблюдение сроков возврата обеспечения",
+                "test": "Проверить возврат обеспечения после закрытия карточного договора.",
+                "criterion": "п. 7.3 Регламента закрытия договоров",
+                "metric": "дней просрочки",
+                "unit": "договоров",
+                "field": "collateral_return_delay",
+            },
         ],
     },
     "вклады": {
@@ -343,6 +509,14 @@ THEMES: dict[str, dict] = {
         "suffix": "DEPOSITS",
         "tables": ["deposits.accounts", "deposits.interest_accruals"],
         "entity": "счёт",
+        "scopes": [
+            "вклады физических лиц",
+            "расчётные счета юридических лиц",
+            "филиал «Центральный»",
+            "филиал «Западный»",
+            "продукт «Сберегательный»",
+            "продукт «Доходный»",
+        ],
         "findings": [
             {
                 "title": "Открытие счёта без полного комплекта документов",
@@ -411,6 +585,40 @@ THEMES: dict[str, dict] = {
                 "unit": "операций",
                 "field": "priority_violations",
             },
+            {
+                "title": "Некорректное списание при частичном снятии",
+                "test": "Проверить расчёт остатка и процентов при частичном снятии.",
+                "criterion": "п. 4.9 Условий вкладов",
+                "metric": "сумма отклонения, руб.",
+                "unit": "операций",
+                "field": "partial_withdrawal_gap",
+            },
+            {
+                "title": "Отсутствие уведомления об изменении условий",
+                "test": "Проверить уведомление клиента об изменении условий обслуживания.",
+                "criterion": "п. 6.3 Регламента информирования",
+                "metric": "дней без уведомления",
+                "unit": "счетов",
+                "field": "terms_notice_delay",
+                "kind": "проблема",
+            },
+            {
+                "title": "Ошибка в расчёте минимального остатка",
+                "test": "Пересчитать минимальный остаток и проверить начисление процентов.",
+                "criterion": "п. 3.5 Методики начисления процентов",
+                "metric": "отклонение остатка, руб.",
+                "unit": "счетов",
+                "field": "min_balance_gap",
+                "kind": "проблема",
+            },
+            {
+                "title": "Несоблюдение сроков возврата вклада",
+                "test": "Проверить срок возврата средств по закрытому вкладу.",
+                "criterion": "п. 5.6 Условий вкладов",
+                "metric": "дней просрочки",
+                "unit": "счетов",
+                "field": "deposit_return_delay",
+            },
         ],
     },
 }
@@ -462,6 +670,13 @@ TEST_WEIGHTS = [40, 20, 15, 10, 15]
 LANG_WEIGHTS = [("SQL", 60), ("Python", 30), ("R", 5), ("Excel", 5)]
 
 SUFFIX_TO_THEME = {theme["suffix"]: code for code, theme in THEMES.items()}
+TEMPLATE_INDEX = {
+    code: {
+        f"{theme['suffix']}-{index:02d}": finding
+        for index, finding in enumerate(theme["findings"], start=1)
+    }
+    for code, theme in THEMES.items()
+}
 
 
 # --------------------------------------------------------------------------
@@ -558,18 +773,42 @@ def gen_pockets(rng: random.Random) -> list[dict]:
     return rows
 
 
-def pick_auditor(rng: random.Random, theme_code: str, used_ranges: dict[str, list[tuple[date, date]]], start: date, end: date) -> str:
+def _has_overlap(ranges: list[tuple[date, date]], start: date, end: date) -> bool:
+    return any(not (end < s or start > e) for s, e in ranges)
+
+
+def schedule_audit(
+    rng: random.Random,
+    theme_code: str,
+    used_ranges: dict[str, list[tuple[date, date]]],
+    start: date,
+    duration: int,
+    pocket_end: date,
+) -> tuple[str, date, date]:
+    """Подбирает свободного аудитора; при конфликте сдвигает старт на неделю."""
     candidates = [a for a in AUDITORS if theme_code in a[6]]
-    rng.shuffle(candidates)
-    for auditor in candidates:
-        ranges = used_ranges.setdefault(auditor[0], [])
-        if all(end < s or start > e for s, e in ranges):
-            ranges.append((start, end))
-            return auditor[0]
-    # если все заняты — берём первого, пересечение допустимо, но помечаем диапазон
-    auditor_id = candidates[0][0] if candidates else AUDITORS[0][0]
-    used_ranges.setdefault(auditor_id, []).append((start, end))
-    return auditor_id
+    if not candidates:
+        raise RuntimeError(f"Нет аудиторов со специализацией {theme_code}")
+
+    current_start = start
+    for _ in range(60):
+        end = min(add_workdays(current_start, duration), pocket_end)
+        shuffled = candidates[:]
+        rng.shuffle(shuffled)
+        for auditor in shuffled:
+            ranges = used_ranges.setdefault(auditor[0], [])
+            if not _has_overlap(ranges, current_start, end):
+                ranges.append((current_start, end))
+                return auditor[0], current_start, end
+
+        current_start = add_workdays(current_start, 7)
+        if current_start >= pocket_end:
+            break
+
+    raise RuntimeError(
+        f"Не удалось назначить аудитора для {theme_code}: "
+        f"нет свободного окна до {pocket_end}"
+    )
 
 
 def gen_audits(rng: random.Random, pockets: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -582,6 +821,7 @@ def gen_audits(rng: random.Random, pockets: list[dict]) -> tuple[list[dict], lis
         theme_code = pocket["theme_code"]
         theme = THEMES[theme_code]
         count = pocket["planned_audit_count"]
+        pocket_end = date(year, 12, 31)
 
         for n in range(1, count + 1):
             audit_code = f"AUD-{year}-{theme['suffix']}-{n:02d}"
@@ -591,37 +831,37 @@ def gen_audits(rng: random.Random, pockets: list[dict]) -> tuple[list[dict], lis
                 status = weighted(rng, ["завершена", "отменена"], [90, 10])
             else:
                 status = weighted(
-                    rng, ["завершена", "в работе", "запланирована", "отменена"], [55, 20, 15, 10]
+                    rng,
+                    ["завершена", "в работе", "запланирована", "отменена"],
+                    [55, 20, 15, 10],
                 )
 
             if status == "завершена":
-                if year == 2025:
-                    latest_start = date(2025, 9, 30)
-                else:
-                    latest_start = date(2026, 8, 31)
+                latest_start = date(year, 9, 30)
                 start = workday_on_or_after(
                     rng, latest_start - timedelta(days=rng.randint(0, 240))
                 )
                 duration = rng.randint(15, 45)
-                end = add_workdays(start, duration)
-                if end > date(year, 11, 15):
-                    end = add_workdays(start, min(duration, 20))
             elif status == "в работе":
-                start = workday_on_or_after(rng, date(year, 10, 1) + timedelta(days=rng.randint(0, 30)))
-                end = add_workdays(start, rng.randint(15, 40))
-                if end > date(year, 12, 31):
-                    end = date(year, 12, 31)
+                start = workday_on_or_after(
+                    rng, date(year, 10, 1) + timedelta(days=rng.randint(0, 25))
+                )
+                duration = rng.randint(15, 40)
             elif status == "запланирована":
-                start = workday_on_or_after(rng, date(year, 11, 20) + timedelta(days=rng.randint(0, 10)))
-                end = min(add_workdays(start, rng.randint(10, 30)), date(year, 12, 31))
-            else:  # отменена
-                start = workday_on_or_after(rng, date(year, 2, 1) + timedelta(days=rng.randint(0, 240)))
-                end = add_workdays(start, rng.randint(10, 40))
+                start = workday_on_or_after(
+                    rng, date(year, 11, 15) + timedelta(days=rng.randint(0, 10))
+                )
+                duration = rng.randint(10, 25)
+            else:
+                start = workday_on_or_after(
+                    rng, date(year, 2, 1) + timedelta(days=rng.randint(0, 220))
+                )
+                duration = rng.randint(10, 40)
 
-            if end > date(year, 12, 31):
-                end = date(year, 12, 31)
+            lead, start, end = schedule_audit(
+                rng, theme_code, used_ranges, start, duration, pocket_end
+            )
 
-            lead = pick_auditor(rng, theme_code, used_ranges, start, end)
             audit_type = weighted(
                 rng,
                 ["плановая", "тематическая", "внеплановая", "повторная", "последующий контроль"],
@@ -653,7 +893,10 @@ def gen_audits(rng: random.Random, pockets: list[dict]) -> tuple[list[dict], lis
                     act_date = end + timedelta(days=rng.randint(5, 15))
                     act_status = weighted(rng, ["утверждён", "на согласовании"], [90, 10])
                 else:
-                    act_date = max(start, min(end, TODAY) - timedelta(days=rng.randint(0, 5)))
+                    act_date = max(
+                        start,
+                        min(end, TODAY) - timedelta(days=rng.randint(0, 5)),
+                    )
                     act_status = "черновик"
                 approver = rng.choice([a[0] for a in AUDITORS if a[0] != lead])
                 acts.append(
@@ -663,7 +906,7 @@ def gen_audits(rng: random.Random, pockets: list[dict]) -> tuple[list[dict], lis
                         "act_number": f"ACT-{year}-{theme['suffix']}-{n:02d}",
                         "act_date": iso(act_date),
                         "status": act_status,
-                        "approved_by": approver if act_status != "черновик" else "",
+                        "approved_by": approver if act_status == "утверждён" else "",
                         "summary": (
                             f"Акт по проверке {audit_code}: выявлены отклонения и проблемы "
                             f"в процессах {theme['title'].lower()}."
@@ -752,11 +995,10 @@ def gen_items_and_scripts(
     scripts: list[dict] = []
     runs: list[dict] = []
     deviations: list[dict] = []
-    used_ranges: dict[str, list[tuple[date, date]]] = {}
 
     act_by_audit = {act["audit_id"]: act for act in acts}
-    prev_items_by_theme: dict[str, list[dict]] = {}
-    script_seq = 0
+    act_by_id = {act["act_id"]: act for act in acts}
+    audit_by_id = {audit["audit_id"]: audit for audit in audits}
     run_seq = 0
     dev_seq = 0
 
@@ -767,31 +1009,31 @@ def gen_items_and_scripts(
 
         theme_code = SUFFIX_TO_THEME[audit["pocket_id"].split("-", 2)[2]]
         theme = THEMES[theme_code]
+        templates = TEMPLATE_INDEX[theme_code]
         act_date = date.fromisoformat(act["act_date"])
         total_items = rng.randint(5, 10)
         numbers = make_item_numbers(rng, total_items)
-        pool = theme["findings"] * 2
-        rng.shuffle(pool)
-        findings = pool[:total_items]
 
-        act_items: list[dict] = []
-        for idx, (number, finding) in enumerate(zip(numbers, findings), start=1):
-            is_problem = finding.get("kind") == "проблема"
-            item_type = "проблема" if (is_problem or rng.random() < 0.25) else "отклонение"
+        problem_templates = [f for f in theme["findings"] if f.get("kind") == "проблема"]
+        deviation_templates = [f for f in theme["findings"] if f.get("kind") != "проблема"]
+        n_problem = min(round(total_items * 0.35), len(problem_templates))
+        chosen = rng.sample(problem_templates, n_problem)
+        chosen += rng.sample(deviation_templates, total_items - n_problem)
+        rng.shuffle(chosen)
+
+        for idx, (number, finding) in enumerate(zip(numbers, chosen), start=1):
+            item_type = "проблема" if finding.get("kind") == "проблема" else "отклонение"
 
             if item_type == "отклонение":
                 risk = weighted(rng, RISK_BY_INDEX, [10, 40, 35, 15])
-            else:
-                risk = weighted(rng, RISK_BY_INDEX, [35, 45, 15, 5])
-
-            if item_type == "проблема":
-                test_type = weighted(rng, TEST_TYPES, [10, 15, 20, 5, 50])
-            else:
                 test_type = weighted(
                     rng,
                     ["непрерывный", "выборочный", "аналитический", "повторное выполнение"],
                     [45, 25, 15, 15],
                 )
+            else:
+                risk = weighted(rng, RISK_BY_INDEX, [35, 45, 15, 5])
+                test_type = weighted(rng, TEST_TYPES, [10, 15, 20, 5, 50])
 
             if audit["status"] == "завершена":
                 status = weighted(rng, ["закрыт", "в работе", "открыт"], [70, 15, 15])
@@ -802,21 +1044,26 @@ def gen_items_and_scripts(
             closed_at = None
             if status == "закрыт":
                 closed_at = deadline + timedelta(days=rng.randint(-20, 10))
-
-            # часть открытых пунктов — просроченные
-            if status != "закрыт" and rng.random() < 0.35:
+            elif rng.random() < 0.35:
                 deadline = TODAY - timedelta(days=rng.randint(1, 120))
 
-            total = rng.randint(200, 5000)
-            share = rng.uniform(0.005, 0.06)
-            found = max(1, int(total * share))
-            condition = (
-                f"у {found} из {total} {finding['unit']} "
-                f"показатель «{finding['metric']}» превышает допустимое значение."
-                if item_type == "отклонение"
-                else f"по {found} из {total} {finding['unit']} не подтверждено соблюдение требования."
-            )
+            population = rng.randint(200, 8000)
+            if item_type == "отклонение":
+                found = max(1, int(population * rng.uniform(0.003, 0.05)))
+                condition = (
+                    f"у {found} из {population} {finding['unit']} "
+                    f"показатель «{finding['metric']}» превышает допустимое значение."
+                )
+            else:
+                found = rng.randint(1, min(5, population))
+                condition = (
+                    f"по {found} из {population} {finding['unit']} "
+                    f"не подтверждено соблюдение требования."
+                )
 
+            template_key = next(
+                key for key, template in templates.items() if template is finding
+            )
             item_id = f"ITM-{audit['audit_code'][4:]}-{number.replace('.', '')}"
             item = {
                 "item_id": item_id,
@@ -824,6 +1071,8 @@ def gen_items_and_scripts(
                 "item_number": number,
                 "item_type": item_type,
                 "test_type": test_type,
+                "finding_template_key": template_key,
+                "finding_scope": rng.choice(theme["scopes"]),
                 "title": finding["title"],
                 "test_description": finding["test"],
                 "criterion": finding["criterion"],
@@ -839,140 +1088,222 @@ def gen_items_and_scripts(
                 "is_repeat": "false",
                 "repeat_of_item_id": "",
                 "order_index": idx,
+                "_theme": theme_code,
+                "_year": int(audit["pocket_id"].split("-")[1]),
+                "_template": finding,
+                "_template_key": template_key,
+                "_population": population,
+                "_found": found,
             }
-
-            # повторные находки: 12–15% пунктов 2026 года со ссылкой на 2025 год
-            if audit["pocket_id"].startswith("PKT-2026") and rng.random() < 0.135:
-                candidates = [
-                    prev for prev in prev_items_by_theme.get(theme_code, [])
-                    if prev["item_type"] == item_type
-                ]
-                if candidates:
-                    previous = rng.choice(candidates)
-                    item["is_repeat"] = "true"
-                    item["repeat_of_item_id"] = previous["item_id"]
-                    item["title"] = previous["title"]
-
-            act_items.append(item)
             items.append(item)
 
-            # скрипты
-            if item_type == "отклонение":
-                script_count = rng.randint(1, 3)
-            else:
-                script_count = weighted(rng, [0, 1, 2], [35, 50, 15])
+    # Повторные находки: ровно 12–15% пунктов 2026 года, ссылка на 2025 год.
+    items_2025 = [item for item in items if item["_year"] == 2025]
+    items_2026 = [item for item in items if item["_year"] == 2026]
+    repeat_target = round(len(items_2026) * 0.135)
+    candidates_by_key: dict[tuple[str, str], list[dict]] = {}
+    for previous in items_2025:
+        candidates_by_key.setdefault(
+            (previous["_theme"], previous["item_type"]), []
+        ).append(previous)
 
-            for s_idx in range(1, int(script_count) + 1):
-                script_seq += 1
-                language = weighted(rng, [w[0] for w in LANG_WEIGHTS], [w[1] for w in LANG_WEIGHTS])
-                threshold = rng.randint(30, 500)
-                population = rng.randint(500, 10000)
-                rows_found = (
-                    max(1, int(population * rng.uniform(0.002, 0.05)))
-                    if item_type == "отклонение"
-                    else rng.choice([0, 0, 1, 2, 3])
-                )
-                executed = datetime.combine(
-                    act_date + timedelta(days=rng.randint(1, 10)),
-                    datetime.min.time(),
-                    tzinfo=timezone.utc,
-                ) + timedelta(hours=rng.randint(9, 19), minutes=rng.randint(0, 59))
+    for item in rng.sample(items_2026, repeat_target):
+        candidates = candidates_by_key.get((item["_theme"], item["item_type"]), [])
+        if not candidates:
+            continue
+        previous = rng.choice(candidates)
+        item["is_repeat"] = "true"
+        item["repeat_of_item_id"] = previous["item_id"]
+        for field in (
+            "title",
+            "test_description",
+            "criterion",
+            "cause",
+            "effect",
+            "recommendation",
+        ):
+            item[field] = previous[field]
+        item["_template"] = previous["_template"]
+        item["_template_key"] = previous["_template_key"]
 
-                script_id = f"SCR-{audit['audit_code'][4:]}-{number.replace('.', '')}-{s_idx}"
-                scripts.append(
-                    {
-                        "script_id": script_id,
-                        "item_id": item_id,
-                        "name": f"Скрипт проверки: {finding['title'].lower()}",
-                        "language": language,
-                        "description": (
-                            f"Проверка показателя «{finding['metric']}» "
-                            f"по источникам: {', '.join(theme['tables'])}."
-                        ),
-                        "code": gen_script_code(rng, language, theme, finding, threshold),
-                        "parameters": json.dumps(
-                            {"date_from": f"{audit['start_date']}", "date_to": f"{audit['end_date']}"},
-                            ensure_ascii=False,
-                        ),
-                        "source_tables": array_literal(theme["tables"]),
-                        "target_system": rng.choice(["АБС", "Хранилище данных", "Процессинг", "CRM"]),
-                        "expected_result": (
-                            f"Ожидается не более {max(1, population // 100)} записей "
-                            f"с превышением порога {threshold}."
-                        ),
-                        "result_summary": (
-                            f"Проверено {population} записей, выявлено {rows_found} "
-                            f"отклонений по показателю «{finding['metric']}»."
-                        ),
-                        "population_size": population,
-                        "rows_found": rows_found,
-                        "execution_ms": rng.randint(50, 30000),
-                        "executed_at": iso_ts(executed),
-                        "version": s_idx,
-                    }
-                )
+    # Скрипты и запуски — после повторов, чтобы использовать итоговую находку.
+    for item in items:
+        theme = THEMES[item["_theme"]]
+        finding = item["_template"]
+        population = item["_population"]
+        found = item["_found"]
+        act_date = date.fromisoformat(
+            act_by_id[item["act_id"]]["act_date"]
+        )
+        audit = audit_by_id[act_by_id[item["act_id"]]["audit_id"]]
 
-                # запуск скрипта
-                run_seq += 1
-                run_status = weighted(rng, ["успешно", "частично", "ошибка"], [90, 5, 5])
-                if run_status == "ошибка":
-                    rows_found_run = 0
-                    error = rng.choice(
-                        [
-                            "Превышено время выполнения запроса.",
-                            "Источник данных недоступен в момент запуска.",
-                            "Не найдена обязательная колонка в источнике.",
-                        ]
-                    )
-                else:
-                    rows_found_run = rows_found if run_status == "успешно" else max(0, rows_found // 2)
-                    error = ""
+        if item["item_type"] == "отклонение":
+            script_count = rng.randint(1, 3)
+        else:
+            script_count = weighted(rng, [0, 1, 2], [35, 50, 15])
 
-                runs.append(
-                    {
-                        "run_id": f"RUN-{run_seq:05d}",
-                        "script_id": script_id,
-                        "run_at": iso_ts(executed + timedelta(minutes=rng.randint(1, 30))),
-                        "status": run_status,
-                        "rows_found": rows_found_run,
-                        "duration_ms": rng.randint(50, 45000),
-                        "result_sample": json.dumps(
-                            {"first_rows": min(rows_found_run, 3)}, ensure_ascii=False
-                        ),
-                        "error_message": error,
-                    }
-                )
-
-                # отклонения-доказательства
-                if with_deviations and run_status == "успешно" and rows_found > 0:
-                    for _ in range(min(rows_found, rng.randint(0, 8))):
-                        dev_seq += 1
-                        deviations.append(
-                            {
-                                "deviation_id": f"DEV-{dev_seq:06d}",
-                                "item_id": item_id,
-                                "script_id": script_id,
-                                "entity_type": theme["entity"],
-                                "entity_id": f"{theme['suffix'][:3]}-{rng.randint(100000, 999999)}",
-                                "detected_at": iso(act_date + timedelta(days=rng.randint(1, 15))),
-                                "metric_name": finding["metric"],
-                                "metric_value": round(rng.uniform(threshold * 1.01, threshold * 3), 2),
-                                "threshold_value": float(threshold),
-                                "severity": risk,
-                                "description": (
-                                    f"Выявлено превышение показателя «{finding['metric']}» "
-                                    f"по объекту проверки."
-                                ),
-                                "payload": json.dumps(
-                                    {"script": script_id, "item": item_id}, ensure_ascii=False
-                                ),
-                            }
-                        )
-
-        if audit["pocket_id"].startswith("PKT-2025"):
-            prev_items_by_theme.setdefault(theme_code, []).extend(
-                [i for i in act_items if i["is_repeat"] == "false"]
+        for s_idx in range(1, int(script_count) + 1):
+            language = weighted(
+                rng, [w[0] for w in LANG_WEIGHTS], [w[1] for w in LANG_WEIGHTS]
             )
+            threshold = rng.randint(30, 500)
+            rows_found = found if s_idx == 1 else rng.randint(0, found)
+            if item["item_type"] == "отклонение":
+                rows_found = max(1, rows_found)
+            rows_found = min(rows_found, population)
+            executed = datetime.combine(
+                act_date + timedelta(days=rng.randint(1, 10)),
+                datetime.min.time(),
+                tzinfo=timezone.utc,
+            ) + timedelta(hours=rng.randint(9, 19), minutes=rng.randint(0, 59))
+
+            script_id = (
+                f"SCR-{audit['audit_code'][4:]}-"
+                f"{item['item_number'].replace('.', '')}-{s_idx}"
+            )
+            scripts.append(
+                {
+                    "script_id": script_id,
+                    "item_id": item["item_id"],
+                    "name": f"Скрипт проверки: {finding['title'].lower()}",
+                    "language": language,
+                    "description": (
+                        f"Проверка показателя «{finding['metric']}» "
+                        f"по источникам: {', '.join(theme['tables'])}."
+                    ),
+                    "code": gen_script_code(rng, language, theme, finding, threshold),
+                    "parameters": json.dumps(
+                        {
+                            "date_from": audit["start_date"],
+                            "date_to": audit["end_date"],
+                            "threshold": threshold,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "source_tables": array_literal(theme["tables"]),
+                    "target_system": rng.choice(
+                        ["АБС", "Хранилище данных", "Процессинг", "CRM"]
+                    ),
+                    "expected_result": (
+                        f"Ожидается не более {max(1, population // 100)} записей "
+                        f"с превышением порога {threshold}."
+                    ),
+                    "result_summary": (
+                        f"Проверено {population} записей, выявлено {rows_found} "
+                        f"отклонений по показателю «{finding['metric']}»."
+                    ),
+                    "population_size": population,
+                    "rows_found": rows_found,
+                    "execution_ms": rng.randint(50, 30000),
+                    "executed_at": iso_ts(executed),
+                    "version": s_idx,
+                }
+            )
+
+            run_seq += 1
+            run_status = weighted(rng, ["успешно", "частично", "ошибка"], [90, 5, 5])
+            if run_status == "ошибка":
+                rows_found_run = 0
+                error = rng.choice(
+                    [
+                        "Превышено время выполнения запроса.",
+                        "Источник данных недоступен в момент запуска.",
+                        "Не найдена обязательная колонка в источнике.",
+                    ]
+                )
+            else:
+                rows_found_run = (
+                    rows_found if run_status == "успешно" else max(0, rows_found // 2)
+                )
+                error = ""
+
+            runs.append(
+                {
+                    "run_id": f"RUN-{run_seq:05d}",
+                    "script_id": script_id,
+                    "run_at": iso_ts(
+                        executed + timedelta(minutes=rng.randint(1, 30))
+                    ),
+                    "status": run_status,
+                    "rows_found": rows_found_run,
+                    "duration_ms": rng.randint(50, 45000),
+                    "result_sample": json.dumps(
+                        {"first_rows": min(rows_found_run, 3)}, ensure_ascii=False
+                    ),
+                    "error_message": error,
+                }
+            )
+
+            if with_deviations and run_status == "успешно" and rows_found > 0:
+                for _ in range(min(rows_found, rng.randint(0, 8))):
+                    dev_seq += 1
+                    deviations.append(
+                        {
+                            "deviation_id": f"DEV-{dev_seq:06d}",
+                            "item_id": item["item_id"],
+                            "script_id": script_id,
+                            "entity_type": theme["entity"],
+                            "entity_id": (
+                                f"{theme['suffix'][:3]}-{rng.randint(100000, 999999)}"
+                            ),
+                            "detected_at": iso(
+                                act_date + timedelta(days=rng.randint(1, 15))
+                            ),
+                            "metric_name": finding["metric"],
+                            "metric_value": round(
+                                rng.uniform(threshold * 1.01, threshold * 3), 2
+                            ),
+                            "threshold_value": float(threshold),
+                            "severity": item["risk_level"],
+                            "description": (
+                                f"Выявлено превышение показателя «{finding['metric']}» "
+                                f"по объекту проверки."
+                            ),
+                            "payload": json.dumps(
+                                {"script": script_id, "item": item["item_id"]},
+                                ensure_ascii=False,
+                            ),
+                        }
+                    )
+
+    # Полный текст акта собирается после финальных формулировок пунктов.
+    items_by_act: dict[str, list[dict]] = {}
+    for item in items:
+        items_by_act.setdefault(item["act_id"], []).append(item)
+
+    for act in acts:
+        audit = audit_by_id[act["audit_id"]]
+        lines = [
+            f"Акт {act['act_number']} по проверке {audit['audit_code']}.",
+            f"Дата акта: {act['act_date']}.",
+            (
+                f"Вводная часть: проверка проведена в период "
+                f"{audit['start_date']} — {audit['end_date']}. "
+                f"Охват: {audit['scope']}"
+            ),
+            "",
+        ]
+        for item in sorted(
+            items_by_act.get(act["act_id"], []), key=lambda row: row["order_index"]
+        ):
+            lines.extend(
+                [
+                    f"Пункт {item['item_number']}. {item['title']}",
+                    f"Тест: {item['test_description']}",
+                    f"Критерий: {item['criterion']}",
+                    f"Условие: {item['condition']}",
+                    f"Причина: {item['cause']}",
+                    f"Следствие: {item['effect']}",
+                    f"Рекомендация: {item['recommendation']}",
+                    "",
+                ]
+            )
+        act["full_text"] = "\n".join(lines).strip()
+        act["summary"] = (
+            f"Акт по проверке {audit['audit_code']}: "
+            f"{len(items_by_act.get(act['act_id'], []))} пунктов, "
+            f"процессы {THEMES[SUFFIX_TO_THEME[audit['pocket_id'].split('-', 2)[2]]]['title'].lower()}."
+        )
 
     return items, scripts, runs, deviations
 
@@ -985,7 +1316,7 @@ def gen_script_templates() -> list[dict]:
             "Сводка по статусам проверок",
             "Количество проверок по статусам за указанный год.",
             "SELECT status, count(*) AS cnt FROM audit.audits "
-            "WHERE start_date >= :year::text || '-01-01'::date "
+            "WHERE start_date >= make_date(%(year)s, 1, 1) "
             "GROUP BY status ORDER BY cnt DESC",
             {"year": 2026},
         ),
@@ -995,8 +1326,8 @@ def gen_script_templates() -> list[dict]:
             "Топ видов отклонений",
             "Самые частые формулировки отклонений за период.",
             "SELECT title, count(*) AS cnt FROM audit.act_items "
-            "WHERE item_type = 'отклонение' AND created_at >= :date_from::date "
-            "GROUP BY title ORDER BY cnt DESC LIMIT :limit",
+            "WHERE item_type = 'отклонение' AND created_at >= %(date_from)s::date "
+            "GROUP BY title ORDER BY cnt DESC LIMIT %(limit)s",
             {"date_from": "2026-01-01", "limit": 10},
         ),
         (
@@ -1182,6 +1513,7 @@ def manifest(counts: dict[str, int]) -> None:
     data = {
         "seed": SEED,
         "generated_at": "2026-11-21",
+        "as_of_date": TODAY.isoformat(),
         "counts": counts,
         "sha256": digest.hexdigest(),
         "note": "Все содержательные данные — синтетические и русскоязычные.",
@@ -1238,7 +1570,8 @@ def main() -> int:
     )
     write_csv(
         "act_items",
-        ["item_id", "act_id", "item_number", "item_type", "test_type", "title",
+        ["item_id", "act_id", "item_number", "item_type", "test_type",
+         "finding_template_key", "finding_scope", "title",
          "test_description", "criterion", "condition", "cause", "effect",
          "recommendation", "risk_level", "status", "deadline", "responsible_unit",
          "closed_at", "is_repeat", "repeat_of_item_id", "order_index"],
