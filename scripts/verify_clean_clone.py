@@ -412,6 +412,28 @@ def stop_process(process: subprocess.Popen) -> None:
         process.kill()
 
 
+def assistant_graph_ids(body: object) -> set[str]:
+    """Проверяет ответ /assistants/search и возвращает набор graph_id.
+
+    Порядок ассистентов не гарантирован, поэтому сравниваем набор, а не
+    первый элемент.
+    """
+    if not isinstance(body, list) or not body:
+        raise CheckError("API не вернул ни одного ассистента")
+    graph_ids = {
+        str(item.get("graph_id"))
+        for item in body
+        if isinstance(item, dict) and item.get("graph_id")
+    }
+    for expected in ("audit_assistant", "dialogue_admin"):
+        if expected not in graph_ids:
+            raise CheckError(
+                f"API не вернул граф {expected}; получено: "
+                f"{', '.join(sorted(graph_ids)) or '<пусто>'}"
+            )
+    return graph_ids
+
+
 def check_api(clone: Path, api_port: int = DEFAULT_API_PORT) -> None:
     print("\n=== 8. LangGraph API ===")
     url = f"http://127.0.0.1:{api_port}"
@@ -446,10 +468,8 @@ def check_api(clone: Path, api_port: int = DEFAULT_API_PORT) -> None:
             body = json.loads(response.read().decode("utf-8"))
         if not isinstance(body, list) or not body:
             raise CheckError("API не вернул ни одного ассистента")
-        graph_id = body[0].get("graph_id")
-        if graph_id != "audit_assistant":
-            raise CheckError(f"Неожиданный graph_id: {graph_id}")
-        print(f"[api] assistant: {graph_id}")
+        graph_ids = assistant_graph_ids(body)
+        print(f"[api] assistants: {', '.join(sorted(graph_ids))}")
     finally:
         stop_process(process)
         log_file.close()

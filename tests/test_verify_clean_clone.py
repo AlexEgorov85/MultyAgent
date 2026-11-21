@@ -9,6 +9,7 @@ import pytest
 
 from scripts.verify_clean_clone import (
     CheckError,
+    assistant_graph_ids,
     build_parser,
     format_result,
     is_forbidden_tracked_path,
@@ -178,6 +179,24 @@ def test_is_sha_like_true(ref):
 )
 def test_is_sha_like_false(ref):
     assert is_sha_like(ref) is False
+
+
+def test_assistant_graph_ids_ignores_order():
+    body = [
+        {"graph_id": "dialogue_admin"},
+        {"graph_id": "audit_assistant"},
+    ]
+    assert assistant_graph_ids(body) == {"audit_assistant", "dialogue_admin"}
+
+
+def test_assistant_graph_ids_requires_both_graphs():
+    with pytest.raises(CheckError, match="dialogue_admin"):
+        assistant_graph_ids([{"graph_id": "audit_assistant"}])
+
+
+def test_assistant_graph_ids_rejects_empty_body():
+    with pytest.raises(CheckError, match="ни одного ассистента"):
+        assistant_graph_ids([])
 
 
 def test_main_failure_returns_1_and_prints_result(monkeypatch, capsys):
