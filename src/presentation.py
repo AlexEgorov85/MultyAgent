@@ -132,8 +132,15 @@ _ROUTE_KEYS = {
     "report": "route_report",
     "investigation": "route_investigation",
     "memory": "route_memory",
+    "smalltalk": "route_smalltalk",
     "unsafe": "route_unsafe",
     "out_of_domain": "route_out_of_domain",
+}
+
+_SMALLTALK_REASON_KEYS = {
+    "smalltalk:greeting": "trace_smalltalk_greeting",
+    "smalltalk:capabilities": "trace_smalltalk_capabilities",
+    "smalltalk:thanks": "trace_smalltalk_thanks",
 }
 
 _AGENT_KEYS = {
@@ -170,6 +177,14 @@ def _lang(state: dict[str, Any]) -> str:
 def _route_label(lang: str, route: str) -> str:
     key = _ROUTE_KEYS.get(str(route or "").strip().lower())
     return t(lang, key) if key else (str(route or "").strip() or "—")
+
+
+def _reason_label(lang: str, route: str, reason: str) -> str:
+    """Убирает технические префиксы служебных маршрутов."""
+    key = _SMALLTALK_REASON_KEYS.get(reason.strip().lower())
+    if key and str(route).lower() == "smalltalk":
+        return t(lang, key)
+    return reason
 
 
 def _agent_label(lang: str, value: str) -> str:
@@ -551,7 +566,31 @@ def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dic
             }
         )
 
+    original_query = str(state.get("user_query") or "").strip()
+    resolved_query = str(state.get("resolved_query") or "").strip()
+    if resolved_query and resolved_query != original_query:
+        steps.append(
+            {
+                "step": "followup",
+                "title": t(lang, "trace_followup"),
+                "detail": (
+                    f"{_truncate(original_query, 160)} → "
+                    f"{_truncate(resolved_query, 220)}"
+                ),
+                "status": "ok",
+                "agent": t(lang, "agent_orchestrator"),
+                "kind": "route",
+                "chips": _chips(
+                    (
+                        t(lang, "trace_followup_reason"),
+                        _truncate(str(state.get("resolved_reason") or ""), 120),
+                    )
+                ),
+            }
+        )
+
     reason = _truncate(str(state.get("route_reason") or ""), 240)
+    reason = _reason_label(lang, route, reason)
     confidence = state.get("route_confidence")
     route_detail = f"{route_label} — {reason}" if reason else route_label
     confidence_chip = None

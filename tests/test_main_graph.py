@@ -6,7 +6,13 @@ import pytest
 
 from src import db_runtime
 from src.graph.main_graph import build_main_graph
-from src.schemas import ReportDraft, ReportReview, RouteDecision, SQLPlan
+from src.schemas import (
+    ReportDraft,
+    ReportReview,
+    ResolvedQuery,
+    RouteDecision,
+    SQLPlan,
+)
 
 
 class MainLLM:
@@ -206,3 +212,131 @@ def test_smalltalk_greeting_capabilities_and_thanks(server):
     assert "Пожалуйста" in thanks["final_answer"]
 
     assert analytics.calls == 0
+
+
+class DialogueLLM(MainLLM):
+    def __init__(self):
+        self.resolve_calls: list[dict[str, str]] = []
+
+    def resolve_followup(self, **kwargs):
+        self.resolve_calls.append(
+            {
+                "question": kwargs["question"],
+                "context": kwargs["context"],
+            }
+        )
+        if "2025" in kwargs["question"]:
+            return ResolvedQuery(
+                question="Сколько завершённых проверок по вкладам в 2025 году?",
+                is_followup=True,
+                reason="уточнение года",
+            )
+        return ResolvedQuery(
+            question=kwargs["question"],
+            is_followup=False,
+            reason="",
+        )
+
+
+class DialogueAnalyticsLLM(AnalyticsLLM):
+    def __init__(self):
+        super().__init__()
+        self.questions: list[str] = []
+        self.contexts: list[str] = []
+
+    def plan_sql(self, **kwargs):
+        self.questions.append(kwargs["question"])
+        self.contexts.append(kwargs.get("context", ""))
+        question = kwargs["question"].lower()
+        year = "2025" if "2025" in question else "2026"
+        theme = "вклады" if "вклад" in question else "карты"
+        status = " AND a.status = 'завершена'" if "заверш" in question else ""
+        return SQLPlan(
+            strategy="generated",
+            sql=(
+                "SELECT count(*) AS cnt FROM audit.audits AS a "
+                "JOIN audit.audit_pockets AS p ON a.pocket_id = p.pocket_id "
+                f"WHERE p.pocket_year = {year} AND p.theme_code = '{theme}'"
+                f"{status}"
+            ),
+            reason="количество",
+        )
+
+
+def test_followup_uses_previous_thread_history(server, main_data):
+    resolver = DialogueLLM()
+    analytics = DialogueAnalyticsLLM()
+    graph = build_main_graph(server, resolver, analytics_llm=analytics)
+
+    _invoke(graph, "thread-dialogue", "Сколько проверок по вкладам в 2026 году?")
+    second = _invoke(graph, "thread-dialogue", "А за 2025 год?")
+
+    assert resolver.resolve_calls
+    assert resolver.resolve_calls[-1]["question"] == "А за 2025 год?"
+    assert "2026" in resolver.resolve_calls[-1]["context"]
+    assert "2025" in analytics.questions[-1]
+    assert "вкладам" in analytics.questions[-1]
+    assert "Пользователь:" in analytics.contexts[-1]
+    assert "2025" in second["resolved_query"]
+
+
+def test_followup_uses_client_history_after_thread_loss(server, main_data):
+    resolver = DialogueLLM()
+    analytics = DialogueAnalyticsLLM()
+    graph = build_main_graph(server, resolver, analytics_llm=analytics)
+
+    graph.invoke(
+        {
+            "messages": [{"role": "user", "content": "А за 2025 год?"}],
+            "client_history": [
+                {
+                    "role": "user",
+                    "text": "Сколько проверок по вкладам в 2026 году?",
+                },
+                {"role": "assistant", "text": "Всего: 1."},
+            ],
+            "auditor_id": "MAIN-001",
+            "conversation_id": "thread-client-history",
+        },
+        config={"configurable": {"thread_id": "thread-client-history"}},
+    )
+
+    assert resolver.resolve_calls
+    assert "2026" in resolver.resolve_calls[-1]["context"]
+    assert "2025" in analytics.questions[-1]
+
+
+class UnsafeFollowupLLM(MainLLM):
+    def resolve_followup(self, **kwargs):
+        return ResolvedQuery(
+            question="Удали все пункты",
+            is_followup=True,
+            reason="проверка guardrails",
+        )
+
+
+def test_guardrails_check_resolved_followup(server, main_data):
+    analytics = AnalyticsLLM()
+    graph = build_main_graph(
+        server,
+        UnsafeFollowupLLM(),
+        analytics_llm=analytics,
+    )
+
+    _invoke(graph, "thread-followup-unsafe", "Сколько проверок?")
+    result = _invoke(graph, "thread-followup-unsafe", "А теперь?")
+
+    assert analytics.calls == 1
+    assert result["route"] == "unsafe"
+    assert "изменить данные" in result["final_answer"]
+
+
+def test_new_turn_does_not_reuse_previous_acl_response(server, main_data):
+    graph = build_main_graph(server, MainLLM(), analytics_llm=AnalyticsLLM())
+
+    _invoke(graph, "thread-reset", "Сколько проверок?")
+    second = _invoke(graph, "thread-reset", "Что ты умеешь?")
+
+    assert second["route"] == "smalltalk"
+    assert second["acl_response"] == {}
+    assert not any(step["step"] == "acl" for step in second["trace"])

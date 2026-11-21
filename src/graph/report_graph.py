@@ -8,6 +8,7 @@ from typing import Any, Literal
 from langgraph.graph import END, START, StateGraph
 
 from ..acl import ACLMessage, ACLValidationError, make_reply, validate_acl
+from ..dialogue import last_audit_code
 from ..i18n import t
 from ..llm import LLMClient
 from ..schemas import ReportDraft, ReportReview
@@ -67,6 +68,9 @@ def build_report_graph(server, llm: LLMClient):
             "status": "ok",
             "request": message.model_dump(),
             "question": question,
+            "conversation_context": str(
+                message.content.get("conversation_context", "")
+            ),
             "auditor_id": str(message.content.get("auditor_id", "")),
             "language": str(message.content.get("language", "ru")),
             "conversation_id": message.conversation_id,
@@ -75,12 +79,16 @@ def build_report_graph(server, llm: LLMClient):
 
     def collect_facts(state: ReportState) -> dict[str, Any]:
         match = AUDIT_CODE_RE.search(state["question"])
-        if not match:
+        audit_code = (
+            match.group(0).upper()
+            if match
+            else last_audit_code(state.get("conversation_context", ""))
+        )
+        if not audit_code:
             return {
                 "status": "failed",
                 "error": t(state.get("language"), "missing_audit_code"),
             }
-        audit_code = match.group(0).upper()
         audit = db_tools.get_audit(server, audit_code)
         if audit is None:
             return {
@@ -138,6 +146,7 @@ def build_report_graph(server, llm: LLMClient):
                 question=state["question"],
                 facts_text=state["facts_text"],
                 allowed_ids=state["allowed_ids"],
+                context=state.get("conversation_context", ""),
             )
         except Exception as exc:
             return {
@@ -202,6 +211,7 @@ def build_report_graph(server, llm: LLMClient):
                 review=review_model,
                 facts_text=state["facts_text"],
                 allowed_ids=state["allowed_ids"],
+                context=state.get("conversation_context", ""),
             )
         except Exception as exc:
             return {

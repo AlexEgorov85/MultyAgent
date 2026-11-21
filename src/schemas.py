@@ -25,6 +25,14 @@ class RouteDecision(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
+class ResolvedQuery(BaseModel):
+    """Уточняющий вопрос, переформулированный как самостоятельный."""
+
+    question: str = Field(min_length=1)
+    is_followup: bool
+    reason: str
+
+
 class SQLPlan(BaseModel):
     """План аналитического запроса: готовый шаблон или сгенерированный SQL."""
 

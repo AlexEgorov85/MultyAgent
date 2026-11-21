@@ -221,7 +221,10 @@ export function AgentTrace() {
           // Если у шага есть компактные метрики, не дублируем их текстом.
           // Для маршрута и ACL текст важен и без метрик.
           const keepDetail =
-            step.step === "route" || step.step === "acl" || !step.chips?.length;
+            step.step === "route" ||
+            step.step === "acl" ||
+            step.step === "followup" ||
+            !step.chips?.length;
           const detail =
             keepDetail && step.detail && step.detail !== step.code
               ? step.detail

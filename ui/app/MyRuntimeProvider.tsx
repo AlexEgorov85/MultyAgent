@@ -116,6 +116,12 @@ export function MyRuntimeProvider({
 
       const chat = activeChat ?? newChat();
       const chatId = chat.id;
+      // Резервная копия истории: если backend потеряет тред после перезапуска,
+      // он всё равно сможет восстановить контекст последних реплик.
+      const clientHistory = (chat.messages ?? [])
+        .filter((item) => item.text.trim().length > 0)
+        .slice(-8)
+        .map((item) => ({ role: item.role, text: item.text.slice(0, 2000) }));
 
       appendMessage(chatId, {
         id: newId(),
@@ -136,6 +142,7 @@ export function MyRuntimeProvider({
               assistant_id: ASSISTANT_ID,
               input: {
                 messages: [{ type: "human", content: question }],
+                client_history: clientHistory,
                 language,
                 auditor_id: auditorId,
               },

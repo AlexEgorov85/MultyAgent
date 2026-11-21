@@ -66,6 +66,9 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
             "status": "ok",
             "request": message.model_dump(),
             "question": question,
+            "conversation_context": str(
+                message.content.get("conversation_context", "")
+            ),
             "auditor_id": str(message.content.get("auditor_id", "")),
             "language": str(message.content.get("language", "ru")),
             "conversation_id": message.conversation_id,
@@ -106,7 +109,9 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
     def generate(state: RetrievalState) -> dict[str, Any]:
         try:
             answer = llm.answer_from_chunks(
-                question=state["question"], chunks=state["chunks"]
+                question=state["question"],
+                chunks=state["chunks"],
+                context=state.get("conversation_context", ""),
             )
         except Exception as exc:
             return {
@@ -153,7 +158,10 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
         answer = RetrievalAnswer.model_validate(state["answer"])
         try:
             critique = llm.critique_answer(
-                question=state["question"], answer=answer, chunks=state["chunks"]
+                question=state["question"],
+                answer=answer,
+                chunks=state["chunks"],
+                context=state.get("conversation_context", ""),
             )
         except Exception as exc:
             return {
@@ -183,6 +191,7 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
                 answer=answer,
                 issues=state.get("critic_issues", []),
                 chunks=state["chunks"],
+                context=state.get("conversation_context", ""),
             )
         except Exception as exc:
             return {

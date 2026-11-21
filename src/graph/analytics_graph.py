@@ -10,6 +10,7 @@ import psycopg
 from langgraph.graph import END, START, StateGraph
 
 from ..acl import ACLMessage, ACLValidationError, make_reply, validate_acl
+from ..dialogue import last_audit_code
 from ..i18n import t
 from ..llm import LLMClient
 from ..schemas import SQLPlan, ToolPlan
@@ -134,6 +135,9 @@ def build_analytics_graph(server, llm: LLMClient):
             "status": "ok",
             "request": message.model_dump(),
             "question": question,
+            "conversation_context": str(
+                message.content.get("conversation_context", "")
+            ),
             "auditor_id": str(message.content.get("auditor_id", "")),
             "language": str(message.content.get("language", "ru")),
             "conversation_id": message.conversation_id,
@@ -145,6 +149,8 @@ def build_analytics_graph(server, llm: LLMClient):
     def classify(state: AnalyticsState) -> dict[str, Any]:
         question = state.get("question", "").lower()
         code = AUDIT_CODE_RE.search(question)
+        if not code:
+            code = last_audit_code(state.get("conversation_context", ""))
         if code and ("похож" in question or "друг" in question):
             return {"mode": "multi_tool"}
         if code and any(
@@ -159,6 +165,7 @@ def build_analytics_graph(server, llm: LLMClient):
                 question=state["question"],
                 schema_text=db_tools.get_schema(),
                 templates=db_tools.list_script_templates(server),
+                context=state.get("conversation_context", ""),
             )
         except Exception as exc:
             detail = str(exc).strip() or repr(exc)
@@ -254,6 +261,7 @@ def build_analytics_graph(server, llm: LLMClient):
                 sql=state.get("sql") or state["plan"].get("sql", ""),
                 error=state.get("error", ""),
                 schema_text=db_tools.get_schema(),
+                context=state.get("conversation_context", ""),
             )
         except Exception as exc:
             return _fail(
@@ -264,9 +272,13 @@ def build_analytics_graph(server, llm: LLMClient):
 
     def drilldown(state: AnalyticsState) -> dict[str, Any]:
         code = AUDIT_CODE_RE.search(state["question"])
-        if not code:
+        audit_code = (
+            code.group(0).upper()
+            if code
+            else last_audit_code(state.get("conversation_context", ""))
+        )
+        if not audit_code:
             return _fail(state, "Не найден код проверки")
-        audit_code = code.group(0).upper()
         items = db_tools.get_act_items(server, audit_code, limit=50)
         english = str(state.get("language")).lower() == "en"
         if not items:
@@ -305,7 +317,9 @@ def build_analytics_graph(server, llm: LLMClient):
     def multi_tool(state: AnalyticsState) -> dict[str, Any]:
         try:
             plan: ToolPlan = llm.plan_tools(
-                question=state["question"], tools_text=TOOL_SPECS
+                question=state["question"],
+                tools_text=TOOL_SPECS,
+                context=state.get("conversation_context", ""),
             )
         except Exception as exc:
             return _fail(
@@ -316,7 +330,11 @@ def build_analytics_graph(server, llm: LLMClient):
         calls: list[dict[str, Any]] = []
         evidence: list[dict[str, Any]] = []
         code_match = AUDIT_CODE_RE.search(state["question"])
-        audit_code = code_match.group(0).upper() if code_match else ""
+        audit_code = (
+            code_match.group(0).upper()
+            if code_match
+            else last_audit_code(state.get("conversation_context", ""))
+        )
         lines: list[str] = [f"Проверка {audit_code}:" if audit_code else "Результаты:"]
         for call in plan.calls[:5]:
             name = call.name.split("(", 1)[0].strip()

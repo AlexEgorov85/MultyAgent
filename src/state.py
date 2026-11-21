@@ -12,6 +12,7 @@ class AnalyticsState(TypedDict, total=False):
     acl_request: dict[str, Any]
     request: dict[str, Any]
     question: str
+    conversation_context: str
     auditor_id: str
     language: str
     conversation_id: str
@@ -39,6 +40,7 @@ class RetrievalState(TypedDict, total=False):
     acl_request: dict[str, Any]
     request: dict[str, Any]
     question: str
+    conversation_context: str
     auditor_id: str
     language: str
     conversation_id: str
@@ -64,6 +66,7 @@ class ReportState(TypedDict, total=False):
     acl_request: dict[str, Any]
     request: dict[str, Any]
     question: str
+    conversation_context: str
     auditor_id: str
     language: str
     conversation_id: str
@@ -90,6 +93,7 @@ class InvestigationState(TypedDict, total=False):
     acl_request: dict[str, Any]
     request: dict[str, Any]
     question: str
+    conversation_context: str
     auditor_id: str
     language: str
     conversation_id: str
@@ -112,6 +116,10 @@ class MainState(TypedDict, total=False):
 
     messages: Annotated[list[Any], operator.add]
     user_query: str
+    resolved_query: str
+    resolved_reason: str
+    dialogue_context: str
+    client_history: list[dict[str, Any]]
     auditor_id: str
     language: str
     conversation_id: str

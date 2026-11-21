@@ -6,10 +6,12 @@ import re
 import time
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from ..acl import make_acl_message
+from ..dialogue import build_dialogue_context, is_followup
 from ..guardrails import check_final_answer, check_request, extract_sql
 from ..llm import LLMClient
 from ..memory import store as memory_store
@@ -92,16 +94,69 @@ def build_main_graph(
         top_k=top_k,
     )
 
-    def load_memory(state: MainState) -> dict[str, Any]:
-        question = _last_user_text(state.get("messages", []))
+    def load_memory(state: MainState, config: RunnableConfig) -> dict[str, Any]:
+        messages = state.get("messages", [])
+        question = _last_user_text(messages)
+        language = str(state.get("language") or "ru")
+        context = build_dialogue_context(
+            messages,
+            state.get("client_history", []),
+            question,
+            language=language,
+        )
         auditor_id = state.get("auditor_id", "")
         profile = memory_store.load_profile(server, auditor_id)
+        configurable = (config or {}).get("configurable", {})
+        thread_id = str(configurable.get("thread_id") or "")
         return {
             "user_query": question,
+            "resolved_query": question,
+            "resolved_reason": "",
+            "dialogue_context": context,
             "profile": profile,
-            "conversation_id": state.get("conversation_id", "conv-main"),
+            "conversation_id": thread_id
+            or state.get("conversation_id")
+            or "conv-main",
+            "route": "",
+            "route_reason": "",
+            "route_confidence": 0.0,
+            "guardrail": {},
+            "answer_guardrail": {},
+            "final_answer": "",
+            "acl_response": {},
+            "evidence": [],
+            "presentation": {},
+            "trace": [],
+            "memory_saved": False,
             "metrics": {"started_at": time.perf_counter()},
         }
+
+    def resolve_query(state: MainState) -> dict[str, Any]:
+        """Переформулирует уточнение с учётом предыдущих реплик."""
+        question = state.get("user_query", "")
+        context = state.get("dialogue_context", "")
+        if not context or not is_followup(question, True):
+            return {"resolved_query": question, "resolved_reason": ""}
+
+        resolver = getattr(llm, "resolve_followup", None)
+        if resolver is None:
+            return {"resolved_query": question, "resolved_reason": ""}
+
+        try:
+            resolved = resolver(
+                question=question,
+                context=context,
+                profile_text=memory_store.profile_text(state.get("profile", {})),
+                language=str(state.get("language") or "ru"),
+            )
+        except Exception:
+            return {"resolved_query": question, "resolved_reason": ""}
+
+        text = " ".join(str(resolved.question or "").split()).strip()
+        if not text or len(text) > 500:
+            text = question
+        reason = str(resolved.reason or "") if resolved.is_followup else ""
+        return {"resolved_query": text, "resolved_reason": reason}
 
     def save_memory(state: MainState) -> dict[str, Any]:
         facts = memory_store.infer_memory(state.get("user_query", ""))
@@ -121,7 +176,11 @@ def build_main_graph(
         }
 
     def guard_request(state: MainState) -> dict[str, Any]:
-        result = check_request(state.get("user_query", ""))
+        user_query = state.get("user_query", "")
+        resolved_query = state.get("resolved_query", "")
+        result = check_request(user_query)
+        if result.safe and resolved_query and resolved_query != user_query:
+            result = check_request(resolved_query)
         if not result.safe:
             return {
                 "guardrail": result.model_dump(),
@@ -131,7 +190,7 @@ def build_main_graph(
         return {"guardrail": result.model_dump()}
 
     def router(state: MainState) -> dict[str, Any]:
-        question = state.get("user_query", "")
+        question = state.get("resolved_query") or state.get("user_query", "")
         lower = question.lower()
         compact = re.sub(r"\s+", " ", lower).strip(" !?.,…")
         if any(
@@ -198,6 +257,7 @@ def build_main_graph(
             decision = llm.route(
                 question=question,
                 profile_text=memory_store.profile_text(state.get("profile", {})),
+                context=state.get("dialogue_context", ""),
             )
         except Exception:
             decision = None
@@ -213,7 +273,7 @@ def build_main_graph(
         }
 
     def _question_with_profile(state: MainState) -> str:
-        question = state.get("user_query", "")
+        question = state.get("resolved_query") or state.get("user_query", "")
         profile = state.get("profile", {})
         parts = []
         if profile.get("focus_theme"):
@@ -231,6 +291,8 @@ def build_main_graph(
             receiver=receiver,
             content={
                 "question": _question_with_profile(state),
+                "original_question": state.get("user_query", ""),
+                "conversation_context": state.get("dialogue_context", ""),
                 "auditor_id": state.get("auditor_id", ""),
                 "language": state.get("language", "ru"),
             },
@@ -350,6 +412,7 @@ def build_main_graph(
     builder = StateGraph(MainState)
     builder.add_node("load_memory", load_memory)
     builder.add_node("save_memory", save_memory)
+    builder.add_node("resolve_query", resolve_query)
     builder.add_node("guard_request", guard_request)
     builder.add_node("router", router)
     builder.add_node("analytics", analytics_branch)
@@ -366,9 +429,10 @@ def build_main_graph(
     builder.add_edge("load_memory", "save_memory")
     builder.add_conditional_edges(
         "save_memory",
-        lambda s: "present" if s.get("memory_saved") else "guard_request",
-        {"guard_request": "guard_request", "present": "present"},
+        lambda s: "present" if s.get("memory_saved") else "resolve_query",
+        {"resolve_query": "resolve_query", "present": "present"},
     )
+    builder.add_edge("resolve_query", "guard_request")
     builder.add_conditional_edges(
         "guard_request",
         lambda s: "refusal" if s.get("route") == "unsafe" else "router",
