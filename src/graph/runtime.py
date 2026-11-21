@@ -114,3 +114,8 @@ def get_admin_graph():
     """Служебный граф управления чатами."""
     _start_build()
     return _wait_result("admin_graph")
+
+
+# Прогреваем сборку сразу при импорте: сервер успевает поднять PostgreSQL
+# и графы, пока LangGraph API завершает собственный старт.
+_start_build()
