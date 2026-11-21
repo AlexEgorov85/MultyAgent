@@ -9,6 +9,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import {
+  deleteBackendThread,
+  deleteRemoteChat,
+  renameRemoteChat,
+} from "./dialogueAdmin";
+import { readPreferences } from "./preferences";
 
 export type TraceChip = {
   label: string;
@@ -57,6 +63,7 @@ type ChatContextValue = ChatStore & {
   ready: boolean;
   newChat: () => Chat;
   switchChat: (id: string) => void;
+  renameChat: (id: string, title: string) => void;
   deleteChat: (id: string) => void;
   appendMessage: (chatId: string, message: ChatMessage) => void;
   setBackendThreadId: (chatId: string, threadId: string) => void;
@@ -270,21 +277,50 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
     setActiveId(id);
   }, []);
 
+  const renameChat = useCallback(
+    (id: string, title: string) => {
+      const value = title.replace(/\s+/g, " ").trim().slice(0, 160);
+      if (!value) return;
+      setChats((previous) =>
+        previous.map((chat) =>
+          chat.id === id
+            ? { ...chat, title: value, updatedAt: Date.now() }
+            : chat,
+        ),
+      );
+      const { auditorId } = readPreferences();
+      void renameRemoteChat(id, value, auditorId).catch((error) => {
+        console.warn("Не удалось переименовать чат в БД:", error);
+      });
+    },
+    [],
+  );
+
   const deleteChat = useCallback(
     (id: string) => {
+      const target = chats.find((chat) => chat.id === id);
       const remaining = chats.filter((chat) => chat.id !== id);
       if (remaining.length === 0) {
         const chat = makeChat();
         setChats([chat]);
         setActiveId(chat.id);
-        return;
+      } else {
+        setChats(remaining);
+        if (activeId === id) {
+          const next = [...remaining].sort(
+            (left, right) => right.updatedAt - left.updatedAt,
+          )[0];
+          setActiveId(next.id);
+        }
       }
-      setChats(remaining);
-      if (activeId === id) {
-        const next = [...remaining].sort(
-          (left, right) => right.updatedAt - left.updatedAt,
-        )[0];
-        setActiveId(next.id);
+
+      if (target) {
+        void deleteRemoteChat(target.id).catch((error) => {
+          console.warn("Не удалось удалить чат из БД:", error);
+        });
+        void deleteBackendThread(target.backendThreadId).catch((error) => {
+          console.warn("Не удалось удалить thread backend:", error);
+        });
       }
     },
     [chats, activeId],
@@ -341,6 +377,7 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
       ready,
       newChat,
       switchChat,
+      renameChat,
       deleteChat,
       appendMessage,
       setBackendThreadId,
@@ -353,6 +390,7 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
       ready,
       newChat,
       switchChat,
+      renameChat,
       deleteChat,
       appendMessage,
       setBackendThreadId,

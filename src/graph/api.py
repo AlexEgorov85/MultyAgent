@@ -1,81 +1,20 @@
-"""Точка входа графа для LangGraph API server.
+"""Точка входа графов для LangGraph API server.
 
-Сборка графа (включая запуск встроенного PostgreSQL через pgserver) —
-синхронная и блокирующая. API-сервер вызывает фабрику внутри event loop,
-где `langgraph dev` запрещает блокирующие вызовы, поэтому сборка выполняется
-в отдельном потоке, а фабрика лишь дожидается результата.
-
-Ноды графа — обычные синхронные функции, LangGraph сам исполняет их
-в threadpool, поэтому их обращения к БД и LLM под это ограничение не попадают.
+Сборка графов живёт в `src/graph/runtime.py`: `langgraph dev` импортирует
+этот файл отдельно для каждого графа из `langgraph.json`, а тяжёлая
+инициализация (PostgreSQL, LLM, эмбеддинги) должна произойти ровно один раз.
 """
 
 from __future__ import annotations
 
-import logging
-import threading
-from typing import Any
-
-from src import db_runtime
-from src.graph.main_graph import build_main_graph
-from src.llm import OpenAILLM
-from src.rag.embeddings import OpenAIEmbeddings
-
-logger = logging.getLogger(__name__)
-
-_ready = threading.Event()
-_result: dict[str, Any] = {}
-_error: dict[str, BaseException] = {}
-
-
-def _start_db_server():
-    try:
-        return db_runtime.start_server(cleanup_mode=None)
-    except Exception:
-        # Предыдущий процесс могли завершить жёстко: postmaster остался
-        # и держит каталог данных. Останавливаем его и пробуем ещё раз.
-        if db_runtime.stop_server():
-            return db_runtime.start_server(cleanup_mode=None)
-        raise
-
-
-def _prepare_database(server) -> None:
-    """Применяет новые миграции и права при старте backend.
-
-    Это делает обновление схемы (например, chat_history) бесшовным.
-    Ошибка здесь не должна мешать запуску графа: история может быть
-    недоступна, но остальные функции продолжат работать.
-    """
-    try:
-        db_runtime.ensure_database(server)
-        db_runtime.apply_migrations(server)
-        db_runtime.ensure_roles(server)
-    except Exception as exc:  # noqa: BLE001 - не ломаем старт графа
-        logger.warning("Не удалось подготовить схему БД: %s", exc)
-
-
-def _build_worker() -> None:
-    try:
-        server = _start_db_server()
-        _prepare_database(server)
-        llm = OpenAILLM()
-        embeddings = OpenAIEmbeddings()
-        _result["graph"] = build_main_graph(server, llm, embeddings=embeddings)
-    except BaseException as exc:  # noqa: BLE001 - пробрасываем в фабрику
-        _error["exc"] = exc
-    finally:
-        _ready.set()
-
-
-threading.Thread(
-    target=_build_worker,
-    name="audit-graph-builder",
-    daemon=True,
-).start()
+from src.graph.runtime import get_admin_graph, get_main_graph
 
 
 def graph(config=None):
-    """Фабрика графа для langgraph.json."""
-    _ready.wait()
-    if "exc" in _error:
-        raise _error["exc"]
-    return _result["graph"]
+    """Фабрика основного графа для langgraph.json."""
+    return get_main_graph()
+
+
+def admin_graph(config=None):
+    """Фабрика служебного графа управления чатами."""
+    return get_admin_graph()

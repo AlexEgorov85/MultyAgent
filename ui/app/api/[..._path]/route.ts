@@ -17,6 +17,9 @@ function isAllowedPath(path: string, method: string) {
       path === "assistants"
     );
   }
+  if (method === "DELETE") {
+    return new RegExp(`^threads/${thread}$`).test(path);
+  }
   if (method !== "POST") return false;
   return (
     path === "threads" ||
@@ -111,7 +114,7 @@ export const HEAD = () => new NextResponse(null, { status: 404 });
 export const POST = (req: NextRequest) => handleRequest(req, "POST");
 export const PUT = () => new NextResponse(null, { status: 404 });
 export const PATCH = () => new NextResponse(null, { status: 404 });
-export const DELETE = () => new NextResponse(null, { status: 404 });
+export const DELETE = (req: NextRequest) => handleRequest(req, "DELETE");
 export const OPTIONS = (req: NextRequest) =>
   isAllowedRequestContext(req)
     ? new NextResponse(null, { status: 204 })

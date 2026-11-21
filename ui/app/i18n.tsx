@@ -70,6 +70,9 @@ export type Dictionary = {
   closeChats: string;
   noChats: string;
   loadingChats: string;
+  renameChat: string;
+  renameChatHint: string;
+  renameChatPlaceholder: string;
   deleteChat: string;
   deleteChatConfirm: string;
   chatsStoredLocally: string;
@@ -229,6 +232,9 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     closeChats: "Закрыть список чатов",
     noChats: "Пока нет диалогов",
     loadingChats: "Загрузка…",
+    renameChat: "Переименовать чат",
+    renameChatHint: "Введите новое название",
+    renameChatPlaceholder: "Название чата",
     deleteChat: "Удалить диалог",
     deleteChatConfirm: "Удалить этот диалог?",
     chatsStoredLocally: "История хранится в браузере",
@@ -387,6 +393,9 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     closeChats: "Close chat list",
     noChats: "No conversations yet",
     loadingChats: "Loading…",
+    renameChat: "Rename chat",
+    renameChatHint: "Enter a new title",
+    renameChatPlaceholder: "Chat title",
     deleteChat: "Delete conversation",
     deleteChatConfirm: "Delete this conversation?",
     chatsStoredLocally: "History is stored in the browser",

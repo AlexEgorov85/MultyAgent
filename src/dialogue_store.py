@@ -91,6 +91,40 @@ def append_turn(
             )
 
 
+def rename_thread(
+    server,
+    conversation_id: str,
+    title: str,
+    *,
+    auditor_id: str = "",
+) -> None:
+    """Меняет название чата; создаёт строку для старых чатов без истории."""
+    conversation_id = str(conversation_id or "").strip()
+    title = " ".join(str(title or "").split())[:160]
+    if not conversation_id or not title:
+        return
+    with _connect(server) as conn:
+        conn.execute(
+            "INSERT INTO audit.chat_threads "
+            "(conversation_id, auditor_id, title) VALUES (%s, %s, %s) "
+            "ON CONFLICT (conversation_id) DO UPDATE SET "
+            "title = EXCLUDED.title, updated_at = now()",
+            (conversation_id, str(auditor_id or ""), title),
+        )
+
+
+def delete_thread(server, conversation_id: str) -> None:
+    """Удаляет чат и все его сообщения (FK ON DELETE CASCADE)."""
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return
+    with _connect(server) as conn:
+        conn.execute(
+            "DELETE FROM audit.chat_threads WHERE conversation_id = %s",
+            (conversation_id,),
+        )
+
+
 def load_history(
     server,
     conversation_id: str,

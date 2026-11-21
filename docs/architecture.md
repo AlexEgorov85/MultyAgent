@@ -97,5 +97,17 @@ audit.chat_messages  (conversation_id, turn_id, role, content, trace)
   присылает `client_history` как аварийный fallback.
 - Список чатов в UI пока хранится в `localStorage`. Для истории на другом
   устройстве нужен отдельный API `GET /chats` поверх `chat_threads`.
+
+## Управление чатами
+
+Служебный граф `dialogue_admin` (`src/graph/admin_graph.py`) выполняет
+`rename` и `delete` без LLM:
+
+- UI вызывает его через тот же LangGraph API (`assistant_id=dialogue_admin`);
+- `rename` обновляет `audit.chat_threads.title`;
+- `delete` удаляет `audit.chat_threads`, а `chat_messages` уходят каскадом;
+- дополнительно UI удаляет backend-тред через `DELETE /threads/{id}`.
+
+Переименование и удаление доступны из списка чатов: карандаш и корзина.
 - `pgserver` — встроенный сервер для учебного запуска, не production.
 - Данные синтетические, кроме методичек.

@@ -9,7 +9,8 @@
     "python-dotenv>=1.0"
   ],
   "graphs": {
-    "audit_assistant": "./src/graph/api.py:graph"
+    "audit_assistant": "./src/graph/api.py:graph",
+    "dialogue_admin": "./src/graph/api.py:admin_graph"
   },
   "env": ".env"
 }

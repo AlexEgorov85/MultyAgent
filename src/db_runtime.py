@@ -131,6 +131,13 @@ def stop_server(
 
 def data_uri(server, role: str = ADMIN_ROLE, database: str | None = None) -> str:
     """Возвращает актуальный DSN для роли на текущем порту сервера."""
+    # pgserver кэширует handle. После неудачного старта/перезапуска в кэше
+    # может остаться объект с _postmaster_info=None. Тогда get_uri() падает
+    # с AssertionError. Перечитываем postmaster.pid и восстанавливаем handle.
+    if getattr(server, "_postmaster_info", None) is None:
+        ensure = getattr(server, "ensure_postgres_running", None)
+        if ensure is not None:
+            ensure()
     uri = server.get_uri(database=database or config.DB_NAME)
     if role == ADMIN_ROLE:
         return uri
@@ -148,7 +155,12 @@ def connect(
     autocommit: bool = True,
     client_side: bool = False,
 ):
-    """Открывает соединение psycopg с указанной ролью."""
+    """Открывает соединение psycopg с указанной ролью.
+
+    Если pgserver-объект хранит устаревший порт (после перезапуска
+    PostgreSQL), первое подключение падает. Тогда перечитываем
+    postmaster.pid и повторяем один раз.
+    """
     import psycopg
 
     kwargs: dict = {"autocommit": autocommit}
@@ -156,7 +168,18 @@ def connect(
         from psycopg import ClientCursor
 
         kwargs["cursor_factory"] = ClientCursor
-    return psycopg.connect(data_uri(server, role, database), **kwargs)
+
+    def _open():
+        return psycopg.connect(data_uri(server, role, database), **kwargs)
+
+    try:
+        return _open()
+    except psycopg.OperationalError:
+        ensure = getattr(server, "ensure_postgres_running", None)
+        if ensure is None:
+            raise
+        ensure()
+        return _open()
 
 
 def ensure_database(server) -> bool:

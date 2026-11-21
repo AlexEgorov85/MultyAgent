@@ -10,6 +10,26 @@ import pytest
 from src import db_runtime
 
 
+def test_data_uri_recovers_missing_postmaster_info():
+    class FakeServer:
+        _postmaster_info = None
+
+        def ensure_postgres_running(self):
+            self.called = True
+            self._postmaster_info = True
+
+        def get_uri(self, database=None):
+            assert self._postmaster_info is not None
+            return f"postgresql://postgres:@127.0.0.1:1/{database or 'audit'}"
+
+    server = FakeServer()
+    db_runtime.data_uri(server)
+    assert server.called is True
+    assert "audit_app:@" in db_runtime.data_uri(
+        server, role=db_runtime.APP_ROLE
+    )
+
+
 def test_repeated_migrations_keep_data(server):
     with db_runtime.connect(server) as conn:
         conn.execute(
