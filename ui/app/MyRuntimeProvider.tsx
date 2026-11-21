@@ -10,7 +10,8 @@ import { Client } from "@langchain/langgraph-sdk";
 import { useMemo } from "react";
 
 const API_URL =
-  process.env.NEXT_PUBLIC_LANGGRAPH_API_URL ?? "http://127.0.0.1:2024";
+  process.env.NEXT_PUBLIC_LANGGRAPH_API_URL ??
+  (typeof window !== "undefined" ? "/api" : "http://127.0.0.1:2024");
 const ASSISTANT_ID =
   process.env.NEXT_PUBLIC_LANGGRAPH_ASSISTANT_ID ?? "audit_assistant";
 

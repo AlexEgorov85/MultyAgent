@@ -36,3 +36,6 @@ ui/.env.local
 ui/.next/
 .langgraph_api/
 reports/metrics.md
+
+# next dev regenerates this file
+ui/AGENTS.md

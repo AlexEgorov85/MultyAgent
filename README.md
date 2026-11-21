@@ -216,7 +216,21 @@ npm --prefix ui run dev
 
 Откройте `http://localhost:3000`. Интерфейс работает с тем же графом:
 маршрутизация, SQL, retrieval, отчёт, расследование, память и guardrails.
-Ключ LLM остаётся только на backend; frontend обращается к LangGraph API.
+Ключ LLM остаётся только на backend.
+
+Браузер обращается не напрямую к `:2024`, а к Next-прокси `/api/*`
+(`ui/app/api/[..._path]/route.ts`), поэтому CORS не нужен. Адрес API
+задаётся в `ui/.env.local`:
+
+```dotenv
+LANGGRAPH_API_URL=http://127.0.0.1:2024
+NEXT_PUBLIC_LANGGRAPH_ASSISTANT_ID=audit_assistant
+```
+
+> `.env` должен оставаться в ASCII. `langgraph dev` читает его через
+> `python-dotenv` с локальной кодировкой Windows (cp1251), и кириллические
+> комментарии вызывают `UnicodeDecodeError`. Поэтому комментарии
+> в `.env.example` — на английском.
 
 `init_db.py` поднимает встроенный PostgreSQL 16 через `pgserver`,
 применяет миграции и создаёт read-only роль `audit_ro`.
