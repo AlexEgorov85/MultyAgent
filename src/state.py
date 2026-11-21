@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+import operator
+from typing import Annotated, Any, TypedDict
 
 
 class AnalyticsState(TypedDict, total=False):
@@ -105,11 +106,17 @@ class InvestigationState(TypedDict, total=False):
 class MainState(TypedDict, total=False):
     """Состояние основного графа."""
 
-    messages: list[Any]
+    messages: Annotated[list[Any], operator.add]
     user_query: str
     auditor_id: str
     conversation_id: str
     route: str
+    route_reason: str
+    route_confidence: float
+    profile: dict[str, str]
+    memory_saved: bool
+    guardrail: dict[str, Any]
     final_answer: str
+    evidence: list[dict[str, Any]]
     acl_response: dict[str, Any]
     metrics: dict[str, Any]

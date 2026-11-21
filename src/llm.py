@@ -13,6 +13,7 @@ from .schemas import (
     ReportDraft,
     ReportReview,
     RetrievalAnswer,
+    RouteDecision,
     SQLPlan,
     ToolPlan,
 )
@@ -23,6 +24,8 @@ class LLMError(RuntimeError):
 
 
 class LLMClient(Protocol):
+    def route(self, *, question: str, profile_text: str) -> "RouteDecision": ...
+
     def plan_sql(
         self, *, question: str, schema_text: str, templates: list[dict[str, Any]]
     ) -> SQLPlan: ...
@@ -166,11 +169,26 @@ class OpenAILLM:
                     f"Structured output не получен: {first_error}; {second_error}"
                 ) from second_error
 
+    def route(self, *, question: str, profile_text: str) -> RouteDecision:
+        return self._parse(
+            system=(
+                "Ты — маршрутизатор ассистента внутреннего аудитора. "
+                "Выбери ровно один маршрут: analytics, retrieval, report, "
+                "investigation, out_of_domain, unsafe."
+            ),
+            user=(
+                f"Вопрос: {question}\nПрофиль аудитора: {profile_text or 'нет'}\n\n"
+                "Верни RouteDecision: route, reason, confidence."
+            ),
+            schema=RouteDecision,
+        )
+
     def plan_sql(
         self, *, question: str, schema_text: str, templates: list[dict[str, Any]]
     ) -> SQLPlan:
         template_lines = "\n".join(
-            f"- {item['template_key']}: {item['title']} (параметры: {item['parameters']})"
+            f"- {item['template_key']}: {item['title']} "
+            f"(параметры: {item['parameters']})"
             for item in templates
         )
         return self._parse(
