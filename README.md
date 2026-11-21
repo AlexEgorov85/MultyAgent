@@ -18,8 +18,10 @@
 | QA-проверки данных | ✅ `scripts/qa_checks.py`, включая расписание, дубли, шаблоны |
 | SQL safety | ✅ `src/tools/sql_guard.py`, `src/tools/db.py`, 40 тестов |
 | Agent protocol | ✅ `src/acl.py`: FIPA-ACL, корреляция, JSONL-журнал |
-| Analytics-агент | ✅ LangGraph: NL→SQL, шаблоны, drill-down, multi-tool, 57 тестов |
-| Остальные агенты | ⏳ retrieval, report, investigation |
+| Analytics-агент | ✅ LangGraph: NL→SQL, шаблоны, drill-down, multi-tool |
+| Retrieval-агент | ✅ индекс методичек/пунктов/актов, гибридный поиск, цитаты, критик |
+| Тесты | ✅ 64 passed |
+| Остальные агенты | ⏳ report, investigation |
 | Чат-интерфейс (assistant-ui) | ⏳ следующий этап |
 
 ## Спецификации (OpenSpec)
@@ -74,6 +76,11 @@ SQL и код скриптов — латиницей и не выдаются �
 
 ## Быстрый старт
 
+Провайдер LLM — **NeuralDeep**: OpenAI-совместимый endpoint
+`https://api.neuraldeep.ru/v1`. Чат — `qwen3.6-35b-a3b` (tools, reasoning,
+256k контекст), эмбеддинги — `frida` (RU-first, 1536 измерений).
+Ключ `sk-...` добавляется в `.env` как `OPENAI_API_KEY`.
+
 Нужен Python 3.12 (pgserver не поддерживает 3.13+). Если 3.12 нет:
 
 ```powershell
@@ -88,6 +95,7 @@ python -m uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 ```powershell
 .venv\Scripts\python.exe scripts\generate_data.py --deviations
 .venv\Scripts\python.exe scripts\init_db.py --reset-db --yes --seed
+.venv\Scripts\python.exe scripts\build_index.py --hash
 .venv\Scripts\python.exe scripts\qa_checks.py
 .venv\Scripts\python.exe -m pytest -q
 ```
@@ -108,6 +116,12 @@ python -m uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 Copy-Item .env.example .env
 # вписать ключ в .env
 .venv\Scripts\python.exe scripts\run_analytics.py --question "Сколько завершённых проверок по ипотеке в 2026 году?"
+```
+
+Запустить Retrieval-агента:
+
+```powershell
+.venv\Scripts\python.exe scripts\run_retrieval.py --question "Что сказано про просроченную оценку залога?"
 ```
 
 `init_db.py` поднимает встроенный PostgreSQL 16 через `pgserver`,
@@ -132,6 +146,8 @@ scripts/qa_checks.py      проверки качества данных
 scripts/demo_queries.py   демонстрационные read-only запросы
 scripts/run_db.py         живой PostgreSQL для ручной проверки
 scripts/run_analytics.py  CLI Analytics-агента
+scripts/run_retrieval.py  CLI Retrieval-агента
+scripts/build_index.py    построение RAG-индекса
 data/knowledge/           методические документы для RAG
 data/seed/                сгенерированные CSV (не коммитятся)
 data/pg/                  кластер PostgreSQL (не коммитится)

@@ -31,6 +31,30 @@ class AnalyticsState(TypedDict, total=False):
     metrics: dict[str, Any]
 
 
+class RetrievalState(TypedDict, total=False):
+    """Состояние Retrieval-подагента."""
+
+    acl_request: dict[str, Any]
+    request: dict[str, Any]
+    question: str
+    auditor_id: str
+    conversation_id: str
+    status: str
+    error: str
+    chunks: list[dict[str, Any]]
+    answer: dict[str, Any]
+    critique: dict[str, Any]
+    citations: list[str]
+    citation_issues: list[str]
+    critic_issues: list[str]
+    iterations: int
+    warnings: list[str]
+    evidence: list[dict[str, Any]]
+    search_mode: str
+    acl_response: dict[str, Any]
+    metrics: dict[str, Any]
+
+
 class MainState(TypedDict, total=False):
     """Состояние основного графа."""
 

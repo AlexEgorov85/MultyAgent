@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any, Protocol
 
-from .schemas import AnswerDraft, SQLPlan, ToolPlan
+from .schemas import AnswerDraft, Critique, RetrievalAnswer, SQLPlan, ToolPlan
 
 
 class LLMError(RuntimeError):
@@ -32,6 +32,30 @@ class LLMClient(Protocol):
         columns: list[str],
         rows: list[dict[str, Any]],
     ) -> str: ...
+
+    def answer_from_chunks(
+        self,
+        *,
+        question: str,
+        chunks: list[dict[str, Any]],
+    ) -> "RetrievalAnswer": ...
+
+    def critique_answer(
+        self,
+        *,
+        question: str,
+        answer: "RetrievalAnswer",
+        chunks: list[dict[str, Any]],
+    ) -> "Critique": ...
+
+    def rewrite_answer(
+        self,
+        *,
+        question: str,
+        answer: "RetrievalAnswer",
+        issues: list[str],
+        chunks: list[dict[str, Any]],
+    ) -> "RetrievalAnswer": ...
 
 
 class OpenAILLM:
@@ -168,3 +192,75 @@ class OpenAILLM:
         except Exception:
             pass
         return f"Найдено строк: {len(rows)}."
+
+    @staticmethod
+    def _chunks_text(chunks: list[dict[str, Any]]) -> str:
+        lines = []
+        for index, chunk in enumerate(chunks, start=1):
+            lines.append(
+                f"[{index}] source_type={chunk['source_type']} "
+                f"source_id={chunk['source_id']} title={chunk['title']}\n"
+                f"{chunk['content']}"
+            )
+        return "\n\n".join(lines)
+
+    def answer_from_chunks(
+        self,
+        *,
+        question: str,
+        chunks: list[dict[str, Any]],
+    ) -> RetrievalAnswer:
+        return self._parse(
+            system=(
+                "Ты — ассистент внутреннего аудитора. Отвечай только по найденным "
+                "фрагментам. Каждое утверждение подкрепи source_id из фрагмента. "
+                "Если подтверждения нет — не утверждай это. Не используй общие знания."
+            ),
+            user=(
+                f"Вопрос: {question}\n\nФрагменты:\n{self._chunks_text(chunks)}\n\n"
+                "Верни RetrievalAnswer: text, citations (список source_id)."
+            ),
+            schema=RetrievalAnswer,
+        )
+
+    def critique_answer(
+        self,
+        *,
+        question: str,
+        answer: RetrievalAnswer,
+        chunks: list[dict[str, Any]],
+    ) -> Critique:
+        return self._parse(
+            system=(
+                "Ты — критик RAG-ответа. Проверь: релевантность вопросу, "
+                "подтверждённость каждого утверждения, корректность citations. "
+                "Если утверждение не подтверждено — verdict=rewrite."
+            ),
+            user=(
+                f"Вопрос: {question}\nОтвет: {answer.model_dump_json()}\n\n"
+                f"Фрагменты:\n{self._chunks_text(chunks)}\n\n"
+                "Верни Critique: verdict, issues, suggestions, grounded, citations_ok."
+            ),
+            schema=Critique,
+        )
+
+    def rewrite_answer(
+        self,
+        *,
+        question: str,
+        answer: RetrievalAnswer,
+        issues: list[str],
+        chunks: list[dict[str, Any]],
+    ) -> RetrievalAnswer:
+        return self._parse(
+            system=(
+                "Ты исправляешь RAG-ответ по замечаниям критика. "
+                "Не добавляй факты, которых нет во фрагментах."
+            ),
+            user=(
+                f"Вопрос: {question}\nЧерновик: {answer.model_dump_json()}\n"
+                f"Замечания: {issues}\n\nФрагменты:\n{self._chunks_text(chunks)}\n\n"
+                "Верни исправленный RetrievalAnswer."
+            ),
+            schema=RetrievalAnswer,
+        )

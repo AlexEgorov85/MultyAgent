@@ -55,6 +55,13 @@ class AnswerDraft(BaseModel):
     text: str = Field(min_length=1)
 
 
+class RetrievalAnswer(BaseModel):
+    """Ответ RAG-агента со ссылками на источники."""
+
+    text: str = Field(min_length=1)
+    citations: list[str] = Field(default_factory=list)
+
+
 class Critique(BaseModel):
     """Результат критика (используется в retrieval/report)."""
 
