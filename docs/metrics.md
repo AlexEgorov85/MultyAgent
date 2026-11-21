@@ -6,10 +6,14 @@
 |---|---|
 | `latency_total_sec` | время `graph.invoke` |
 | `latency_p50/p95` | перцентили по тест-набору |
-| `llm_calls` | счётчик в ответе/логах |
+| `llm_calls` / `llm_attempts` / `llm_retries` / `llm_errors` | вызовы, попытки, 429-повторы и финальные ошибки LLM |
 | `tool_calls` | счётчик инструментов |
+| `input_tokens` / `output_tokens` / `cached_tokens` | токены LLM |
+| `llm_latency_sec` / `llm_failed_latency_sec` / `tool_latency_sec` | время LLM, неудачных попыток и инструментов |
+| `overhead_sec` | время графа вне LLM и tools |
 | `sql_retries` | число исправлений SQL |
 | `acl_rounds` | раунды расследования |
+| `trace_step_count` | число шагов агента |
 | `cost_usd` | токены × учебная цена |
 
 ## Качество
@@ -17,9 +21,13 @@
 | Метрика | Проверка |
 |---|---|
 | `route_accuracy` | совпадение маршрута |
-| `success_rate` | маршрут + обязательные строки + evidence |
+| `answer_success_rate` | качество ответа без процессных ограничений |
+| `process_success_rate` | tools, шаги, лимиты вызовов/токенов/времени |
+| `success_rate` | `answer_success` и `process_success` |
 | `sql_validity_rate` | SQL проходит `sql_guard` |
 | `evidence_coverage` | есть evidence для фактических ответов |
+| `citation_coverage` | есть цитаты для retrieval |
+| `steps_ok` | обязательные шаги `trace` присутствуют |
 | `investigation_completeness` | есть и SQL-, и текстовые доказательства |
 | `groundedness` | LLM-judge (внешняя оценка) |
 
@@ -45,13 +53,15 @@
 
 | Уровень | Кейсов | Реплик | Что проверяет |
 |---|---:|---:|---|
-| `simple` | 8 | 8 | один факт, шаблон, drill-down, retrieval, отказы |
-| `complex` | 5 | 5 | multi-tool, отчёт, investigation, динамика |
-| `chain` | 5 | 15 | перенос года, темы и кода проверки между репликами |
+| `simple` | 13 | 13 | один факт, один фильтр, retrieval, отказы |
+| `medium` | 18 | 18 | join, группировки, готовые шаблоны, метаданные |
+| `complex` | 10 | 10 | multi-tool, отчёт, investigation, cross-table |
+| `chain` | 8 | 24 | перенос года, темы, типа находки и кода проверки |
 
 ```powershell
 .venv\Scripts\python.exe scripts\benchmark.py --dry-run
 .venv\Scripts\python.exe scripts\benchmark.py --tier simple
+.venv\Scripts\python.exe scripts\benchmark.py --tier medium
 .venv\Scripts\python.exe scripts\benchmark.py --tier chain
 ```
 
@@ -62,12 +72,32 @@
 
 | Метрика | Проверка |
 |---|---|
+| `answer_success_rate` | качество ответа |
+| `process_success_rate` | качество процесса: tools, шаги, лимиты |
 | `case_success_rate` | успешны все реплики кейса |
 | `context_retention_rate` | сущность сохранилась в `resolved_query` или ответе |
 | `context_rewrite_rate` | сущность явно попала в `resolved_query` |
 | `context_answer_rate` | сущность видна в ответе |
 | `chain_context_retention_rate` | retention только по цепочкам |
 | `tool_accuracy` / `strategy_accuracy` | ожидаемые инструменты и стратегия Analytics |
+| `citation_coverage` | цитаты retrieval |
+| `llm_calls_total` / `tool_calls_total` | вызовы LLM и инструментов |
+| `input_tokens_total` / `output_tokens_total` | генерация токенов |
+| `latency_total_sec` / `llm_latency_total_sec` / `tool_latency_total_sec` | время выполнения и его разбивка |
+| `embedding_calls_total` | вызовы эмбеддингов для retrieval |
+| `tokens_per_success` / `cost_per_success_usd` | цена успешного ответа |
+
+Телеметрия (`src/telemetry.py`) собирает по каждому ходу:
+
+- вызовы LLM: модель, schema, input/output/cached tokens, latency, ошибки;
+- вызовы инструментов: имя, статус, latency;
+- эмбеддинги;
+- версии промптов `id@vN:hash`;
+- шаги `trace` и снимок состояния агента.
+
+В отчётах сохраняются `state` и `fingerprint`; в CSV — краткие поля
+`llm_calls`, `tool_calls`, токены, `llm_latency_sec`, `tool_latency_sec`,
+`overhead_sec`, `trace_steps`, `acl_*`, `prompts`.
 
 Подробное описание — `docs/benchmark.md`.
 
@@ -78,9 +108,12 @@
 поэтому оценку лучше запускать после сброса окна (`/v1/limits`).
 `evaluate.py` поддерживает `--limit` и `--only`, чтобы прогнать подмножество.
 
-## Фактический прогон
+## Исторический прогон `evaluate.py`
 
-26 кейсов, seed 42:
+> Таблица — результат прошлого прогона, а не текущей ревизии. Отчёты
+> `reports/*` не коммитятся; перед сдачей их нужно сгенерировать заново.
+
+26 кейсов, seed 42, модель `qwen3.6-35b-a3b-noreason`:
 
 | Метрика | Значение |
 |---|---:|
@@ -93,8 +126,29 @@
 | `latency_p95_sec` | 72.124 |
 
 Один кейс (`an_08`) упал из-за обрезки JSON плана SQL; после увеличения
-лимита токенов он проходит отдельно. Повторный полный прогон ограничен
-free-тарифом (400 запросов / 3 часа).
+лимита токенов он проходил отдельно. Повторный полный прогон ограничен
+free-тарифом (400 запросов / 3 часа) и на текущей ревизии не выполнялся.
+
+## Текущее состояние отчётов
+
+Проверено без LLM на текущей ревизии:
+
+- `scripts/evaluate.py --dry-run` — структура набора `data/test_cases.jsonl`
+  (26 кейсов) валидна;
+- `scripts/benchmark.py --dry-run` — структура `data/benchmark_cases.jsonl`
+  (49 кейсов / 65 реплик) валидна, покрытие таблиц рассчитано.
+
+Живой прогон `evaluate.py` или `benchmark.py` на текущей ревизии **не
+выполнялся**. Если в `reports/` лежит частичный отчёт (например, один кейс
+с `success_rate = 0`), он не является оценкой системы: это артефакт
+прерванного запуска. Не публикуйте его как результат.
+
+## Воспроизводимость
+
+- temperature 0;
+- фиксированный seed данных 42;
+- одинаковый набор кейсов;
+- фиксированная дата среза `2026-11-21`.
 
 ## Воспроизводимость
 

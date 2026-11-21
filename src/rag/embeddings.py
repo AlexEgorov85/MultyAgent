@@ -6,6 +6,8 @@ import hashlib
 import re
 from typing import Protocol
 
+from .. import telemetry
+
 TOKEN_RE = re.compile(r"[0-9a-zA-Zа-яА-ЯёЁ]+")
 
 
@@ -29,6 +31,7 @@ class OpenAIEmbeddings:
         self.client = client
         self.model = model or os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 
+    @telemetry.timed_embedding("embed_query")
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
@@ -42,6 +45,7 @@ class HashEmbeddings:
     def __init__(self, dim: int = 1536) -> None:
         self.dim = dim
 
+    @telemetry.timed_embedding("embed_hash")
     def embed(self, texts: list[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
         for text in texts:

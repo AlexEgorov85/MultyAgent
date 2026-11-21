@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .. import telemetry
+
 from .. import db_runtime
 
 RRF_K = 60
@@ -64,6 +66,7 @@ def _vector(server, query: str, embeddings, limit: int) -> list[dict[str, Any]]:
     ]
 
 
+@telemetry.timed_tool("search_act_items")
 def search(
     server,
     query: str,

@@ -11,13 +11,14 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src import db_runtime  # noqa: E402
+from src import config, db_runtime, telemetry  # noqa: E402
 from src.benchmark import (  # noqa: E402
     TIERS,
     evaluate_turn,
@@ -25,11 +26,13 @@ from src.benchmark import (  # noqa: E402
     load_cases,
     select_cases,
     summarize,
+    summarize_table_coverage,
     validate_cases,
     write_reports,
 )
 from src.graph.main_graph import build_main_graph  # noqa: E402
 from src.llm import OpenAILLM  # noqa: E402
+from src.prompts import prompt_versions  # noqa: E402
 from src.rag.embeddings import OpenAIEmbeddings  # noqa: E402
 
 CASES_PATH = ROOT / "data" / "benchmark_cases.jsonl"
@@ -48,6 +51,8 @@ def _print_row(row: dict[str, Any]) -> None:
     print(
         f"[{status}] {row['case_id']}.{row['step']}: "
         f"route={row.get('route') or 'n/a'} "
+        f"llm={row.get('llm_calls', 0)} tools={row.get('tool_calls', 0)} "
+        f"tokens={row.get('total_tokens', 0)} "
         f"latency={row.get('latency_sec', 0)}s{context}"
     )
     if not row.get("success"):
@@ -62,6 +67,17 @@ def _print_row(row: dict[str, Any]) -> None:
             ("include_ok", "must_include"),
             ("exclude_ok", "must_not_include"),
             ("sql_ok", "sql"),
+            ("steps_ok", "steps"),
+            ("llm_calls_ok", "max_llm_calls"),
+            ("llm_errors_ok", "max_llm_errors"),
+            ("tool_calls_ok", "max_tool_calls"),
+            ("tokens_ok", "max_tokens"),
+            ("cost_ok", "max_cost"),
+            ("latency_ok", "max_latency"),
+            ("forbidden_tools_ok", "forbidden_tools"),
+            ("sql_retries_ok", "max_sql_retries"),
+            ("acl_rounds_ok", "max_acl_rounds"),
+            ("max_steps_ok", "max_steps"),
         ):
             if row.get(key) is False:
                 details.append(label)
@@ -79,16 +95,22 @@ def run_case(
     case: dict[str, Any],
     *,
     verbose: bool = True,
+    run_id: str = "",
 ) -> list[dict[str, Any]]:
-    """Прогоняет один кейс; цепочка идёт в одной нити."""
+    """Прогоняет один кейс; цепочка идёт в одной нити.
+
+    ``run_id`` делает thread_id уникальным для запуска: история диалога
+    хранится в PostgreSQL и не должна протекать из предыдущего прогона.
+    """
     case_id = str(case["id"])
-    thread_id = f"bench-{case_id}"
+    prefix = f"bench-{run_id}-{case_id}" if run_id else f"bench-{case_id}"
+    thread_id = prefix
     client_history: list[dict[str, str]] = []
     rows: list[dict[str, Any]] = []
 
     for step, turn in enumerate(case["turns"], start=1):
         if turn.get("reset_thread") and step > 1:
-            thread_id = f"bench-{case_id}-r{step}"
+            thread_id = f"{prefix}-r{step}"
 
         payload: dict[str, Any] = {
             "messages": [{"role": "user", "content": turn["query"]}],
@@ -98,6 +120,7 @@ def run_case(
         if turn.get("reset_thread"):
             payload["client_history"] = list(client_history)
 
+        telemetry.start_run()
         started = time.perf_counter()
         try:
             result = graph.invoke(
@@ -107,6 +130,8 @@ def run_case(
         except Exception as exc:  # noqa: BLE001 - один кейс не должен рвать прогон
             latency = time.perf_counter() - started
             row = failed_turn_row(case, turn, step, exc, latency)
+            row["process"] = telemetry.snapshot()
+            telemetry.stop_run()
             rows.append(row)
             if verbose:
                 _print_row(row)
@@ -115,7 +140,9 @@ def run_case(
             continue
 
         latency = time.perf_counter() - started
-        row = evaluate_turn(case, turn, result, latency, step)
+        process = telemetry.snapshot()
+        telemetry.stop_run()
+        row = evaluate_turn(case, turn, result, latency, step, process=process)
         rows.append(row)
         if verbose:
             _print_row(row)
@@ -127,6 +154,16 @@ def run_case(
     return rows
 
 
+def _server_alive(server) -> bool:
+    """Проверяет, что PostgreSQL отвечает, иначе прогон бессмысленно продолжать."""
+    try:
+        with db_runtime.connect(server) as conn:
+            conn.execute("SELECT 1").fetchone()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _dry_run(cases: list[dict[str, Any]]) -> None:
     turns = sum(len(case["turns"]) for case in cases)
     print(f"[ok] кейсов: {len(cases)}, реплик: {turns}")
@@ -134,6 +171,10 @@ def _dry_run(cases: list[dict[str, Any]]) -> None:
         tier_cases = [case for case in cases if case.get("tier") == tier]
         tier_turns = sum(len(case["turns"]) for case in tier_cases)
         print(f"  {tier}: {len(tier_cases)} кейсов / {tier_turns} реплик")
+    coverage = summarize_table_coverage(cases)
+    print("\nПокрытие таблиц:")
+    for item in coverage:
+        print(f"  {item['table']}: {item['cases']} кейсов / {item['turns']} реплик")
     print("\nСостав:")
     for case in cases:
         print(
@@ -191,10 +232,25 @@ def main() -> int:
 
     server = db_runtime.start_server()
     rows: list[dict[str, Any]] = []
+    run_id = f"{int(time.time())}-{uuid.uuid4().hex[:6]}"
     try:
         graph = build_main_graph(server, llm, embeddings=embeddings)
         for case in cases:
-            rows.extend(run_case(graph, case, verbose=not args.quiet))
+            if not _server_alive(server):
+                print(
+                    "[error] PostgreSQL перестал отвечать: прогон остановлен, "
+                    "частичные результаты сохранены.",
+                    file=sys.stderr,
+                )
+                break
+            rows.extend(
+                run_case(
+                    graph,
+                    case,
+                    verbose=not args.quiet,
+                    run_id=run_id,
+                )
+            )
     finally:
         server.cleanup()
 
@@ -207,7 +263,21 @@ def main() -> int:
             print(f"  {key}: {value}")
 
     if not args.no_write:
-        paths = write_reports(rows, summary, cases, args.report_dir)
+        environment = {
+            "run_id": run_id,
+            "model": getattr(llm, "model", ""),
+            "embedding_model": getattr(embeddings, "model", ""),
+            "seed": 42,
+            "as_of": config.DEFAULT_AS_OF_DATE.isoformat(),
+            "prompt_versions": prompt_versions(),
+        }
+        paths = write_reports(
+            rows,
+            summary,
+            cases,
+            args.report_dir,
+            environment=environment,
+        )
         print(
             "\nОтчёты: "
             f"{paths['csv']}, {paths['json']}, {paths['md']}"

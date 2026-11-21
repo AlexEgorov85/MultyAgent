@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from .. import config, db_runtime
+from .. import config, db_runtime, telemetry
 from .sql_guard import validate_readonly_sql
 
 SCHEMA_TEXT = """
@@ -20,13 +20,42 @@ audit.act_items(item_id, act_id, item_number, item_type, test_type,
   responsible_unit, closed_at, is_repeat, repeat_of_item_id)
 audit.scripts(script_id, item_id, name, language, code, population_size,
   rows_found, result_summary)
+audit.script_runs(run_id, script_id, run_at, status, rows_found, duration_ms,
+  result_sample, error_message)
+audit.deviations(deviation_id, item_id, script_id, entity_type, entity_id,
+  detected_at, metric_name, metric_value, threshold_value, severity,
+  description, payload)
 audit.script_templates(template_id, template_key, title, description,
   sql_template, parameters, max_rows_default)
 audit.auditors(auditor_id, full_name, unit, position, specializations)
+audit.auditor_memory(auditor_id, memory_key, memory_value, updated_at)
+audit.knowledge_chunks(chunk_id, source_type, source_id, title, content)
+audit.dataset_metadata(metadata_id, as_of_date, seed, checksum)
 
-Views: audit.v_pocket_summary, audit.v_audit_summary, audit.v_act_item_details,
-audit.v_open_items, audit.v_repeat_items, audit.v_script_usage,
-audit.v_theme_year_dynamics, audit.v_items_without_scripts.
+Views with columns:
+- audit.v_pocket_summary(pocket_id, pocket_year, theme_code, title, risk_level,
+  planned_audit_count, audit_count, act_count, item_count, deviation_count,
+  problem_count, critical_count, open_count, overdue_count)
+- audit.v_audit_summary(audit_id, audit_code, title, status, audit_type,
+  start_date, end_date, risk_level, pocket_id, pocket_year, theme_code,
+  pocket_title, lead_auditor, act_id, act_number, act_status, act_date,
+  item_count, deviation_count, problem_count, open_count)
+- audit.v_act_item_details(item_id, item_number, item_type, test_type, title,
+  test_description, condition, cause, effect, recommendation, risk_level,
+  status, deadline, closed_at, is_repeat, repeat_of_item_id, act_id,
+  act_number, act_date, audit_id, audit_code, audit_title, pocket_id,
+  pocket_year, theme_code, script_count, rows_found_total, sql_script_count)
+- audit.v_open_items(item_id, item_number, title, item_type, risk_level, status,
+  deadline, act_number, audit_code, theme_code, is_overdue, days_overdue)
+- audit.v_repeat_items(item_id, item_number, title, risk_level, status,
+  repeat_of_item_id, previous_title, previous_number, act_number,
+  previous_act_number, theme_code, pocket_year)
+- audit.v_script_usage(language, script_count, scripts_with_findings,
+  rows_found_total, rows_found_avg, execution_ms_avg)
+- audit.v_theme_year_dynamics(theme_code, pocket_year, item_count,
+  deviation_count, problem_count, critical_count, repeat_count, closed_count)
+- audit.v_items_without_scripts(item_id, item_number, title, item_type,
+  test_type, risk_level, status, act_number, audit_code)
 
 Enum values:
 - theme_code: ипотека, потребкредитование, платежи, карты, вклады
@@ -36,6 +65,9 @@ Enum values:
 - item_type: отклонение, проблема
 - item_status: открыт, в работе, закрыт
 - test_type: непрерывный, выборочный, аналитический, повторное выполнение, опрос
+- script_run_status: успешно, частично, ошибка
+- script_language: SQL, Python, R, Excel, Другое
+- entity_type отклонения: договор, транзакция, карта, счёт
 
 Domain terms:
 - «карман» — это audit.audit_pockets (год + тема). «По годам и карманам» —
@@ -43,6 +75,12 @@ Domain terms:
   если тема не названа явно.
 - «закрытая проверка» — audit.audits.status = 'завершена'.
 - «закрытый пункт» — audit.act_items.status = 'закрыт'.
+- «просроченный пункт» — status <> 'закрыт' и deadline < CURRENT_DATE.
+- «пункт без скрипта/доказательства» — нет строки в audit.scripts по item_id.
+- «повторная находка» — audit.act_items.is_repeat = true.
+- «черновик», «на согласовании», «утверждён» — статусы акта.
+- «скрипт с ошибкой» — audit.script_runs.status = 'ошибка'.
+- «критическое отклонение» — audit.deviations.severity = 'критический'.
 """.strip()
 
 
@@ -63,6 +101,7 @@ def _select(server, sql: str, params: Any = None) -> list[dict[str, Any]]:
         return _rows(conn.execute(sql, params))
 
 
+@telemetry.timed_tool("get_pocket")
 def get_pocket(server, pocket_id: str) -> dict[str, Any] | None:
     rows = _select(
         server,
@@ -74,6 +113,7 @@ def get_pocket(server, pocket_id: str) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
+@telemetry.timed_tool("get_audit")
 def get_audit(server, audit_code: str) -> dict[str, Any] | None:
     rows = _select(
         server,
@@ -92,6 +132,7 @@ def get_audit(server, audit_code: str) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
+@telemetry.timed_tool("get_act")
 def get_act(server, audit_code: str) -> dict[str, Any] | None:
     rows = _select(
         server,
@@ -105,6 +146,7 @@ def get_act(server, audit_code: str) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
+@telemetry.timed_tool("get_act_items")
 def get_act_items(
     server,
     audit_code: str,
@@ -137,6 +179,7 @@ def get_act_items(
     )
 
 
+@telemetry.timed_tool("search_acts")
 def search_acts(server, query: str, limit: int = 5) -> list[dict[str, Any]]:
     return _select(
         server,
@@ -184,6 +227,7 @@ def _execute(
     }
 
 
+@telemetry.timed_tool("run_readonly_sql")
 def run_readonly_sql(
     server,
     sql: str,
@@ -195,6 +239,7 @@ def run_readonly_sql(
     return _execute(server, sql, params, cap)
 
 
+@telemetry.timed_tool("list_script_templates")
 def list_script_templates(server) -> list[dict[str, Any]]:
     """Возвращает активные шаблоны без выполнения."""
     with db_runtime.connect(server) as conn:
@@ -214,6 +259,7 @@ def list_script_templates(server) -> list[dict[str, Any]]:
     ]
 
 
+@telemetry.timed_tool("run_script_template")
 def run_script_template(
     server,
     template_key: str,

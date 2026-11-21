@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from .. import telemetry
+
 PROMPTS_DIR = Path(__file__).resolve().parent
 
 _FRONT_MATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -95,12 +97,16 @@ def _load(name: str) -> Prompt:
 
 def load_prompt_meta(name: str) -> Prompt:
     """Возвращает промпт вместе с версией и хэшем."""
-    return _load(name)
+    prompt = _load(name)
+    telemetry.record_prompt(prompt.name, prompt.version, prompt.hash)
+    return prompt
 
 
 def load_prompt(name: str) -> str:
     """Возвращает только текст промпта без front matter."""
-    return _load(name).text
+    prompt = _load(name)
+    telemetry.record_prompt(prompt.name, prompt.version, prompt.hash)
+    return prompt.text
 
 
 def prompt_version(name: str) -> int:
@@ -139,6 +145,8 @@ def format_guide(kind: str) -> str:
     rule = _format_rule(kind)
     if not rule:
         return f"{common} {load_prompt('format/default')}"
+    prompt = _load(f"format/{kind}")
+    telemetry.record_prompt(prompt.name, prompt.version, prompt.hash)
     return f"{common}\n\n{rule}"
 
 

@@ -8,6 +8,7 @@ import time
 from typing import Any, Protocol
 
 from .prompts import format_guide, load_prompt
+from . import telemetry
 from .schemas import (
     AnswerDraft,
     Critique,
@@ -199,18 +200,38 @@ class OpenAILLM:
         self.client = client
         self.model = model or os.getenv("LLM_MODEL", "gpt-5-mini")
 
-    def _request(self, **kwargs):
+    def _request(self, *, schema_name: str = "", **kwargs):
         """Вызов чата с ожиданием при лимите 429 (3 запроса/мин у провайдера)."""
         last_error: Exception | None = None
         for attempt in range(3):
+            started = time.perf_counter()
             try:
-                return self.client.chat.completions.create(**kwargs)
+                response = self.client.chat.completions.create(**kwargs)
+                latency = time.perf_counter() - started
+                usage = getattr(response, "usage", None)
+                details = getattr(usage, "prompt_tokens_details", None)
+                telemetry.record_llm(
+                    model=self.model,
+                    input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                    output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+                    cached_tokens=int(getattr(details, "cached_tokens", 0) or 0),
+                    latency_sec=latency,
+                    schema=schema_name,
+                )
+                return response
             except Exception as exc:
                 last_error = exc
                 text = str(exc)
                 if "429" in text and attempt < 2:
+                    telemetry.record_llm_retry()
                     time.sleep(25)
                     continue
+                telemetry.record_llm_error(
+                    model=self.model,
+                    latency_sec=time.perf_counter() - started,
+                    schema=schema_name,
+                    error=str(exc),
+                )
                 raise
         raise last_error  # pragma: no cover
 
@@ -222,6 +243,7 @@ class OpenAILLM:
         schema_name = getattr(schema, "__name__", "Response")
         try:
             response = self._request(
+                schema_name=schema_name,
                 model=self.model,
                 messages=messages,
                 response_format={
@@ -240,6 +262,7 @@ class OpenAILLM:
         except Exception as first_error:
             try:
                 response = self._request(
+                    schema_name=f"{schema_name}.fallback",
                     model=self.model,
                     messages=messages,
                     response_format={"type": "json_object"},
@@ -379,7 +402,8 @@ class OpenAILLM:
     ) -> str:
         preview = rows[:20]
         try:
-            response = self.client.chat.completions.create(
+            response = self._request(
+                schema_name="analytics_summarize",
                 model=self.model,
                 messages=[
                     {
@@ -483,6 +507,7 @@ class OpenAILLM:
 
     def _plain(self, *, system: str, user: str, max_tokens: int = 2000) -> str:
         response = self._request(
+            schema_name="plain",
             model=self.model,
             messages=[
                 {"role": "system", "content": system},
@@ -646,6 +671,7 @@ class OpenAILLM:
             "evidence": (retrieval.get("evidence") or [])[:10],
         }
         response = self._request(
+            schema_name="investigation_synthesize",
             model=self.model,
             messages=[
                 {
