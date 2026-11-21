@@ -175,7 +175,7 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     ],
     placeholder: "Спросите про проверки, отклонения или акт…",
     send: "Отправить",
-    thinking: "Ассистент готовит ответ…",
+    thinking: "Ассистент готовит ответ",
     disclaimer:
       "Ответы основаны только на данных аудиторской базы. Проверяйте критичные выводы по первоисточникам.",
     errorTitle: "Не удалось получить ответ",
@@ -306,7 +306,7 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     ],
     placeholder: "Ask about audits, deviations or an act…",
     send: "Send",
-    thinking: "The assistant is preparing an answer…",
+    thinking: "The assistant is preparing an answer",
     disclaimer:
       "Answers are based only on the audit database. Verify critical conclusions against the source documents.",
     errorTitle: "Could not get an answer",

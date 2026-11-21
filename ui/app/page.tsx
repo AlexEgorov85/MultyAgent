@@ -81,6 +81,16 @@ function UserMessage() {
 function AssistantMessage() {
   const { t } = useI18n();
   const { settings } = useSettings();
+  const emptyRunning = useAuiState(
+    (state) =>
+      state.message.role === "assistant" &&
+      state.message.status?.type === "running" &&
+      !state.message.parts.some(
+        (part) => part.type === "text" && part.text.trim().length > 0,
+      ),
+  );
+
+  if (emptyRunning) return null;
 
   return (
     <MessagePrimitive.Root className="mr-auto max-w-[92%]">
@@ -154,8 +164,12 @@ function ThinkingStatus() {
 
   return (
     <div className="mb-2 flex items-center justify-center gap-2 text-xs app-accent-text">
-      <span className="app-accent-dot h-1.5 w-1.5 animate-pulse rounded-full" />
-      {t.thinking}
+      <span>{t.thinking}</span>
+      <span className="flex items-center gap-1" aria-hidden="true">
+        <span className="app-thinking-dot app-accent-dot h-1.5 w-1.5 rounded-full" />
+        <span className="app-thinking-dot app-accent-dot h-1.5 w-1.5 rounded-full" />
+        <span className="app-thinking-dot app-accent-dot h-1.5 w-1.5 rounded-full" />
+      </span>
     </div>
   );
 }
