@@ -21,6 +21,55 @@ from ..tools.sql_guard import UnsafeSQLError, validate_readonly_sql
 AUDIT_CODE_RE = re.compile(r"AUD-\d{4}-[A-Z]+-\d{2}", re.IGNORECASE)
 
 
+def missing_question_filters(
+    question: str,
+    sql: str,
+    themes: list[str],
+    parameters: dict[str, Any] | None = None,
+) -> list[str]:
+    """Какие условия вопроса не попали в SQL.
+
+    Планировщик иногда теряет фильтр (например, тему «ипотека») и считает
+    все проверки года. Без этой проверки пользователь получает правдоподобное,
+    но неверное число.
+    """
+    query = (question or "").lower()
+    haystack = f"{sql or ''} {parameters or ''}".lower()
+    missing: list[str] = []
+
+    for year in re.findall(r"\b(20\d{2})\b", query):
+        if year not in haystack:
+            missing.append(f"год {year}")
+
+    for theme in themes:
+        value = theme.lower()
+        stem = value[:-1] if value.endswith(("а", "я", "ы")) else value
+        if len(stem) >= 4 and stem in query and value not in haystack:
+            missing.append(f"тема «{theme}»")
+
+    if "заверш" in query and "заверш" not in haystack:
+        missing.append("статус «завершена»")
+    if "открыт" in query and "открыт" not in haystack:
+        missing.append("статус «открыт»")
+    if "критич" in query and "критич" not in haystack:
+        missing.append("уровень риска «критический»")
+    for code in AUDIT_CODE_RE.findall(query):
+        if code.lower() not in haystack:
+            missing.append(f"проверка {code.upper()}")
+    return missing
+
+
+def known_themes(server) -> list[str]:
+    from .. import db_runtime
+
+    with db_runtime.connect(server, role=db_runtime.APP_ROLE) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT lower(theme_code) AS theme FROM audit.audit_pockets "
+            "ORDER BY theme"
+        ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
 def _reply(
     state: AnalyticsState,
     performative: Literal["inform", "refuse", "failure"],
@@ -149,7 +198,25 @@ def build_analytics_graph(server, llm: LLMClient):
             safe = validate_readonly_sql(state["plan"]["sql"])
         except UnsafeSQLError as exc:
             return _refuse(state, f"SQL отклонён: {exc}")
-        return {"sql": safe}
+
+        missing = missing_question_filters(
+            state.get("question", ""),
+            safe,
+            known_themes(server),
+            state["plan"].get("parameters"),
+        )
+        if missing:
+            retries = int(state.get("retries", 0))
+            message = "SQL не учитывает условия вопроса: " + ", ".join(missing)
+            if retries < 2:
+                return {
+                    "sql": safe,
+                    "retry": True,
+                    "retries": retries + 1,
+                    "error": message + ". Добавь соответствующие фильтры.",
+                }
+            return _fail(state, message + ".")
+        return {"sql": safe, "retry": False}
 
     def execute_sql(state: AnalyticsState) -> dict[str, Any]:
         try:
@@ -484,8 +551,12 @@ def build_analytics_graph(server, llm: LLMClient):
     )
     builder.add_conditional_edges(
         "validate",
-        lambda s: "execute" if s.get("status") == "ok" else "summarize",
-        {"execute": "execute", "summarize": "summarize"},
+        lambda s: (
+            "repair"
+            if s.get("retry")
+            else ("execute" if s.get("status") == "ok" else "summarize")
+        ),
+        {"execute": "execute", "repair": "repair", "summarize": "summarize"},
     )
     builder.add_conditional_edges(
         "execute",
