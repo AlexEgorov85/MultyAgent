@@ -258,6 +258,7 @@ class OpenAILLM:
                 "Верни SQLPlan: strategy, template_key, parameters, sql, reason."
             ),
             schema=SQLPlan,
+            max_tokens=8192,
         )
 
     def repair_sql(
@@ -398,6 +399,18 @@ class OpenAILLM:
             schema=RetrievalAnswer,
         )
 
+    def _plain(self, *, system: str, user: str, max_tokens: int = 2000) -> str:
+        response = self._request(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            max_tokens=max_tokens,
+            temperature=0,
+        )
+        return (response.choices[0].message.content or "").strip()
+
     def draft_report(
         self,
         *,
@@ -405,22 +418,20 @@ class OpenAILLM:
         facts_text: str,
         allowed_ids: list[str],
     ) -> ReportDraft:
-        return self._parse(
+        text = self._plain(
             system=(
-                "Ты — внутренний аудитор. Составь проект раздела акта по-русски "
-                "строго по фактам. Структура: вводная часть, ключевые отклонения "
-                "и проблемы, рекомендации, сроки. Выбери не более 5 ключевых "
-                "пунктов, каждый — 1–2 предложения. Объём — до 5000 символов. "
-                "Каждое утверждение подкрепи ID из списка."
+                "Ты — внутренний аудитор. Составь краткий проект раздела акта "
+                "по-русски строго по фактам. Структура: вводная часть, ключевые "
+                "отклонения и проблемы, рекомендации, сроки. Не более 5 пунктов, "
+                "до 5000 символов. Каждое утверждение подкрепи ID из списка."
             ),
             user=(
                 f"Запрос: {question}\n\nФакты:\n{facts_text}\n\n"
-                f"Допустимые ID: {', '.join(allowed_ids)}\n\n"
-                "Верни ReportDraft: text, citations."
+                f"Допустимые ID: {', '.join(allowed_ids)}"
             ),
-            schema=ReportDraft,
-            max_tokens=8192,
+            max_tokens=2500,
         )
+        return ReportDraft(text=text or facts_text[:5000], citations=[])
 
     def review_report(
         self,
@@ -452,21 +463,21 @@ class OpenAILLM:
         facts_text: str,
         allowed_ids: list[str],
     ) -> ReportDraft:
-        return self._parse(
+        text = self._plain(
             system=(
                 "Ты исправляешь проект акта по замечаниям инспектора. "
-                "Удаляй или смягчай неподтверждённое; не добавляй новых фактов."
+                "Удаляй или смягчай неподтверждённое; не добавляй новых фактов. "
+                "До 5000 символов."
             ),
             user=(
                 f"Черновик: {draft.model_dump_json()}\n"
                 f"Замечания: {review.model_dump_json()}\n\n"
                 f"Факты:\n{facts_text}\n\n"
-                f"Допустимые ID: {', '.join(allowed_ids)}\n\n"
-                "Верни исправленный ReportDraft."
+                f"Допустимые ID: {', '.join(allowed_ids)}"
             ),
-            schema=ReportDraft,
-            max_tokens=8192,
+            max_tokens=2500,
         )
+        return ReportDraft(text=text or draft.text, citations=[])
 
     def plan_investigation(
         self,
@@ -528,19 +539,36 @@ class OpenAILLM:
             "sources": (retrieval.get("sources") or [])[:5],
             "evidence": (retrieval.get("evidence") or [])[:10],
         }
-        return self._parse(
-            system=(
-                "Ты синтезируешь итог расследования. Отделяй подтверждённый факт "
-                "от гипотезы. Причинное утверждение допустимо только при наличии "
-                "и количественных, и текстовых доказательств. Ответ — до 1200 "
-                "символов, без пересказа всех входных данных."
-            ),
-            user=(
-                f"Вопрос: {question}\nРаундов: {rounds}\n"
-                f"Analytics: {analytics_short}\nRetrieval: {retrieval_short}\n"
-                f"Не хватает: {', '.join(missing) or 'ничего'}\n\n"
-                "Верни InvestigationAnswer: text (до 1200 символов), causal_claim."
-            ),
-            schema=InvestigationAnswer,
-            max_tokens=8192,
+        response = self._request(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Ты синтезируешь итог аудиторского расследования. "
+                        "Отделяй факт от гипотезы. Ответ — не более 900 символов, "
+                        "без пересказа входных данных и без списков источников."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Вопрос: {question}\nРаундов: {rounds}\n"
+                        f"Analytics: {analytics_short}\nRetrieval: {retrieval_short}\n"
+                        f"Не хватает: {', '.join(missing) or 'ничего'}"
+                    ),
+                },
+            ],
+            max_tokens=1200,
+            temperature=0,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        if not text:
+            text = (
+                f"Количественные данные: {analytics.get('answer') or 'нет'}. "
+                f"Подтверждения из актов: {retrieval.get('answer') or 'нет'}."
+            )
+        return InvestigationAnswer(
+            text=text[:1800],
+            causal_claim=not missing,
         )

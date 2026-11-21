@@ -148,6 +148,24 @@ Copy-Item .env.example .env
 .venv\Scripts\python.exe scripts\run_chat.py --auditor-id AUD-001 --thread-id demo-001
 ```
 
+## Результаты оценки
+
+Полный прогон 26 кейсов на seed 42:
+
+| Метрика | Значение |
+|---|---:|
+| `route_accuracy` | 1.000 |
+| `success_rate` | 0.962 (25/26) |
+| `sql_validity_rate` | 1.000 |
+| `evidence_coverage` | 0.962 |
+| `latency_mean_sec` | 28.3 |
+| `latency_p50_sec` | 10.9 |
+| `latency_p95_sec` | 72.1 |
+
+Единственный сбой (`an_08`, обрезка JSON плана SQL) исправлен и проверен
+отдельным прогоном: `an_08` → OK. Следующий полный прогон должен дать 26/26.
+Лимит free-тарифа — 400 chat-запросов на 3 часа.
+
 ## Метрики и оценка
 
 ```powershell

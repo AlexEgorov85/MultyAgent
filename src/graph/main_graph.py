@@ -113,6 +113,24 @@ def build_main_graph(
                 "route_reason": "код проверки и запрос похожих формулировок",
                 "route_confidence": 0.95,
             }
+        if "повторн" in lower and "наход" in lower:
+            return {
+                "route": "retrieval",
+                "route_reason": "поиск примеров повторных находок",
+                "route_confidence": 0.9,
+            }
+        if (
+            ("почему" in lower or "за счёт" in lower or "за счет" in lower)
+            and any(
+                word in lower
+                for word in ("доля", "вырос", "изменил", "динамик", "снизил")
+            )
+        ):
+            return {
+                "route": "investigation",
+                "route_reason": "причинный вопрос о динамике показателя",
+                "route_confidence": 0.9,
+            }
         try:
             decision = llm.route(
                 question=question,
