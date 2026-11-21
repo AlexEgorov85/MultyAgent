@@ -48,13 +48,37 @@ def test_client_history_used_when_server_thread_is_new():
     assert "Всего: 3." in context
 
 
+def test_long_context_keeps_conversation_anchor():
+    messages = [
+        {
+            "role": "user" if index % 2 == 0 else "assistant",
+            "content": f"message-{index}",
+        }
+        for index in range(20)
+    ]
+
+    context = build_dialogue_context(
+        messages,
+        [],
+        "message-19",
+        max_messages=6,
+    )
+
+    assert "message-0" in context
+    assert "message-1" in context
+    assert "message-18" in context
+    assert "…" in context
+
+
 def test_followup_detection():
     assert is_followup("А за 2025 год?", has_history=True)
     assert is_followup("Почему?", has_history=True)
     assert is_followup("А по картам?", has_history=True)
     assert is_followup("В 2025 году", has_history=True)
     assert is_followup("Покажи их", has_history=True)
+    assert is_followup("Ипотека", has_history=True)
     assert not is_followup("Сколько проверок по картам за 2026 год?", has_history=True)
+    assert not is_followup("Сколько проверок?", has_history=True)
     assert not is_followup("Спасибо!", has_history=True)
     assert not is_followup("А за 2025 год?", has_history=False)
 

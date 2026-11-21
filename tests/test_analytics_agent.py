@@ -43,6 +43,18 @@ class FakeLLM:
         return self.answer
 
 
+class FormattingFakeLLM(FakeLLM):
+    """Fake с отдельным шагом оформления готового ответа."""
+
+    def __init__(self, formatted: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.formatted = formatted
+
+    def format_answer(self, **kwargs):
+        self.calls.append("format_answer")
+        return self.formatted
+
+
 def acl_request(question: str) -> dict:
     return make_acl_message(
         performative="request",
@@ -145,8 +157,10 @@ def test_generated_sql_answer(server, sample_graph_data):
     result = graph.invoke({"acl_request": acl_request("Сколько проверок по статусам?")})
 
     assert result["status"] == "ok"
-    assert "Результат" in result["answer"] or "cnt" in result["answer"]
+    assert result["answer"] == "Завершено: 1 проверка."
+    assert result["answer_source"] == "llm"
     assert result["rows"]
+    assert llm.calls.count("summarize") == 1
     assert result["acl_response"]["performative"] == "inform"
     assert result["acl_response"]["content"]["sql"].upper().count("LIMIT") == 1
     assert result["evidence"][0]["type"] == "sql_result"
@@ -264,7 +278,9 @@ def test_script_template_strategy(server, sample_graph_data):
     assert result["strategy"] == "script"
     assert result["rows"]
     assert result["evidence"][0]["type"] == "script_template"
-    assert llm.calls == ["plan_sql"]
+    assert llm.calls == ["plan_sql", "summarize"]
+    assert result["answer"] == "Статусы получены."
+    assert result["answer_source"] == "llm"
 
 
 def test_drilldown_by_audit_code(server, sample_graph_data):
@@ -283,6 +299,39 @@ def test_drilldown_by_audit_code(server, sample_graph_data):
     assert "AUD-2026-MORTGAGE-03" in result["answer"]
     assert {item["item_id"] for item in result["evidence"]} == {"ITM-T-01", "ITM-T-02"}
     assert llm.calls == []
+
+
+def test_drilldown_is_formatted_by_llm(server, sample_graph_data):
+    llm = FormattingFakeLLM("Найдено 2 пункта: 5.1 и 5.2.")
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke(
+        {
+            "acl_request": acl_request(
+                "Какие критические отклонения в AUD-2026-MORTGAGE-03?"
+            )
+        }
+    )
+
+    assert result["answer"] == "Найдено 2 пункта: 5.1 и 5.2."
+    assert result["answer_source"] == "llm"
+    assert llm.calls == ["format_answer"]
+
+
+def test_drilldown_falls_back_when_llm_loses_total(server, sample_graph_data):
+    llm = FormattingFakeLLM("Найдено пунктов: 5.")
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke(
+        {
+            "acl_request": acl_request(
+                "Какие критические отклонения в AUD-2026-MORTGAGE-03?"
+            )
+        }
+    )
+
+    assert result["answer_source"] == "agent"
+    assert "найдено пунктов: 2" in result["answer"].lower()
 
 
 def test_multi_tool_in_one_llm_call(server, sample_graph_data):
@@ -315,3 +364,35 @@ def test_multi_tool_in_one_llm_call(server, sample_graph_data):
     types = {item["type"] for item in result["evidence"]}
     assert "item" in types
     assert "act" in types or "tool" in types
+
+
+def test_multi_tool_is_formatted_by_llm(server, sample_graph_data):
+    llm = FormattingFakeLLM(
+        "Найдены пункты проверки и похожие формулировки в других актах.",
+        tool_plan=ToolPlan(
+            calls=[
+                ToolCall(
+                    name="get_act_items",
+                    arguments={"audit_code": "AUD-2026-MORTGAGE-03"},
+                ),
+                ToolCall(name="search_acts", arguments={"query": "залог"}),
+            ],
+            reason="нужны пункты и похожие акты",
+        ),
+    )
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke(
+        {
+            "acl_request": acl_request(
+                "Найди отклонения по AUD-2026-MORTGAGE-03 "
+                "и похожие формулировки в других актах"
+            )
+        }
+    )
+
+    assert result["answer"] == (
+        "Найдены пункты проверки и похожие формулировки в других актах."
+    )
+    assert result["answer_source"] == "llm"
+    assert llm.calls == ["plan_tools", "format_answer"]

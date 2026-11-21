@@ -25,7 +25,7 @@
 | Основной граф | ✅ Router + ACL-ветки + `thread_id`-память + профиль аудитора |
 | Guardrails | ✅ блокировка изменения данных, PII, prompt injection, проверка SQL |
 | Веб-интерфейс | ✅ assistant-ui + LangGraph API (`ui/`) |
-| Тесты | ✅ 92 passed |
+| Тесты | ✅ 133 passed |
 | Остальные агенты | ⏳ report, investigation |
 | Чат-интерфейс (assistant-ui) | ⏳ следующий этап |
 
@@ -179,8 +179,32 @@ Copy-Item .env.example .env
 Результаты: `reports/metrics.csv` и `reports/metrics.md`.
 Набор: `data/test_cases.jsonl` (26 кейсов).
 
+### Бенчмарк: простые, сложные и цепочки
+
+Дополнительный набор `data/benchmark_cases.jsonl` проверяет три уровня:
+8 простых вопросов, 5 сложных сценариев и 5 цепочек по 3 реплики. В цепочках
+контролируется перенос года, темы и кода проверки в `resolved_query` и в
+ответ, а кейс `chain_ui_recovery` восстанавливает контекст из `client_history`
+после смены нити.
+
+```powershell
+# структура набора без LLM
+.venv\Scripts\python.exe scripts\benchmark.py --dry-run
+
+# уровни и отдельные кейсы
+.venv\Scripts\python.exe scripts\benchmark.py --tier simple
+.venv\Scripts\python.exe scripts\benchmark.py --tier chain
+.venv\Scripts\python.exe scripts\benchmark.py --only chain_year_theme
+```
+
+Результаты: `reports/benchmark.csv`, `reports/benchmark.json`,
+`reports/benchmark.md`. Метрики: `success_rate` / `error_rate`,
+`route_accuracy`, `numeric_accuracy`, `tool_accuracy`, `evidence_coverage`,
+`context_retention_rate`, `context_rewrite_rate`, latency. Подробно —
+`docs/benchmark.md`.
+
 Документация: `docs/architecture.md`, `docs/metrics.md`,
-`docs/sql_safety.md`, `docs/screencast_script.md`.
+`docs/benchmark.md`, `docs/sql_safety.md`, `docs/screencast_script.md`.
 
 ## Проверка чистого клона
 
@@ -225,9 +249,18 @@ npm --prefix ui run dev
 
 Диалог контекстный: последние реплики передаются маршрутизатору и агентам,
 а уточнения вроде «а за 2025 год?» или «а по картам?» переформулируются в
-самостоятельный вопрос. Если backend потерял нить после перезапуска, UI
-присылает `client_history` из `localStorage`, чтобы сохранить контекст
-последних сообщений.
+самостоятельный вопрос.
+
+История диалога сохраняется в PostgreSQL (`audit.chat_threads` и
+`audit.chat_messages`) по стабильному `conversation_id` чата. Поэтому
+перезапуск backend не теряет контекст. Если недоступна и серверная история,
+UI присылает `client_history` из `localStorage`.
+
+После обновления кода примените миграции:
+
+```powershell
+.venv\Scripts\python.exe scripts\init_db.py
+```
 
 > **Важно про язык интерфейса.** `langgraph dev` предлагает
 > **LangGraph Studio** (`smith.langchain.com/studio`) — это сторонний
@@ -314,6 +347,8 @@ scripts/generate_data.py  детерминированная генерация 
 scripts/init_db.py        pgserver, миграции, read-only роль, загрузка CSV
 scripts/qa_checks.py      проверки качества данных
 scripts/demo_queries.py   демонстрационные read-only запросы
+scripts/evaluate.py       оценка по test_cases.jsonl
+scripts/benchmark.py      бенчмарк simple/complex/chain
 scripts/run_db.py         живой PostgreSQL для ручной проверки
 scripts/run_analytics.py  CLI Analytics-агента
 scripts/run_retrieval.py  CLI Retrieval-агента
@@ -324,6 +359,7 @@ scripts/build_index.py    построение RAG-индекса
 scripts/share_ui.ps1      API + UI + туннель одной командой (docs/share_ui.md)
 scripts/share_auth.ps1    включить/выключить пароль на лету
 ui/                       assistant-ui (Next.js) поверх LangGraph API
+data/benchmark_cases.jsonl  простые, сложные и цепочечные кейсы
 data/knowledge/           методические документы для RAG
 data/seed/                сгенерированные CSV (не коммитятся)
 data/pg/                  кластер PostgreSQL (не коммитится)

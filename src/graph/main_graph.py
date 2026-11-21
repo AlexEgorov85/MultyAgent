@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
+import uuid
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
+from .. import dialogue_store
 from ..acl import make_acl_message
 from ..dialogue import build_dialogue_context, is_followup
 from ..guardrails import check_final_answer, check_request, extract_sql
@@ -17,10 +20,12 @@ from ..llm import LLMClient
 from ..memory import store as memory_store
 from ..presentation import present
 from ..state import MainState
-from .analytics_graph import build_analytics_graph
+from .analytics_graph import build_analytics_graph, known_themes
 from .investigation_graph import build_investigation_graph
 from .report_graph import build_report_graph
 from .retrieval_graph import build_retrieval_graph
+
+logger = logging.getLogger(__name__)
 
 
 def _content_text(content: Any) -> str:
@@ -98,25 +103,36 @@ def build_main_graph(
         messages = state.get("messages", [])
         question = _last_user_text(messages)
         language = str(state.get("language") or "ru")
+        configurable = (config or {}).get("configurable", {})
+        thread_id = str(configurable.get("thread_id") or "")
+        conversation_id = (
+            str(state.get("conversation_id") or "").strip()
+            or thread_id
+            or "conv-main"
+        )
+
+        db_history: list[dict[str, str]] = []
+        try:
+            db_history = dialogue_store.load_history(server, conversation_id)
+        except Exception as exc:  # история не должна ломать ответ
+            logger.warning("История диалога недоступна: %s", exc)
+
         context = build_dialogue_context(
-            messages,
+            db_history or messages,
             state.get("client_history", []),
             question,
             language=language,
         )
         auditor_id = state.get("auditor_id", "")
         profile = memory_store.load_profile(server, auditor_id)
-        configurable = (config or {}).get("configurable", {})
-        thread_id = str(configurable.get("thread_id") or "")
         return {
             "user_query": question,
             "resolved_query": question,
             "resolved_reason": "",
             "dialogue_context": context,
             "profile": profile,
-            "conversation_id": thread_id
-            or state.get("conversation_id")
-            or "conv-main",
+            "conversation_id": conversation_id,
+            "turn_id": uuid.uuid4().hex,
             "route": "",
             "route_reason": "",
             "route_confidence": 0.0,
@@ -153,13 +169,14 @@ def build_main_graph(
             return {"resolved_query": question, "resolved_reason": ""}
 
         text = " ".join(str(resolved.question or "").split()).strip()
-        if not text or len(text) > 500:
+        if not resolved.is_followup or not text or len(text) > 500:
             text = question
         reason = str(resolved.reason or "") if resolved.is_followup else ""
         return {"resolved_query": text, "resolved_reason": reason}
 
     def save_memory(state: MainState) -> dict[str, Any]:
-        facts = memory_store.infer_memory(state.get("user_query", ""))
+        question = state.get("resolved_query") or state.get("user_query", "")
+        facts = memory_store.infer_memory(question)
         if not facts:
             return {"memory_saved": False}
         for key, value in facts.items():
@@ -191,6 +208,33 @@ def build_main_graph(
 
     def router(state: MainState) -> dict[str, Any]:
         question = state.get("resolved_query") or state.get("user_query", "")
+        # Маршрут выбирает LLM по смыслу вопроса. Доменных эвристик
+        # («если есть AUD-код и слово похож», «если есть повторн и наход»)
+        # здесь намеренно нет: они не покрывают все формулировки и
+        # перекрывают друг друга. Детерминированный код остаётся только
+        # аварийным fallback'ом на случай недоступности модели.
+        try:
+            decision = llm.route(
+                question=question,
+                profile_text=memory_store.profile_text(state.get("profile", {})),
+                context=state.get("dialogue_context", ""),
+            )
+        except Exception:
+            decision = None
+        if decision is None:
+            return _fallback_route(question)
+        return {
+            "route": decision.route,
+            "route_reason": decision.reason,
+            "route_confidence": decision.confidence,
+        }
+
+    def _fallback_route(question: str) -> dict[str, Any]:
+        """Минимальный fallback, если LLM недоступна.
+
+        Доменный маршрут не угадываем: лучше честно сказать, что
+        маршрутизация недоступна, чем выполнить не тот агент.
+        """
         lower = question.lower()
         compact = re.sub(r"\s+", " ", lower).strip(" !?.,…")
         if any(
@@ -210,7 +254,7 @@ def build_main_graph(
             return {
                 "route": "smalltalk",
                 "route_reason": "smalltalk:capabilities",
-                "route_confidence": 0.99,
+                "route_confidence": 0.5,
             }
         if re.match(
             r"^(привет|здравствуй(те)?|добрый (день|вечер)|доброе утро|хай|hello|hi|hey)\b",
@@ -219,65 +263,38 @@ def build_main_graph(
             return {
                 "route": "smalltalk",
                 "route_reason": "smalltalk:greeting",
-                "route_confidence": 0.99,
+                "route_confidence": 0.5,
             }
         if re.match(r"^(спасибо|благодарю|thanks|thank you)\b", compact):
             return {
                 "route": "smalltalk",
                 "route_reason": "smalltalk:thanks",
-                "route_confidence": 0.99,
-            }
-        if re.search(r"aud-\d{4}-[a-z]+-\d{2}", lower) and (
-            "похож" in lower or "друг" in lower
-        ):
-            return {
-                "route": "analytics",
-                "route_reason": "код проверки и запрос похожих формулировок",
-                "route_confidence": 0.95,
-            }
-        if "повторн" in lower and "наход" in lower:
-            return {
-                "route": "retrieval",
-                "route_reason": "поиск примеров повторных находок",
-                "route_confidence": 0.9,
-            }
-        if (
-            ("почему" in lower or "за счёт" in lower or "за счет" in lower)
-            and any(
-                word in lower
-                for word in ("доля", "вырос", "изменил", "динамик", "снизил")
-            )
-        ):
-            return {
-                "route": "investigation",
-                "route_reason": "причинный вопрос о динамике показателя",
-                "route_confidence": 0.9,
-            }
-        try:
-            decision = llm.route(
-                question=question,
-                profile_text=memory_store.profile_text(state.get("profile", {})),
-                context=state.get("dialogue_context", ""),
-            )
-        except Exception:
-            decision = None
-        if decision is None:
-            return {
-                "route": "out_of_domain",
-                "route_reason": "маршрутизация недоступна",
+                "route_confidence": 0.5,
             }
         return {
-            "route": decision.route,
-            "route_reason": decision.reason,
-            "route_confidence": decision.confidence,
+            "route": "out_of_domain",
+            "route_reason": "маршрутизация недоступна",
         }
 
-    def _question_with_profile(state: MainState) -> str:
+    def _question_with_profile(state: MainState, receiver: str) -> str:
         question = state.get("resolved_query") or state.get("user_query", "")
+        # Профиль — предпочтение для отчёта, а не фильтр данных. Для Analytics
+        # «Тема: ипотека» в вопросе превращается в theme_code='ипотека' даже
+        # когда пользователь просит разрез по всем карманам.
+        if receiver != "report_agent":
+            return question
         profile = state.get("profile", {})
         parts = []
         if profile.get("focus_theme"):
-            parts.append(f"Тема: {profile['focus_theme']}.")
+            lower = question.lower()
+            mentions_theme = any(
+                (
+                    theme[:-1] if theme.endswith(("а", "я", "ы")) else theme
+                ) in lower
+                for theme in known_themes(server)
+            )
+            if not mentions_theme:
+                parts.append(f"Тема: {profile['focus_theme']}.")
         if profile.get("default_format"):
             parts.append(f"Формат: {profile['default_format']}.")
         if parts:
@@ -290,7 +307,7 @@ def build_main_graph(
             sender="orchestrator",
             receiver=receiver,
             content={
-                "question": _question_with_profile(state),
+                "question": _question_with_profile(state, receiver),
                 "original_question": state.get("user_query", ""),
                 "conversation_context": state.get("dialogue_context", ""),
                 "auditor_id": state.get("auditor_id", ""),
@@ -383,6 +400,21 @@ def build_main_graph(
             answer = thanks
         else:
             answer = greeting
+        formatter = getattr(llm, "format_answer", None)
+        if formatter is not None:
+            try:
+                text = formatter(
+                    question=state.get("user_query", ""),
+                    draft=answer,
+                    kind="smalltalk",
+                    language=str(state.get("language") or "ru"),
+                    context=state.get("dialogue_context", ""),
+                )
+            except Exception:
+                text = ""
+            text = str(text or "").strip()
+            if text:
+                answer = text
         return {"final_answer": answer, "evidence": []}
 
     def guard_answer(state: MainState) -> dict[str, Any]:
@@ -403,6 +435,19 @@ def build_main_graph(
         started = metrics.pop("started_at", None)
         if started is not None:
             metrics["latency_total_sec"] = round(time.perf_counter() - started, 4)
+        try:
+            dialogue_store.append_turn(
+                server,
+                conversation_id=state.get("conversation_id", ""),
+                auditor_id=state.get("auditor_id", ""),
+                turn_id=state.get("turn_id", ""),
+                user_text=state.get("user_query", ""),
+                assistant_text=answer,
+                trace=state.get("trace", []),
+                resolved_query=state.get("resolved_query", ""),
+            )
+        except Exception as exc:  # ответ важнее записи истории
+            logger.warning("Не удалось сохранить историю диалога: %s", exc)
         return {
             "messages": [{"type": "ai", "content": answer}],
             "final_answer": answer,
@@ -426,13 +471,13 @@ def build_main_graph(
     builder.add_node("finalize", finalize)
 
     builder.add_edge(START, "load_memory")
-    builder.add_edge("load_memory", "save_memory")
+    builder.add_edge("load_memory", "resolve_query")
+    builder.add_edge("resolve_query", "save_memory")
     builder.add_conditional_edges(
         "save_memory",
-        lambda s: "present" if s.get("memory_saved") else "resolve_query",
-        {"resolve_query": "resolve_query", "present": "present"},
+        lambda s: "present" if s.get("memory_saved") else "guard_request",
+        {"guard_request": "guard_request", "present": "present"},
     )
-    builder.add_edge("resolve_query", "guard_request")
     builder.add_conditional_edges(
         "guard_request",
         lambda s: "refusal" if s.get("route") == "unsafe" else "router",

@@ -14,9 +14,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
-MAX_CONTEXT_MESSAGES = 8
-MAX_CONTEXT_CHARS = 4000
-MAX_MESSAGE_CHARS = 700
+MAX_CONTEXT_MESSAGES = 12
+MAX_CONTEXT_CHARS = 6000
+MAX_MESSAGE_CHARS = 900
 
 _AUDIT_CODE_RE = re.compile(r"AUD-\d{4}-[A-Z]+-\d{2}", re.IGNORECASE)
 
@@ -46,8 +46,13 @@ _FOLLOWUP_PERIOD_RE = re.compile(
 )
 
 _DOMAIN_RE = re.compile(
-    r"(проверк|аудит|акт|пункт|отклонен|риск|ипотек|вклад|платеж|"
-    r"карт|кредит|просроч|доля|динамик|год|20\d{2}|aud-)",
+    r"(провер|аудит|акт|пункт|отклон|риск|ипотек|вклад|платеж|"
+    r"карт|кредит|просроч|дол|динамик|год|20\d{2}|aud-)",
+    re.IGNORECASE,
+)
+
+_THEME_ONLY_RE = re.compile(
+    r"^(ипотека|карты|вклады|платежи|кредиты|потребкредитование)$",
     re.IGNORECASE,
 )
 
@@ -82,7 +87,7 @@ def _normalize(role: Any, content: Any) -> dict[str, str] | None:
 def normalize_messages(messages: Any) -> list[dict[str, str]]:
     """Приводит сообщения LangGraph/LangChain к ``{role, text}``."""
     result: list[dict[str, str]] = []
-    for message in messages or []:
+    for message in (messages or [])[-32:]:
         if isinstance(message, dict):
             item = _normalize(
                 message.get("role") or message.get("type"),
@@ -103,7 +108,7 @@ def normalize_client_history(history: Any) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
     if not isinstance(history, list):
         return result
-    for message in history:
+    for message in history[-32:]:
         if not isinstance(message, dict):
             continue
         item = _normalize(
@@ -147,14 +152,19 @@ def build_dialogue_context(
     if not history:
         return ""
 
-    history = history[-max_messages:]
+    truncated = len(history) > max_messages
+    if truncated:
+        # Держим начало разговора как якорь темы и последние реплики.
+        history = history[:2] + history[-(max_messages - 2) :]
     english = str(language).lower() == "en"
     user_label = "User" if english else "Пользователь"
     assistant_label = "Assistant" if english else "Ассистент"
 
     lines: list[str] = []
     used = 0
-    for item in history:
+    for index, item in enumerate(history):
+        if truncated and index == 2:
+            lines.append("…")
         text = _trim(item["text"], MAX_MESSAGE_CHARS)
         label = user_label if item["role"] == "user" else assistant_label
         line = f"{label}: {text}"
@@ -178,6 +188,10 @@ def is_followup(question: str, has_history: bool) -> bool:
     if _SMALLTALK_RE.match(text):
         return False
     if _FOLLOWUP_START_RE.match(text) or _FOLLOWUP_PERIOD_RE.match(text):
+        return True
+    if len(text.split()) <= 2 and not _DOMAIN_RE.search(text):
+        return True
+    if _THEME_ONLY_RE.match(text):
         return True
     if _FOLLOWUP_ANY_RE.search(text):
         return True

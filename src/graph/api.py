@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any
 
@@ -18,6 +19,8 @@ from src import db_runtime
 from src.graph.main_graph import build_main_graph
 from src.llm import OpenAILLM
 from src.rag.embeddings import OpenAIEmbeddings
+
+logger = logging.getLogger(__name__)
 
 _ready = threading.Event()
 _result: dict[str, Any] = {}
@@ -35,9 +38,25 @@ def _start_db_server():
         raise
 
 
+def _prepare_database(server) -> None:
+    """Применяет новые миграции и права при старте backend.
+
+    Это делает обновление схемы (например, chat_history) бесшовным.
+    Ошибка здесь не должна мешать запуску графа: история может быть
+    недоступна, но остальные функции продолжат работать.
+    """
+    try:
+        db_runtime.ensure_database(server)
+        db_runtime.apply_migrations(server)
+        db_runtime.ensure_roles(server)
+    except Exception as exc:  # noqa: BLE001 - не ломаем старт графа
+        logger.warning("Не удалось подготовить схему БД: %s", exc)
+
+
 def _build_worker() -> None:
     try:
         server = _start_db_server()
+        _prepare_database(server)
         llm = OpenAILLM()
         embeddings = OpenAIEmbeddings()
         _result["graph"] = build_main_graph(server, llm, embeddings=embeddings)

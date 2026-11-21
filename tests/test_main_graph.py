@@ -26,6 +26,20 @@ class MainLLM:
             )
         if "удали" in question:
             return RouteDecision(route="unsafe", reason="изменение", confidence=0.95)
+        if "что ты умеешь" in question or "что ты можешь" in question:
+            return RouteDecision(
+                route="smalltalk",
+                reason="smalltalk:capabilities",
+                confidence=0.95,
+            )
+        if "спасибо" in question or "благодарю" in question:
+            return RouteDecision(
+                route="smalltalk", reason="smalltalk:thanks", confidence=0.95
+            )
+        if "привет" in question or "здравствуй" in question:
+            return RouteDecision(
+                route="smalltalk", reason="smalltalk:greeting", confidence=0.95
+            )
         return RouteDecision(route="analytics", reason="числа", confidence=0.8)
 
 
@@ -139,7 +153,7 @@ def test_short_term_memory_accumulates_messages(server, main_data):
     graph = build_main_graph(server, MainLLM(), analytics_llm=analytics)
 
     first = _invoke(graph, "thread-short", "Сколько проверок?")
-    assert first["final_answer"] == "Всего: 1."
+    assert first["final_answer"] == "Проверок: 1."
     assert "cnt" not in first["final_answer"]
     assert len(first["messages"]) == 2
 
@@ -212,6 +226,26 @@ def test_smalltalk_greeting_capabilities_and_thanks(server):
     assert "Пожалуйста" in thanks["final_answer"]
 
     assert analytics.calls == 0
+
+
+def test_smalltalk_is_formatted_by_llm(server):
+    class FormattingLLM(MainLLM):
+        def __init__(self):
+            self.last: dict = {}
+
+        def format_answer(self, **kwargs):
+            self.last = kwargs
+            return "Привет! Могу посчитать проверки и найти подтверждения."
+
+    llm = FormattingLLM()
+    graph = build_main_graph(server, llm, analytics_llm=AnalyticsLLM())
+
+    hi = _invoke(graph, "thread-hi-llm", "Привет!")
+
+    assert hi["final_answer"] == (
+        "Привет! Могу посчитать проверки и найти подтверждения."
+    )
+    assert llm.last["kind"] == "smalltalk"
 
 
 class DialogueLLM(MainLLM):
@@ -331,6 +365,28 @@ def test_guardrails_check_resolved_followup(server, main_data):
     assert "изменить данные" in result["final_answer"]
 
 
+def test_explicit_theme_wins_over_profile_theme(server, main_data):
+    with db_runtime.connect(server) as conn:
+        conn.execute(
+            "INSERT INTO audit.auditor_memory "
+            "(auditor_id, memory_key, memory_value, updated_at) "
+            "VALUES ('MAIN-001', 'focus_theme', 'ипотека', now()) "
+            "ON CONFLICT (auditor_id, memory_key) DO UPDATE "
+            "SET memory_value = EXCLUDED.memory_value"
+        )
+
+    report = ReportLLM()
+    graph = build_main_graph(server, MainLLM(), report_llm=report)
+    _invoke(
+        graph,
+        "thread-theme-override",
+        "Сформируй раздел акта по AUD-2026-DEPOSITS-88 для вкладов",
+    )
+
+    assert report.questions
+    assert "Тема: ипотека" not in report.questions[-1]
+
+
 def test_new_turn_does_not_reuse_previous_acl_response(server, main_data):
     graph = build_main_graph(server, MainLLM(), analytics_llm=AnalyticsLLM())
 
@@ -340,3 +396,78 @@ def test_new_turn_does_not_reuse_previous_acl_response(server, main_data):
     assert second["route"] == "smalltalk"
     assert second["acl_response"] == {}
     assert not any(step["step"] == "acl" for step in second["trace"])
+
+
+def test_turn_is_persisted_in_database(server, main_data):
+    graph = build_main_graph(server, MainLLM(), analytics_llm=AnalyticsLLM())
+
+    graph.invoke(
+        {
+            "messages": [{"role": "user", "content": "Сколько проверок?"}],
+            "auditor_id": "MAIN-001",
+            "conversation_id": "chat-persist-one",
+        },
+        config={"configurable": {"thread_id": "thread-persist-one"}},
+    )
+
+    with db_runtime.connect(server) as conn:
+        rows = conn.execute(
+            "SELECT role, content, trace FROM audit.chat_messages "
+            "WHERE conversation_id = %s ORDER BY created_at, role",
+            ("chat-persist-one",),
+        ).fetchall()
+        thread = conn.execute(
+            "SELECT title FROM audit.chat_threads "
+            "WHERE conversation_id = %s",
+            ("chat-persist-one",),
+        ).fetchone()
+
+    assert [row[0] for row in rows] == ["user", "assistant"]
+    assert rows[0][1] == "Сколько проверок?"
+    assert rows[1][1]
+    assert rows[1][2] is not None
+    assert thread and thread[0] == "Сколько проверок?"
+
+
+def test_history_from_db_survives_new_thread(server, main_data):
+    first_resolver = DialogueLLM()
+    first_analytics = DialogueAnalyticsLLM()
+    first_graph = build_main_graph(
+        server,
+        first_resolver,
+        analytics_llm=first_analytics,
+    )
+    first_graph.invoke(
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Сколько проверок по вкладам в 2026 году?",
+                }
+            ],
+            "auditor_id": "MAIN-001",
+            "conversation_id": "chat-persist-restart",
+        },
+        config={"configurable": {"thread_id": "thread-persist-old"}},
+    )
+
+    resolver = DialogueLLM()
+    analytics = DialogueAnalyticsLLM()
+    second_graph = build_main_graph(
+        server,
+        resolver,
+        analytics_llm=analytics,
+    )
+    second_graph.invoke(
+        {
+            "messages": [{"role": "user", "content": "А за 2025 год?"}],
+            "auditor_id": "MAIN-001",
+            "conversation_id": "chat-persist-restart",
+        },
+        config={"configurable": {"thread_id": "thread-persist-new"}},
+    )
+
+    assert resolver.resolve_calls
+    assert "2026" in resolver.resolve_calls[-1]["context"]
+    assert "2025" in analytics.questions[-1]
+    assert "вкладам" in analytics.questions[-1]

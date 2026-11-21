@@ -45,14 +45,39 @@ _HEADLINE_COLUMNS = (
     "total",
 )
 
+# Порядок колонок в таблице: сначала то, что осмысленно для человека,
+# затем остальные поля запроса. Иначе первыми попадают служебные ID.
+_TABLE_PREFERRED_COLUMNS = (
+    "item_number",
+    "title",
+    "risk_level",
+    "status",
+    "deadline",
+    "audit_code",
+    "act_number",
+    "pocket_year",
+    "year",
+    "theme_code",
+    "completed_audits_count",
+    "audit_count",
+    "deviations_count",
+    "items_count",
+)
+
+
+def _table_columns(columns: list[str]) -> list[str]:
+    preferred = [column for column in _TABLE_PREFERRED_COLUMNS if column in columns]
+    return preferred + [column for column in columns if column not in preferred]
+
 _LABELS_RU: dict[str, str] = {
     "audit_id": "проверка",
     "audit_code": "проверка",
     "act_id": "акт",
     "act_number": "акт",
-    "item_id": "пункт",
+    "item_id": "ID пункта",
     "item_number": "пункт",
     "item_type": "тип пункта",
+    "test_type": "тип проверки",
     "title": "название",
     "risk_level": "уровень риска",
     "status": "статус",
@@ -64,6 +89,8 @@ _LABELS_RU: dict[str, str] = {
     "year": "год",
     "period_year": "год",
     "pocket_year": "год",
+    "pocket_id": "карман",
+    "pocket_title": "карман",
     "theme_code": "тема",
     "theme": "тема",
     "theme_name": "тема",
@@ -90,9 +117,10 @@ _LABELS_EN: dict[str, str] = {
     "audit_code": "audit",
     "act_id": "act",
     "act_number": "act",
-    "item_id": "item",
+    "item_id": "item ID",
     "item_number": "item",
     "item_type": "item type",
+    "test_type": "test type",
     "title": "title",
     "risk_level": "risk level",
     "status": "status",
@@ -104,6 +132,8 @@ _LABELS_EN: dict[str, str] = {
     "year": "year",
     "period_year": "year",
     "pocket_year": "year",
+    "pocket_id": "pocket",
+    "pocket_title": "pocket",
     "theme_code": "theme",
     "theme": "theme",
     "theme_name": "theme",
@@ -223,7 +253,12 @@ def _dynamic_label(column: str, state: dict[str, Any]) -> str | None:
     """
     lower = column.lower()
     english = _english(state)
-    completed = "completed" in lower or "заверш" in lower
+    completed = (
+        "completed" in lower
+        or "closed" in lower
+        or "заверш" in lower
+        or "закрыт" in lower
+    )
     if "audit" in lower or "провер" in lower:
         if english:
             return "Completed audits" if completed else "Audits"
@@ -284,6 +319,12 @@ def _truncate(text: str, limit: int = 1200) -> str:
     return clean if len(clean) <= limit else clean[: limit - 1].rstrip() + "…"
 
 
+def _is_table_boilerplate(answer: str) -> bool:
+    """Служебная фраза «Найдено строк: N. Первые: …» не нужна перед таблицей."""
+    text = answer.strip().lower()
+    return not text or text.startswith(("найдено строк", "rows found"))
+
+
 def _escape_md(value: str) -> str:
     """Экранирует значение для ячейки Markdown-таблицы."""
     return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
@@ -306,7 +347,7 @@ def _contextual_count_label(state: dict[str, Any], fallback: str) -> str:
             return "Overdue items"
         return fallback
     if "провер" in query or "аудит" in query:
-        if "заверш" in query:
+        if "заверш" in query or "закрыт" in query:
             return "Завершённых проверок"
         if "просроч" in query:
             return "Просроченных проверок"
@@ -331,6 +372,13 @@ def _present_analytics(state: dict[str, Any]) -> dict[str, Any]:
     if rows:
         if len(rows) == 1:
             row = rows[0]
+            source = str(content.get("answer_source") or "")
+            # LLM/агент уже сформулировали ответ словами — не заменяем его
+            # сухим шаблоном. Шаблон остаётся для fallback и старых payload'ов
+            # без answer_source.
+            use_answer = bool(answer) and not _is_table_boilerplate(answer) and (
+                source in ("llm", "agent") or not source
+            )
             headline = next(
                 (key for key in _HEADLINE_COLUMNS if key in row and row[key] is not None),
                 None,
@@ -358,7 +406,7 @@ def _present_analytics(state: dict[str, Any]) -> dict[str, Any]:
                     label = _contextual_count_label(state, label)
                 return {
                     "kind": "count" if is_count else "scalar",
-                    "text": f"{label}: {value}.",
+                    "text": answer if use_answer else f"{label}: {value}.",
                     "facts": [{"label": label, "value": value}],
                     "sql": sql,
                 }
@@ -371,26 +419,36 @@ def _present_analytics(state: dict[str, Any]) -> dict[str, Any]:
                 body = ", ".join(parts)
                 return {
                     "kind": "scalar",
-                    "text": t(_lang(state), "result", body=body),
+                    "text": answer if use_answer else t(_lang(state), "result", body=body),
                     "facts": [],
                     "sql": sql,
                 }
 
-        shown_columns = [column for column in columns if column][:5]
-        lines = [t(_lang(state), "present_table_title", count=len(rows)), ""]
+        shown_columns = _table_columns([column for column in columns if column])[:5]
+        lines: list[str] = []
+        if answer and not _is_table_boilerplate(answer):
+            lines.extend([answer, ""])
+        lines.extend([t(_lang(state), "present_table_title", count=len(rows)), ""])
         if shown_columns:
             headers = [_label(column, state) for column in shown_columns]
             lines.append("| " + " | ".join(_escape_md(item) for item in headers) + " |")
             lines.append("| " + " | ".join("---" for _ in headers) + " |")
-            for row in rows[:5]:
+            preview_rows = 20
+            for row in rows[:preview_rows]:
                 cells = [
                     _escape_md(_fmt(row.get(column), column, state))
                     for column in shown_columns
                 ]
                 lines.append("| " + " | ".join(cells) + " |")
-            if len(rows) > 5:
+            if len(rows) > preview_rows:
                 lines.append("")
-                lines.append(t(_lang(state), "present_table_more", count=len(rows) - 5))
+                lines.append(
+                    t(
+                        _lang(state),
+                        "present_table_more",
+                        count=len(rows) - preview_rows,
+                    )
+                )
         return {
             "kind": "table",
             "text": "\n".join(lines),
@@ -541,31 +599,6 @@ def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dic
     route = str(state.get("route") or "")
     route_label = _route_label(lang, route)
 
-    sender = str(acl.get("sender") or "")
-    performative = str(acl.get("performative") or "")
-    if sender or performative:
-        sender_label = _agent_label(lang, sender)
-        receiver_label = _agent_label(
-            lang, str(acl.get("receiver") or "orchestrator")
-        )
-        detail = " → ".join(
-            part for part in (sender_label, receiver_label) if part
-        )
-        performative_label = _performative_label(lang, performative)
-        steps.append(
-            {
-                "step": "acl",
-                "title": t(lang, "trace_acl"),
-                "detail": detail or performative_label,
-                "status": "ok",
-                "agent": sender_label or t(lang, "agent_orchestrator"),
-                "kind": "message",
-                "chips": _chips(
-                    (t(lang, "trace_performative"), performative_label)
-                ),
-            }
-        )
-
     original_query = str(state.get("user_query") or "").strip()
     resolved_query = str(state.get("resolved_query") or "").strip()
     if resolved_query and resolved_query != original_query:
@@ -594,7 +627,11 @@ def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dic
     confidence = state.get("route_confidence")
     route_detail = f"{route_label} — {reason}" if reason else route_label
     confidence_chip = None
-    if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
+    if (
+        isinstance(confidence, (int, float))
+        and not isinstance(confidence, bool)
+        and confidence > 0
+    ):
         confidence_chip = f"{confidence * 100:.0f}%"
     steps.append(
         {
@@ -775,6 +812,31 @@ def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dic
                 "chips": _chips(
                     (t(lang, "trace_rounds"), content_rounds),
                     (t(lang, "trace_evidence"), len(evidence)),
+                ),
+            }
+        )
+
+    sender = str(acl.get("sender") or "")
+    performative = str(acl.get("performative") or "")
+    if sender or performative:
+        sender_label = _agent_label(lang, sender)
+        receiver_label = _agent_label(
+            lang, str(acl.get("receiver") or "orchestrator")
+        )
+        detail = " → ".join(
+            part for part in (sender_label, receiver_label) if part
+        )
+        performative_label = _performative_label(lang, performative)
+        steps.append(
+            {
+                "step": "acl",
+                "title": t(lang, "trace_acl"),
+                "detail": detail or performative_label,
+                "status": "ok",
+                "agent": sender_label or t(lang, "agent_orchestrator"),
+                "kind": "message",
+                "chips": _chips(
+                    (t(lang, "trace_performative"), performative_label)
                 ),
             }
         )

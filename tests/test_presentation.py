@@ -77,6 +77,48 @@ def test_generic_count_alias_uses_question_context():
     assert presentation["text"] == "Завершённых проверок: 5."
 
 
+def test_llm_answer_replaces_single_row_template():
+    state = _state(
+        acl_response={
+            "performative": "inform",
+            "sender": "analytics_agent",
+            "content": {
+                "rows": [{"completed_audits": 5}],
+                "columns": ["completed_audits"],
+                "answer": "По ипотеке в 2026 году завершено 5 проверок.",
+                "answer_source": "llm",
+            },
+        }
+    )
+
+    presentation = build_presentation(state)
+
+    assert presentation["kind"] == "count"
+    assert presentation["text"] == "По ипотеке в 2026 году завершено 5 проверок."
+    assert presentation["facts"] == [
+        {"label": "Завершённых проверок", "value": "5"}
+    ]
+
+
+def test_template_answer_keeps_humanized_single_row():
+    state = _state(
+        acl_response={
+            "performative": "inform",
+            "sender": "analytics_agent",
+            "content": {
+                "rows": [{"completed_audits": 5}],
+                "columns": ["completed_audits"],
+                "answer": "Всего completed_audits: 5.",
+                "answer_source": "template",
+            },
+        }
+    )
+
+    presentation = build_presentation(state)
+
+    assert presentation["text"] == "Завершённых проверок: 5."
+
+
 def test_table_answer_has_no_raw_column_names():
     state = _state(
         acl_response={
@@ -99,6 +141,28 @@ def test_table_answer_has_no_raw_column_names():
     assert "audit_code" not in presentation["text"]
     assert "| проверка |" in presentation["text"]
     assert "| AUD-1 |" in presentation["text"]
+
+
+def test_closed_audits_alias_is_humanized_in_table():
+    state = _state(
+        user_query="Сколько проверок было закрыто по годам и карманам?",
+        acl_response={
+            "performative": "inform",
+            "sender": "analytics_agent",
+            "content": {
+                "rows": [
+                    {"pocket_year": 2025, "theme_code": "ипотека", "closed_audits_count": 8},
+                    {"pocket_year": 2026, "theme_code": "ипотека", "closed_audits_count": 5},
+                ],
+                "columns": ["pocket_year", "theme_code", "closed_audits_count"],
+            },
+        },
+    )
+
+    text = build_presentation(state)["text"]
+
+    assert "| год | тема | Завершённых проверок |" in text
+    assert "closed_audits_count" not in text
 
 
 def test_text_report_and_refusal_pass_through():

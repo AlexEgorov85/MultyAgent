@@ -39,6 +39,38 @@
 (8 analytics, 6 retrieval, 6 report, 2 investigation, 2 out-of-domain,
 1 unsafe, 1 memory).
 
+## Многоуровневый бенчмарк
+
+Отдельный набор `data/benchmark_cases.jsonl` делит проверки на три уровня:
+
+| Уровень | Кейсов | Реплик | Что проверяет |
+|---|---:|---:|---|
+| `simple` | 8 | 8 | один факт, шаблон, drill-down, retrieval, отказы |
+| `complex` | 5 | 5 | multi-tool, отчёт, investigation, динамика |
+| `chain` | 5 | 15 | перенос года, темы и кода проверки между репликами |
+
+```powershell
+.venv\Scripts\python.exe scripts\benchmark.py --dry-run
+.venv\Scripts\python.exe scripts\benchmark.py --tier simple
+.venv\Scripts\python.exe scripts\benchmark.py --tier chain
+```
+
+Результаты: `reports/benchmark.csv`, `reports/benchmark.json`,
+`reports/benchmark.md`.
+
+Дополнительно к `evaluate.py` считаются:
+
+| Метрика | Проверка |
+|---|---|
+| `case_success_rate` | успешны все реплики кейса |
+| `context_retention_rate` | сущность сохранилась в `resolved_query` или ответе |
+| `context_rewrite_rate` | сущность явно попала в `resolved_query` |
+| `context_answer_rate` | сущность видна в ответе |
+| `chain_context_retention_rate` | retention только по цепочкам |
+| `tool_accuracy` / `strategy_accuracy` | ожидаемые инструменты и стратегия Analytics |
+
+Подробное описание — `docs/benchmark.md`.
+
 ## Ограничение провайдера
 
 На free-тарифе NeuralDeep действует сессионный лимит: **400 chat-запросов

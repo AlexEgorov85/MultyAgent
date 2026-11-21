@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from typing import Any, Literal
@@ -21,6 +22,32 @@ from ..tools.sql_guard import UnsafeSQLError, validate_readonly_sql
 
 AUDIT_CODE_RE = re.compile(r"AUD-\d{4}-[A-Z]+-\d{2}", re.IGNORECASE)
 
+# «по годам» — это разбивка, а не фильтр по одному году.
+_GROUP_BY_YEAR_RE = re.compile(r"group\s+by[\s\S]*?year", re.IGNORECASE)
+_GROUP_BY_POCKET_RE = re.compile(
+    r"group\s+by[\s\S]*?(pocket|theme_code|theme)", re.IGNORECASE
+)
+
+
+def _normalise(text: str) -> str:
+    return " ".join((text or "").lower().replace("ё", "е").split())
+
+
+def _stem(word: str) -> str:
+    """Грубая основа слова для поиска темы в разных падежах.
+
+    «ипотека» / «ипотеке» → «ипотек», «карты» / «картам» → «карт».
+    Это не морфология, но достаточно для коротких названий тем.
+    """
+    value = _normalise(word)
+    value = re.sub(
+        r"(иями|ями|ами|ией|иях|ях|ах|ов|ев|ей|ой|ый|ий|ая|яя|ое|ее|ые|ие|"
+        r"ам|ям|ом|ем|ую|юю|а|я|ы|и|е|о|ю|ь)$",
+        "",
+        value,
+    )
+    return value
+
 
 def missing_question_filters(
     question: str,
@@ -28,36 +55,60 @@ def missing_question_filters(
     themes: list[str],
     parameters: dict[str, Any] | None = None,
 ) -> list[str]:
-    """Какие условия вопроса не попали в SQL.
+    """Какие условия вопроса не попали в SQL (или попали лишние).
 
-    Планировщик иногда теряет фильтр (например, тему «ипотека») и считает
-    все проверки года. Без этой проверки пользователь получает правдоподобное,
-    но неверное число.
+    Планировщик иногда теряет фильтр (например, тему «ипотека») или,
+    наоборот, добавляет тему, которой в вопросе не было. Без этой проверки
+    пользователь получает правдоподобное, но неверное число.
     """
-    query = (question or "").lower()
-    haystack = f"{sql or ''} {parameters or ''}".lower()
+    query = _normalise(question)
+    haystack = _normalise(f"{sql or ''} {parameters or ''}")
     missing: list[str] = []
 
     for year in re.findall(r"\b(20\d{2})\b", query):
         if year not in haystack:
             missing.append(f"год {year}")
 
+    requested_themes: list[str] = []
     for theme in themes:
-        value = theme.lower()
-        stem = value[:-1] if value.endswith(("а", "я", "ы")) else value
-        if len(stem) >= 4 and stem in query and value not in haystack:
-            missing.append(f"тема «{theme}»")
+        value = _normalise(theme)
+        stem = _stem(value)
+        if len(stem) >= 4 and stem in query:
+            requested_themes.append(value)
+            if value not in haystack:
+                missing.append(f"тема «{theme}»")
+
+    # Лишний фильтр темы: модель подставила «ипотеку», хотя в вопросе
+    # речь шла только о разрезе по годам и карманам.
+    for theme in themes:
+        value = _normalise(theme)
+        if value and value in haystack and value not in requested_themes:
+            missing.append(f"лишний фильтр темы «{theme}»")
 
     if "заверш" in query and "заверш" not in haystack:
         missing.append("статус «завершена»")
+    if "закрыт" in query:
+        # «Закрытая проверка» в домене — это audits.status='завершена',
+        # а «закрытый пункт» — act_items.status='закрыт'.
+        if "пункт" in query or "item" in query:
+            if "закрыт" not in haystack:
+                missing.append("статус пункта «закрыт»")
+        elif not any(marker in haystack for marker in ("заверш", "закрыт")):
+            missing.append("статус «завершена» (закрытая проверка)")
     if "открыт" in query and "открыт" not in haystack:
         missing.append("статус «открыт»")
     if "критич" in query and "критич" not in haystack:
         missing.append("уровень риска «критический»")
+
+    if "карман" in query and not _GROUP_BY_POCKET_RE.search(haystack):
+        missing.append("разбивка по карманам")
+    if re.search(r"\bпо\s+годам?\b", query) and not _GROUP_BY_YEAR_RE.search(haystack):
+        missing.append("разбивка по годам")
+
     for code in AUDIT_CODE_RE.findall(query):
         if code.lower() not in haystack:
             missing.append(f"проверка {code.upper()}")
-    return missing
+    return list(dict.fromkeys(missing))
 
 
 def known_themes(server) -> list[str]:
@@ -69,6 +120,154 @@ def known_themes(server) -> list[str]:
             "ORDER BY theme"
         ).fetchall()
     return [str(row[0]) for row in rows]
+
+
+_YEAR_COLUMNS = ("pocket_year", "period_year", "year")
+_THEME_COLUMNS = (
+    "theme_code",
+    "theme",
+    "theme_name",
+    "pocket_title",
+    "pocket_id",
+)
+_MEASURE_COLUMNS = (
+    "closed_audits_count",
+    "completed_audits_count",
+    "completed_count",
+    "audit_count",
+    "deviations_count",
+    "items_count",
+    "total_items",
+    "overdue_open_items_count",
+    "critical_open_count",
+    "count",
+    "total",
+    "cnt",
+)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _pick_column(
+    rows: list[dict[str, Any]],
+    columns: list[str],
+    candidates: tuple[str, ...],
+    *,
+    numeric: bool = False,
+) -> str | None:
+    for name in candidates:
+        if name not in columns:
+            continue
+        for row in rows:
+            value = row.get(name)
+            if value is None:
+                continue
+            if numeric and not _is_number(value):
+                break
+            return name
+    return None
+
+
+def _format_number(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def _aggregate_summary(
+    rows: list[dict[str, Any]],
+    columns: list[str],
+    language: str | None = None,
+) -> str:
+    """Детерминированные итоги по годам и темам — без арифметики LLM."""
+    if not rows:
+        return ""
+    english = str(language).lower() == "en"
+    measure = _pick_column(rows, columns, _MEASURE_COLUMNS, numeric=True)
+    if measure is None:
+        measure = _pick_column(
+            rows,
+            columns,
+            tuple(column for column in columns if column not in _YEAR_COLUMNS),
+            numeric=True,
+        )
+    if measure is None:
+        return ""
+
+    parts: list[str] = []
+    year_column = _pick_column(rows, columns, _YEAR_COLUMNS)
+    theme_column = _pick_column(rows, columns, _THEME_COLUMNS)
+
+    def totals(column: str) -> dict[Any, float]:
+        result: dict[Any, float] = {}
+        for row in rows:
+            value = row.get(measure)
+            if not _is_number(value):
+                continue
+            key = row.get(column)
+            result[key] = result.get(key, 0.0) + float(value)
+        return result
+
+    if year_column:
+        by_year = totals(year_column)
+        if by_year:
+            body = ", ".join(
+                f"{key} — {_format_number(value)}"
+                for key, value in sorted(by_year.items(), key=lambda item: str(item[0]))
+            )
+            parts.append(f"By year: {body}." if english else f"По годам: {body}.")
+
+    if theme_column and theme_column != year_column:
+        by_theme = totals(theme_column)
+        if by_theme:
+            body = ", ".join(
+                f"{key} — {_format_number(value)}"
+                for key, value in sorted(
+                    by_theme.items(), key=lambda item: (-item[1], str(item[0]))
+                )
+            )
+            parts.append(f"By theme: {body}." if english else f"По темам: {body}.")
+
+    grand_total = sum(
+        float(row[measure]) for row in rows if _is_number(row.get(measure))
+    )
+    if grand_total:
+        parts.append(
+            f"Total: {_format_number(grand_total)}."
+            if english
+            else f"Всего: {_format_number(grand_total)}."
+        )
+    return " ".join(parts)
+
+
+def _summary_numbers_supported(
+    text: str,
+    rows: list[dict[str, Any]],
+    columns: list[str],
+) -> bool:
+    """Проверяет, что LLM не придумала числа вне таблицы.
+
+    Годы (2025, 2026) разрешены как названия разрезов. Суммы и разницы,
+    которых нет в строках, считаются выдуманными: итоги добавляет
+    детерминированный агрегатор.
+    """
+    allowed: set[float] = {float(len(rows))}
+    for row in rows:
+        for column in columns:
+            value = row.get(column)
+            if _is_number(value):
+                allowed.add(round(float(value), 2))
+
+    for token in re.findall(r"\d+(?:[.,]\d+)?", text or ""):
+        try:
+            value = float(token.replace(",", "."))
+        except ValueError:
+            continue
+        if 2000 <= value <= 2099:
+            continue
+        if round(value, 2) not in allowed:
+            return False
+    return True
 
 
 def _reply(
@@ -98,6 +297,35 @@ def _refuse(state: AnalyticsState, reason: str) -> dict[str, Any]:
 
 def _fail(state: AnalyticsState, reason: str) -> dict[str, Any]:
     return {"status": "failed", "error": reason}
+
+
+def _format_with_llm(
+    llm: LLMClient,
+    state: AnalyticsState,
+    *,
+    draft: str,
+    kind: str,
+    facts: Any = None,
+) -> tuple[str, str]:
+    """Оформляет черновик ответа моделью; при сбое возвращает как есть."""
+    formatter = getattr(llm, "format_answer", None)
+    if formatter is None:
+        return draft, "agent"
+    try:
+        text = formatter(
+            question=state.get("question", ""),
+            draft=draft,
+            kind=kind,
+            facts=(
+                json.dumps(facts, ensure_ascii=False, default=str) if facts else ""
+            ),
+            language=str(state.get("language") or "ru"),
+            context=state.get("conversation_context", ""),
+        )
+    except Exception:
+        text = ""
+    text = str(text or "").strip()
+    return (text, "llm") if text else (draft, "agent")
 
 
 def build_analytics_graph(server, llm: LLMClient):
@@ -291,6 +519,7 @@ def build_analytics_graph(server, llm: LLMClient):
                 "rows": [],
                 "columns": [],
                 "evidence": [],
+                "answer_source": "agent",
             }
         lines = [
             (
@@ -304,14 +533,27 @@ def build_analytics_graph(server, llm: LLMClient):
                 f"{item['item_number']} — {item['title']} "
                 f"({item['risk_level']}, {item['status']})"
             )
+        draft = "\n".join(lines)
+        answer, answer_source = _format_with_llm(
+            llm,
+            state,
+            draft=draft,
+            kind="items",
+            facts=items[:5],
+        )
+        # Модель иногда пересчитывает итог по видимому списку (5 из 9).
+        # Если исходное число потерялось — отдаём детерминированный черновик.
+        if answer_source == "llm" and str(len(items)) not in answer:
+            answer, answer_source = draft, "agent"
         return {
-            "answer": "\n".join(lines),
+            "answer": answer,
             "rows": items,
             "columns": list(items[0].keys()),
             "evidence": [
                 {"type": "item", "item_id": item["item_id"]} for item in items
             ],
             "strategy": "drilldown",
+            "answer_source": answer_source,
         }
 
     def multi_tool(state: AnalyticsState) -> dict[str, Any]:
@@ -369,13 +611,21 @@ def build_analytics_graph(server, llm: LLMClient):
                 lines.append(f"{call.name}: выполнено")
             evidence.append({"type": "tool", "name": call.name})
 
+        answer, answer_source = _format_with_llm(
+            llm,
+            state,
+            draft="\n".join(lines),
+            kind="tools",
+            facts=calls,
+        )
         return {
-            "answer": "Инструменты выполнены:\n" + "\n".join(lines),
+            "answer": answer,
             "rows": [],
             "columns": [],
             "tool_calls": calls,
             "evidence": evidence,
             "strategy": "multi_tool",
+            "answer_source": answer_source,
         }
 
     COLUMN_LABELS = {
@@ -479,7 +729,7 @@ def build_analytics_graph(server, llm: LLMClient):
                 return t(language, "result", body=", ".join(parts))
         preview = "; ".join(
             ", ".join(f"{column}={row.get(column)}" for column in columns)
-            for row in rows[:5]
+            for row in rows[:20]
         )
         return t(language, "found_rows", count=len(rows), preview=preview)
 
@@ -491,10 +741,42 @@ def build_analytics_graph(server, llm: LLMClient):
             return {}
 
         rows = state.get("rows", [])
-        answer = _format_rows(
-            rows, state.get("columns", []), state.get("language")
-        )
-        return {"answer": answer}
+        columns = state.get("columns", [])
+
+        # Формулировку ответа всегда отдаём LLM — и для одной строки, и для
+        # разреза. Детерминированный шаблон остаётся fallback'ом, чтобы при
+        # недоступности модели пользователь всё равно получил корректное число.
+        if rows:
+            summarizer = getattr(llm, "summarize", None)
+            if summarizer is not None:
+                try:
+                    text = summarizer(
+                        question=state.get("question", ""),
+                        columns=columns,
+                        rows=rows,
+                    )
+                except Exception:
+                    text = ""
+                text = str(text or "").strip()
+                if text and _summary_numbers_supported(text, rows, columns):
+                    if len(rows) > 1:
+                        aggregate = _aggregate_summary(
+                            rows, columns, state.get("language")
+                        )
+                        return {
+                            "answer": "\n\n".join(
+                                part for part in (text, aggregate) if part
+                            ),
+                            "answer_source": "llm",
+                        }
+                    return {"answer": text, "answer_source": "llm"}
+
+        answer = _format_rows(rows, columns, state.get("language"))
+        if len(rows) > 1:
+            aggregate = _aggregate_summary(rows, columns, state.get("language"))
+            if aggregate:
+                answer = aggregate
+        return {"answer": answer, "answer_source": "template"}
 
     def pack_response(state: AnalyticsState) -> dict[str, Any]:
         status = state.get("status", "ok")
@@ -519,6 +801,7 @@ def build_analytics_graph(server, llm: LLMClient):
 
         content: dict[str, Any] = {
             "answer": state.get("answer", ""),
+            "answer_source": state.get("answer_source", "template"),
             "strategy": state.get("strategy", "sql"),
             "evidence": state.get("evidence", []),
             "metrics": {

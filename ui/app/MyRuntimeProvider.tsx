@@ -120,7 +120,7 @@ export function MyRuntimeProvider({
       // он всё равно сможет восстановить контекст последних реплик.
       const clientHistory = (chat.messages ?? [])
         .filter((item) => item.text.trim().length > 0)
-        .slice(-8)
+        .slice(-12)
         .map((item) => ({ role: item.role, text: item.text.slice(0, 2000) }));
 
       appendMessage(chatId, {
@@ -142,6 +142,7 @@ export function MyRuntimeProvider({
               assistant_id: ASSISTANT_ID,
               input: {
                 messages: [{ type: "human", content: question }],
+                conversation_id: chat.id,
                 client_history: clientHistory,
                 language,
                 auditor_id: auditorId,

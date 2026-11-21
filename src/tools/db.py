@@ -36,6 +36,13 @@ Enum values:
 - item_type: отклонение, проблема
 - item_status: открыт, в работе, закрыт
 - test_type: непрерывный, выборочный, аналитический, повторное выполнение, опрос
+
+Domain terms:
+- «карман» — это audit.audit_pockets (год + тема). «По годам и карманам» —
+  GROUP BY pocket_year, theme_code (или pocket_id), без фильтра по теме,
+  если тема не названа явно.
+- «закрытая проверка» — audit.audits.status = 'завершена'.
+- «закрытый пункт» — audit.act_items.status = 'закрыт'.
 """.strip()
 
 

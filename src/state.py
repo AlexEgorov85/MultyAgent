@@ -30,6 +30,7 @@ class AnalyticsState(TypedDict, total=False):
     tool_calls: list[dict[str, Any]]
     retries: int
     answer: str
+    answer_source: str  # llm | agent | template
     acl_response: dict[str, Any]
     metrics: dict[str, Any]
 
@@ -119,6 +120,7 @@ class MainState(TypedDict, total=False):
     resolved_query: str
     resolved_reason: str
     dialogue_context: str
+    turn_id: str
     client_history: list[dict[str, Any]]
     auditor_id: str
     language: str

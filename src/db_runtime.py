@@ -260,6 +260,14 @@ def ensure_roles(server) -> None:
         conn.execute(
             f"GRANT INSERT, UPDATE, DELETE ON audit.auditor_memory TO {APP_ROLE}"
         )
+        chat_tables = conn.execute(
+            "SELECT to_regclass('audit.chat_threads')"
+        ).fetchone()
+        if chat_tables and chat_tables[0]:
+            conn.execute(
+                f"GRANT INSERT, UPDATE, DELETE ON "
+                f"audit.chat_threads, audit.chat_messages TO {APP_ROLE}"
+            )
         conn.execute(
             f"REVOKE INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA audit "
             f"FROM {READ_ONLY_ROLE}"
