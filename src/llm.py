@@ -5,7 +5,15 @@ from __future__ import annotations
 import os
 from typing import Any, Protocol
 
-from .schemas import AnswerDraft, Critique, RetrievalAnswer, SQLPlan, ToolPlan
+from .schemas import (
+    AnswerDraft,
+    Critique,
+    ReportDraft,
+    ReportReview,
+    RetrievalAnswer,
+    SQLPlan,
+    ToolPlan,
+)
 
 
 class LLMError(RuntimeError):
@@ -56,6 +64,31 @@ class LLMClient(Protocol):
         issues: list[str],
         chunks: list[dict[str, Any]],
     ) -> "RetrievalAnswer": ...
+
+    def draft_report(
+        self,
+        *,
+        question: str,
+        facts_text: str,
+        allowed_ids: list[str],
+    ) -> "ReportDraft": ...
+
+    def review_report(
+        self,
+        *,
+        draft: "ReportDraft",
+        facts_text: str,
+        allowed_ids: list[str],
+    ) -> "ReportReview": ...
+
+    def revise_report(
+        self,
+        *,
+        draft: "ReportDraft",
+        review: "ReportReview",
+        facts_text: str,
+        allowed_ids: list[str],
+    ) -> "ReportDraft": ...
 
 
 class OpenAILLM:
@@ -263,4 +296,71 @@ class OpenAILLM:
                 "Верни исправленный RetrievalAnswer."
             ),
             schema=RetrievalAnswer,
+        )
+
+    def draft_report(
+        self,
+        *,
+        question: str,
+        facts_text: str,
+        allowed_ids: list[str],
+    ) -> ReportDraft:
+        return self._parse(
+            system=(
+                "Ты — внутренний аудитор. Составь проект раздела акта по-русски "
+                "строго по фактам. Структура: вводная часть, выявленные отклонения "
+                "и проблемы, рекомендации, сроки. Каждое утверждение подкрепи ID "
+                "из списка. Не добавляй факты, которых нет в данных."
+            ),
+            user=(
+                f"Запрос: {question}\n\nФакты:\n{facts_text}\n\n"
+                f"Допустимые ID: {', '.join(allowed_ids)}\n\n"
+                "Верни ReportDraft: text, citations."
+            ),
+            schema=ReportDraft,
+        )
+
+    def review_report(
+        self,
+        *,
+        draft: ReportDraft,
+        facts_text: str,
+        allowed_ids: list[str],
+    ) -> ReportReview:
+        return self._parse(
+            system=(
+                "Ты — инспектор качества аудиторского акта. Проверь: каждое "
+                "утверждение подтверждено фактами, все ID существуют, структура "
+                "полная, чисел и выводов вне фактов нет."
+            ),
+            user=(
+                f"Черновик: {draft.model_dump_json()}\n\nФакты:\n{facts_text}\n\n"
+                f"Допустимые ID: {', '.join(allowed_ids)}\n\n"
+                "Верни ReportReview: verdict, unsupported_claims, missing_sections, "
+                "issues, citations_ok."
+            ),
+            schema=ReportReview,
+        )
+
+    def revise_report(
+        self,
+        *,
+        draft: ReportDraft,
+        review: ReportReview,
+        facts_text: str,
+        allowed_ids: list[str],
+    ) -> ReportDraft:
+        return self._parse(
+            system=(
+                "Ты исправляешь проект акта по замечаниям инспектора. "
+                "Удаляй или смягчай неподтверждённое; не добавляй новых фактов."
+            ),
+            user=(
+                f"Черновик: {draft.model_dump_json()}\n"
+                f"Замечания: {review.model_dump_json()}\n\n"
+                f"Факты:\n{facts_text}\n\n"
+                f"Допустимые ID: {', '.join(allowed_ids)}\n\n"
+                "Верни исправленный ReportDraft."
+            ),
+            schema=ReportDraft,
         )

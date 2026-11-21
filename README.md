@@ -20,7 +20,8 @@
 | Agent protocol | ✅ `src/acl.py`: FIPA-ACL, корреляция, JSONL-журнал |
 | Analytics-агент | ✅ LangGraph: NL→SQL, шаблоны, drill-down, multi-tool |
 | Retrieval-агент | ✅ индекс методичек/пунктов/актов, гибридный поиск, цитаты, критик |
-| Тесты | ✅ 64 passed |
+| Report + Inspector | ✅ проект акта, проверка ID и evidence, до 2 исправлений |
+| Тесты | ✅ 70 passed |
 | Остальные агенты | ⏳ report, investigation |
 | Чат-интерфейс (assistant-ui) | ⏳ следующий этап |
 
@@ -124,6 +125,12 @@ Copy-Item .env.example .env
 .venv\Scripts\python.exe scripts\run_retrieval.py --question "Что сказано про просроченную оценку залога?"
 ```
 
+Сформировать проект раздела акта:
+
+```powershell
+.venv\Scripts\python.exe scripts\run_report.py --question "Сформируй раздел акта по AUD-2026-MORTGAGE-03"
+```
+
 `init_db.py` поднимает встроенный PostgreSQL 16 через `pgserver`,
 применяет миграции и создаёт read-only роль `audit_ro`.
 
@@ -147,6 +154,7 @@ scripts/demo_queries.py   демонстрационные read-only запро�
 scripts/run_db.py         живой PostgreSQL для ручной проверки
 scripts/run_analytics.py  CLI Analytics-агента
 scripts/run_retrieval.py  CLI Retrieval-агента
+scripts/run_report.py     CLI Report-агента
 scripts/build_index.py    построение RAG-индекса
 data/knowledge/           методические документы для RAG
 data/seed/                сгенерированные CSV (не коммитятся)

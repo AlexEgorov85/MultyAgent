@@ -64,7 +64,6 @@ class RetrievalAnswer(BaseModel):
 
 class Critique(BaseModel):
     """Результат критика (используется в retrieval/report)."""
-
     verdict: Literal["ok", "rewrite"]
     issues: list[str] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
@@ -80,6 +79,13 @@ class ReportReview(BaseModel):
     missing_sections: list[str] = Field(default_factory=list)
     issues: list[str] = Field(default_factory=list)
     citations_ok: bool = True
+
+
+class ReportDraft(BaseModel):
+    """Проект раздела акта."""
+
+    text: str = Field(min_length=1)
+    citations: list[str] = Field(default_factory=list)
 
 
 class GuardrailResult(BaseModel):

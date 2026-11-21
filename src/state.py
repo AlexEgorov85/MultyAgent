@@ -55,9 +55,33 @@ class RetrievalState(TypedDict, total=False):
     metrics: dict[str, Any]
 
 
+class ReportState(TypedDict, total=False):
+    """Состояние Report-подагента и Inspector."""
+
+    acl_request: dict[str, Any]
+    request: dict[str, Any]
+    question: str
+    auditor_id: str
+    conversation_id: str
+    status: str
+    error: str
+    audit_code: str
+    facts: list[dict[str, Any]]
+    facts_text: str
+    allowed_ids: list[str]
+    draft: dict[str, Any]
+    review: dict[str, Any]
+    review_issues: list[str]
+    citation_issues: list[str]
+    iterations: int
+    citations: list[str]
+    evidence: list[dict[str, Any]]
+    acl_response: dict[str, Any]
+    metrics: dict[str, Any]
+
+
 class MainState(TypedDict, total=False):
     """Состояние основного графа."""
-
     messages: list[Any]
     user_query: str
     auditor_id: str
