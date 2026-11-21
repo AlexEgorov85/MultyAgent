@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from typing import Any
 
@@ -48,19 +49,33 @@ def _start_db_server():
         raise
 
 
-def _prepare_database(server) -> None:
-    """Применяет новые миграции и права при старте backend.
+_DB_PREPARE_STAGES: tuple[tuple[str, str], ...] = (
+    ("ensure_database", "создание базы данных"),
+    ("apply_migrations", "применение миграций"),
+    ("ensure_roles", "настройка ролей"),
+)
 
-    Это делает обновление схемы (например, chat_history) бесшовным.
-    Ошибка здесь не должна мешать запуску графа: история может быть
-    недоступна, но остальные функции продолжат работать.
+
+def prepare_database(server) -> None:
+    """Создаёт БД, применяет миграции и выдаёт права ролям при старте.
+
+    Это критичный шаг сборки: без схемы и прав граф работать не сможет,
+    поэтому ошибка любого этапа пробрасывается и фабрика графа поднимает
+    её наружу. Необязательные данные (история чата) сюда не входят — их
+    недоступность обрабатывается в самих нодах графа.
     """
-    try:
-        db_runtime.ensure_database(server)
-        db_runtime.apply_migrations(server)
-        db_runtime.ensure_roles(server)
-    except Exception as exc:  # noqa: BLE001 - не ломаем старт графа
-        logger.warning("Не удалось подготовить схему БД: %s", exc)
+    for stage, title in _DB_PREPARE_STAGES:
+        try:
+            getattr(db_runtime, stage)(server)
+        except Exception as exc:  # noqa: BLE001 - переоформляем в понятную ошибку
+            logger.exception(
+                "Подготовка БД: этап «%s» (%s) завершился ошибкой", title, stage
+            )
+            # В сообщение не попадают DSN и прочие детали подключения.
+            raise RuntimeError(
+                f"Не удалось подготовить БД на этапе «{title}» ({stage}): "
+                f"{type(exc).__name__}"
+            ) from exc
 
 
 def _build_worker() -> None:
@@ -68,7 +83,7 @@ def _build_worker() -> None:
         logger.info("Сборка графа: запуск PostgreSQL")
         server = _start_db_server()
         logger.info("Сборка графа: PostgreSQL готов")
-        _prepare_database(server)
+        prepare_database(server)
         logger.info("Сборка графа: схема подготовлена")
         llm = OpenAILLM()
         embeddings = OpenAIEmbeddings()
@@ -117,5 +132,7 @@ def get_admin_graph():
 
 
 # Прогреваем сборку сразу при импорте: сервер успевает поднять PostgreSQL
-# и графы, пока LangGraph API завершает собственный старт.
-_start_build()
+# и графы, пока LangGraph API завершает собственный старт. Переменная
+# окружения позволяет тестам импортировать модуль без запуска pgserver.
+if os.environ.get("AUDIT_SKIP_DB_PREWARM") != "1":
+    _start_build()

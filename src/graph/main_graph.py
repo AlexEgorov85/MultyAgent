@@ -113,7 +113,11 @@ def build_main_graph(
 
         db_history: list[dict[str, str]] = []
         try:
-            db_history = dialogue_store.load_history(server, conversation_id)
+            db_history = dialogue_store.load_history(
+                server,
+                conversation_id,
+                auditor_id=str(state.get("auditor_id") or ""),
+            )
         except Exception as exc:  # история не должна ломать ответ
             logger.warning("История диалога недоступна: %s", exc)
 

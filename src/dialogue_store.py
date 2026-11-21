@@ -18,6 +18,29 @@ def _connect(server):
     return db_runtime.connect(server, role=db_runtime.APP_ROLE)
 
 
+_OWNER_ERROR = "chat belongs to another auditor"
+
+
+def _thread_owner(conn, conversation_id: str) -> str:
+    """Возвращает auditor_id владельца чата или "" если строки нет."""
+    row = conn.execute(
+        "SELECT auditor_id FROM audit.chat_threads WHERE conversation_id = %s",
+        (conversation_id,),
+    ).fetchone()
+    return str(row[0] or "").strip() if row is not None else ""
+
+
+def _check_owner(owner: str, auditor_id: str) -> None:
+    """Разрешает операцию, если владелец неизвестен или совпадает.
+
+    Это defense-in-depth, а не аутентификация: пустой ``auditor_id``
+    допустим только для чатов, у которых владелец не записан.
+    """
+    caller = str(auditor_id or "").strip()
+    if owner and owner != caller:
+        raise PermissionError(_OWNER_ERROR)
+
+
 def _title(text: str) -> str:
     normalized = " ".join((text or "").split())
     return normalized[:120]
@@ -98,27 +121,45 @@ def rename_thread(
     *,
     auditor_id: str = "",
 ) -> None:
-    """Меняет название чата; создаёт строку для старых чатов без истории."""
+    """Меняет название чата; создаёт строку для старых чатов без истории.
+
+    Если у чата уже есть владелец, переименовать его может только он.
+    """
     conversation_id = str(conversation_id or "").strip()
     title = " ".join(str(title or "").split())[:160]
     if not conversation_id or not title:
         return
     with _connect(server) as conn:
+        _check_owner(_thread_owner(conn, conversation_id), auditor_id)
         conn.execute(
             "INSERT INTO audit.chat_threads "
             "(conversation_id, auditor_id, title) VALUES (%s, %s, %s) "
             "ON CONFLICT (conversation_id) DO UPDATE SET "
-            "title = EXCLUDED.title, updated_at = now()",
-            (conversation_id, str(auditor_id or ""), title),
+            "title = EXCLUDED.title, "
+            "auditor_id = COALESCE("
+            "NULLIF(audit.chat_threads.auditor_id, ''), "
+            "NULLIF(EXCLUDED.auditor_id, '')), "
+            "updated_at = now()",
+            (conversation_id, str(auditor_id or "").strip(), title),
         )
 
 
-def delete_thread(server, conversation_id: str) -> None:
-    """Удаляет чат и все его сообщения (FK ON DELETE CASCADE)."""
+def delete_thread(
+    server,
+    conversation_id: str,
+    *,
+    auditor_id: str = "",
+) -> None:
+    """Удаляет чат и все его сообщения (FK ON DELETE CASCADE).
+
+    Если у чата уже есть владелец, удалить его может только он.
+    Отсутствие строки не ошибка: удалять нечего.
+    """
     conversation_id = str(conversation_id or "").strip()
     if not conversation_id:
         return
     with _connect(server) as conn:
+        _check_owner(_thread_owner(conn, conversation_id), auditor_id)
         conn.execute(
             "DELETE FROM audit.chat_threads WHERE conversation_id = %s",
             (conversation_id,),
@@ -129,13 +170,22 @@ def load_history(
     server,
     conversation_id: str,
     *,
+    auditor_id: str = "",
     limit: int = 24,
 ) -> list[dict[str, str]]:
-    """Последние сообщения чата в хронологическом порядке."""
+    """Последние сообщения чата в хронологическом порядке.
+
+    Если передан ``auditor_id``, история чужого чата не отдаётся. Пустой
+    ``auditor_id`` сохраняет прежнее поведение (CLI, тесты, legacy-вызовы).
+    """
     conversation_id = str(conversation_id or "").strip()
     if not conversation_id:
         return []
     with _connect(server) as conn:
+        owner = _thread_owner(conn, conversation_id)
+        caller = str(auditor_id or "").strip()
+        if caller and owner and owner != caller:
+            return []
         rows = conn.execute(
             "SELECT role, content FROM ("
             "  SELECT role, content, created_at, "

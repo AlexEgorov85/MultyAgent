@@ -44,9 +44,17 @@ def build_admin_graph(server):
                 )
                 return {"ok": True, "error": ""}
             if action == "delete":
-                dialogue_store.delete_thread(server, conversation_id)
+                dialogue_store.delete_thread(
+                    server,
+                    conversation_id,
+                    auditor_id=str(state.get("auditor_id") or ""),
+                )
                 return {"ok": True, "error": ""}
             return {"ok": False, "error": f"unknown action: {action or 'empty'}"}
+        except PermissionError as exc:
+            # Чужой чат: наружу только понятное сообщение, без трейсбека.
+            logger.warning("dialogue_admin %s denied: %s", action, exc)
+            return {"ok": False, "error": str(exc) or "access denied"}
         except Exception as exc:  # noqa: BLE001 - вернуть ошибку в UI
             logger.exception("dialogue_admin %s failed", action)
             detail = str(exc).strip() or type(exc).__name__
