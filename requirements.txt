@@ -4,6 +4,11 @@ psycopg[binary]==3.2.3
 sqlglot>=25.0
 pydantic>=2.0
 
+# Агенты
+langgraph>=1.2,<2
+openai>=2,<3
+python-dotenv>=1.0
+
 # Тесты
 pytest>=8.0
 

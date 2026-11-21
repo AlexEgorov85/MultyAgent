@@ -18,7 +18,8 @@
 | QA-проверки данных | ✅ `scripts/qa_checks.py`, включая расписание, дубли, шаблоны |
 | SQL safety | ✅ `src/tools/sql_guard.py`, `src/tools/db.py`, 40 тестов |
 | Agent protocol | ✅ `src/acl.py`: FIPA-ACL, корреляция, JSONL-журнал |
-| LangGraph-агенты | ⏳ следующий этап |
+| Analytics-агент | ✅ LangGraph: NL→SQL, шаблоны, drill-down, multi-tool, 57 тестов |
+| Остальные агенты | ⏳ retrieval, report, investigation |
 | Чат-интерфейс (assistant-ui) | ⏳ следующий этап |
 
 ## Спецификации (OpenSpec)
@@ -101,6 +102,14 @@ python -m uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 .venv\Scripts\python.exe scripts\demo_queries.py --json reports\demo_queries.json
 ```
 
+Запустить Analytics-агента (нужен `OPENAI_API_KEY` в `.env`):
+
+```powershell
+Copy-Item .env.example .env
+# вписать ключ в .env
+.venv\Scripts\python.exe scripts\run_analytics.py --question "Сколько завершённых проверок по ипотеке в 2026 году?"
+```
+
 `init_db.py` поднимает встроенный PostgreSQL 16 через `pgserver`,
 применяет миграции и создаёт read-only роль `audit_ro`.
 
@@ -122,6 +131,7 @@ scripts/init_db.py        pgserver, миграции, read-only роль, заг
 scripts/qa_checks.py      проверки качества данных
 scripts/demo_queries.py   демонстрационные read-only запросы
 scripts/run_db.py         живой PostgreSQL для ручной проверки
+scripts/run_analytics.py  CLI Analytics-агента
 data/knowledge/           методические документы для RAG
 data/seed/                сгенерированные CSV (не коммитятся)
 data/pg/                  кластер PostgreSQL (не коммитится)

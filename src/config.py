@@ -8,6 +8,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+try:  # .env не обязателен для тестов и офлайн-проверок
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
+except Exception:  # pragma: no cover - отсутствие пакета не критично
+    pass
+
 DB_NAME = os.getenv("DB_NAME", "audit")
 PGDATA_DIR = Path(os.getenv("PGDATA_DIR", ROOT / "data" / "pg"))
 SEED_DIR = Path(os.getenv("SEED_DIR", ROOT / "data" / "seed"))
