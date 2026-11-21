@@ -6,7 +6,13 @@ import {
   type AppendMessage,
   type ThreadMessageLike,
 } from "@assistant-ui/react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback } from "react";
+import {
+  newId,
+  useChats,
+  type ChatMessage,
+  type TraceStep,
+} from "./chats";
 import { readPreferences } from "./preferences";
 
 const API_BASE =
@@ -14,28 +20,7 @@ const API_BASE =
 const ASSISTANT_ID =
   process.env.NEXT_PUBLIC_LANGGRAPH_ASSISTANT_ID ?? "audit_assistant";
 
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-  trace?: TraceStep[];
-};
-
-type TraceStep = {
-  step: string;
-  title: string;
-  detail?: string;
-  status?: string;
-};
-
 type ContentPart = { type?: string; text?: string };
-
-function newId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
 
 function textOf(content: unknown): string {
   if (typeof content === "string") return content;
@@ -97,14 +82,22 @@ async function createThread(language: string): Promise<string> {
 export function MyRuntimeProvider({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const threadId = useRef<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isRunning, setIsRunning] = useState(false);
+  const {
+    activeChat,
+    newChat,
+    appendMessage,
+    setBackendThreadId,
+    setRunning,
+  } = useChats();
+
+  const messages = activeChat?.messages ?? [];
+  const isRunning = activeChat?.running ?? false;
 
   const convertMessage = useCallback(
     (message: ChatMessage): ThreadMessageLike => ({
       id: message.id,
       role: message.role,
+      createdAt: new Date(message.createdAt),
       content: [{ type: "text", text: message.text }],
       metadata:
         message.trace && message.trace.length > 0
@@ -114,64 +107,93 @@ export function MyRuntimeProvider({
     [],
   );
 
-  const onNew = useCallback(async (message: AppendMessage) => {
-    const { language, auditorId } = readPreferences();
-    const ru = language !== "en";
-    const question = textOf(message.content);
-    if (!question) return;
+  const onNew = useCallback(
+    async (message: AppendMessage) => {
+      const { language, auditorId } = readPreferences();
+      const ru = language !== "en";
+      const question = textOf(message.content);
+      if (!question) return;
 
-    setMessages((prev) => [
-      ...prev,
-      { id: newId(), role: "user", text: question },
-    ]);
-    setIsRunning(true);
+      const chat = activeChat ?? newChat();
+      const chatId = chat.id;
 
-    let answer: string;
-    let trace: TraceStep[] = [];
-    try {
-      threadId.current ??= await createThread(language);
-      const waitUrl = `${API_BASE}/threads/${threadId.current}/runs/wait`;
-      const response = await fetch(
-        waitUrl,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            assistant_id: ASSISTANT_ID,
-            input: {
-              messages: [{ type: "human", content: question }],
-              language,
-              auditor_id: auditorId,
-            },
-          }),
-        },
-      );
+      appendMessage(chatId, {
+        id: newId(),
+        role: "user",
+        text: question,
+        createdAt: Date.now(),
+      });
+      setRunning(chatId, true);
 
-      if (!response.ok) {
-        answer = ru
-          ? `Ошибка API: ${response.status} ${response.statusText}`
-          : `API error: ${response.status} ${response.statusText}`;
-      } else {
-        const state = await response.json();
-        answer =
-          answerFromState(state) ||
-          (ru
-            ? "Не удалось получить ответ от агента."
-            : "The agent did not return an answer.");
-        trace = Array.isArray(state?.trace) ? (state.trace as TraceStep[]) : [];
+      let answer: string;
+      let trace: TraceStep[] = [];
+      try {
+        const send = async (threadId: string) =>
+          fetch(`${API_BASE}/threads/${threadId}/runs/wait`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              assistant_id: ASSISTANT_ID,
+              input: {
+                messages: [{ type: "human", content: question }],
+                language,
+                auditor_id: auditorId,
+              },
+            }),
+          });
+
+        let threadId = chat.backendThreadId;
+        if (!threadId) {
+          threadId = await createThread(language);
+          setBackendThreadId(chatId, threadId);
+        }
+
+        let response = await send(threadId);
+        if (response.status === 404) {
+          // Нить могла исчезнуть после перезапуска сервера — создаём новую.
+          threadId = await createThread(language);
+          setBackendThreadId(chatId, threadId);
+          response = await send(threadId);
+        }
+
+        if (!response.ok) {
+          answer = ru
+            ? `Ошибка API: ${response.status} ${response.statusText}`
+            : `API error: ${response.status} ${response.statusText}`;
+        } else {
+          const state = await response.json();
+          answer =
+            answerFromState(state) ||
+            (ru
+              ? "Не удалось получить ответ от агента."
+              : "The agent did not return an answer.");
+          trace = Array.isArray(state?.trace)
+            ? (state.trace as TraceStep[])
+            : [];
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        answer = `${ru ? "Ошибка" : "Error"}: ${detail}`;
+      } finally {
+        setRunning(chatId, false);
       }
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      answer = `${ru ? "Ошибка" : "Error"}: ${detail}`;
-    } finally {
-      setIsRunning(false);
-    }
 
-    setMessages((prev) => [
-      ...prev,
-      { id: newId(), role: "assistant", text: answer, trace },
-    ]);
-  }, []);
+      appendMessage(chatId, {
+        id: newId(),
+        role: "assistant",
+        text: answer,
+        trace,
+        createdAt: Date.now(),
+      });
+    },
+    [
+      activeChat,
+      newChat,
+      appendMessage,
+      setBackendThreadId,
+      setRunning,
+    ],
+  );
 
   const runtime = useExternalStoreRuntime<ChatMessage>({
     messages,
@@ -181,8 +203,7 @@ export function MyRuntimeProvider({
     adapters: {
       threadList: {
         onSwitchToNewThread: async () => {
-          setMessages([]);
-          threadId.current = null;
+          newChat();
         },
       },
     },

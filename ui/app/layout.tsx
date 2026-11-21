@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { ChatsProvider } from "./chats";
 import { LanguageProvider } from "./i18n";
 import { MyRuntimeProvider } from "./MyRuntimeProvider";
 import { SettingsProvider } from "./SettingsProvider";
@@ -23,7 +24,9 @@ export default function RootLayout({
       <body>
         <SettingsProvider>
           <LanguageProvider>
-            <MyRuntimeProvider>{children}</MyRuntimeProvider>
+            <ChatsProvider>
+              <MyRuntimeProvider>{children}</MyRuntimeProvider>
+            </ChatsProvider>
           </LanguageProvider>
         </SettingsProvider>
       </body>

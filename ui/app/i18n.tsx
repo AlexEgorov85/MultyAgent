@@ -50,6 +50,15 @@ export type Dictionary = {
   errorHint: string;
   assistantInitial: string;
   agentPath: string;
+  chats: string;
+  chatsHint: string;
+  openChats: string;
+  closeChats: string;
+  noChats: string;
+  loadingChats: string;
+  deleteChat: string;
+  deleteChatConfirm: string;
+  chatsStoredLocally: string;
   appearanceTab: string;
   behaviorTab: string;
   dataTab: string;
@@ -182,6 +191,15 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     errorHint: "Проверьте, что LangGraph API запущен, и повторите запрос.",
     assistantInitial: "А",
     agentPath: "Путь работы агента",
+    chats: "Чаты",
+    chatsHint: "История диалогов",
+    openChats: "Открыть список чатов",
+    closeChats: "Закрыть список чатов",
+    noChats: "Пока нет диалогов",
+    loadingChats: "Загрузка…",
+    deleteChat: "Удалить диалог",
+    deleteChatConfirm: "Удалить этот диалог?",
+    chatsStoredLocally: "История хранится в браузере",
     appearanceTab: "Интерфейс",
     behaviorTab: "Поведение",
     dataTab: "Данные",
@@ -313,6 +331,15 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     errorHint: "Make sure the LangGraph API is running and try again.",
     assistantInitial: "A",
     agentPath: "Agent run path",
+    chats: "Chats",
+    chatsHint: "Conversation history",
+    openChats: "Open chat list",
+    closeChats: "Close chat list",
+    noChats: "No conversations yet",
+    loadingChats: "Loading…",
+    deleteChat: "Delete conversation",
+    deleteChatConfirm: "Delete this conversation?",
+    chatsStoredLocally: "History is stored in the browser",
     appearanceTab: "Appearance",
     behaviorTab: "Behavior",
     dataTab: "Data",
