@@ -113,6 +113,76 @@ _TEXTS: dict[str, dict[str, str]] = {
         "ru": "Причинный вывод не подтверждён: не хватает {missing}.",
         "en": "The causal conclusion is not confirmed: missing {missing}.",
     },
+    "yes": {"ru": "да", "en": "yes"},
+    "no": {"ru": "нет", "en": "no"},
+    "present_table_title": {
+        "ru": "Найдено строк: {count}.",
+        "en": "Rows found: {count}.",
+    },
+    "present_table_more": {
+        "ru": "…и ещё {count}.",
+        "en": "…and {count} more.",
+    },
+    "present_empty": {
+        "ru": "По заданным условиям ничего не найдено.",
+        "en": "No rows match the given conditions.",
+    },
+    "present_no_answer": {
+        "ru": "Не удалось получить ответ.",
+        "en": "Could not get an answer.",
+    },
+    "trace_acl": {"ru": "ACL-сообщение", "en": "ACL message"},
+    "trace_route": {"ru": "Маршрут", "en": "Route"},
+    "trace_memory": {"ru": "Профиль аудитора", "en": "Auditor profile"},
+    "trace_guard": {"ru": "Проверка запроса", "en": "Request check"},
+    "trace_sql": {"ru": "SQL-запрос", "en": "SQL query"},
+    "trace_result": {"ru": "Результат запроса", "en": "Query result"},
+    "trace_retrieval": {"ru": "Поиск по базе знаний", "en": "Knowledge search"},
+    "trace_citations": {"ru": "Источники", "en": "Sources"},
+    "trace_report": {"ru": "Проект акта", "en": "Act draft"},
+    "trace_inspector": {"ru": "Проверка Inspector", "en": "Inspector review"},
+    "trace_investigation": {"ru": "Расследование", "en": "Investigation"},
+    "trace_answer": {"ru": "Проверка ответа", "en": "Answer check"},
+    "trace_latency": {"ru": "Время выполнения", "en": "Elapsed time"},
+    "trace_memory_detail": {
+        "ru": "Загружено фактов: {count}.",
+        "en": "Facts loaded: {count}.",
+    },
+    "trace_safe": {"ru": "запрос безопасен", "en": "request is safe"},
+    "trace_failed_generic": {"ru": "не пройдена", "en": "failed"},
+    "trace_rows_detail": {
+        "ru": "Строк: {rows}, колонок: {columns}.",
+        "en": "Rows: {rows}, columns: {columns}.",
+    },
+    "trace_retries": {
+        "ru": "Повторов SQL: {count}.",
+        "en": "SQL retries: {count}.",
+    },
+    "trace_retrieval_detail": {
+        "ru": "Режим: {mode}, найдено фрагментов: {chunks}.",
+        "en": "Mode: {mode}, chunks found: {chunks}.",
+    },
+    "trace_citations_detail": {
+        "ru": "Подтверждений: {count}.",
+        "en": "Citations: {count}.",
+    },
+    "trace_report_detail": {
+        "ru": "Ссылок в черновике: {count}.",
+        "en": "Citations in the draft: {count}.",
+    },
+    "trace_inspector_detail": {
+        "ru": "Вердикт: {verdict}, итераций: {iterations}.",
+        "en": "Verdict: {verdict}, iterations: {iterations}.",
+    },
+    "trace_investigation_detail": {
+        "ru": "Раундов ACL: {rounds}, подтверждений: {evidence}.",
+        "en": "ACL rounds: {rounds}, evidence: {evidence}.",
+    },
+    "trace_passed": {"ru": "пройдена", "en": "passed"},
+    "trace_not_passed": {"ru": "не пройдена", "en": "not passed"},
+    "trace_latency_detail": {"ru": "{seconds} с.", "en": "{seconds} s."},
+    "trace_missing": {"ru": "Не хватает", "en": "Missing"},
+    "trace_rounds": {"ru": "Раундов", "en": "Rounds"},
 }
 
 

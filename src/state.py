@@ -122,6 +122,8 @@ class MainState(TypedDict, total=False):
     memory_saved: bool
     guardrail: dict[str, Any]
     final_answer: str
+    presentation: dict[str, Any]
+    trace: list[dict[str, Any]]
     evidence: list[dict[str, Any]]
     acl_response: dict[str, Any]
     metrics: dict[str, Any]

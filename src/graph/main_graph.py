@@ -13,6 +13,7 @@ from ..acl import make_acl_message
 from ..guardrails import check_final_answer, check_request, extract_sql
 from ..llm import LLMClient
 from ..memory import store as memory_store
+from ..presentation import present
 from ..state import MainState
 from .analytics_graph import build_analytics_graph
 from .investigation_graph import build_investigation_graph
@@ -281,14 +282,15 @@ def build_main_graph(
     builder.add_node("investigation", investigation_branch)
     builder.add_node("refusal", refusal)
     builder.add_node("guard_answer", guard_answer)
+    builder.add_node("present", present)
     builder.add_node("finalize", finalize)
 
     builder.add_edge(START, "load_memory")
     builder.add_edge("load_memory", "save_memory")
     builder.add_conditional_edges(
         "save_memory",
-        lambda s: "finalize" if s.get("memory_saved") else "guard_request",
-        {"guard_request": "guard_request", "finalize": "finalize"},
+        lambda s: "present" if s.get("memory_saved") else "guard_request",
+        {"guard_request": "guard_request", "present": "present"},
     )
     builder.add_conditional_edges(
         "guard_request",
@@ -309,7 +311,8 @@ def build_main_graph(
     )
     for branch in ("analytics", "retrieval", "report", "investigation", "refusal"):
         builder.add_edge(branch, "guard_answer")
-    builder.add_edge("guard_answer", "finalize")
+    builder.add_edge("guard_answer", "present")
+    builder.add_edge("present", "finalize")
     builder.add_edge("finalize", END)
 
     return builder.compile(checkpointer=checkpointer or InMemorySaver())
