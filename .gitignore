@@ -1,0 +1,33 @@
+# окружение
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# секреты
+.env
+
+# IDE
+.idea/
+.vscode/
+
+# генерируемые данные
+data/pg/
+data/seed/
+logs/
+reports/*.csv
+
+# сборка
+dist/
+build/
+*.egg-info/
+
+# материалы задания (не часть проекта)
+course/
+*.pdf
+
+# node_modules для будущего UI
+node_modules/
+.next/
