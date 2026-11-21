@@ -97,6 +97,8 @@ audit.chat_messages  (conversation_id, turn_id, role, content, trace)
   присылает `client_history` как аварийный fallback.
 - Список чатов в UI пока хранится в `localStorage`. Для истории на другом
   устройстве нужен отдельный API `GET /chats` поверх `chat_threads`.
+- `pgserver` — встроенный сервер для учебного запуска, не production.
+- Данные синтетические, кроме методичек.
 
 ## Управление чатами
 
@@ -106,8 +108,13 @@ audit.chat_messages  (conversation_id, turn_id, role, content, trace)
 - UI вызывает его через тот же LangGraph API (`assistant_id=dialogue_admin`);
 - `rename` обновляет `audit.chat_threads.title`;
 - `delete` удаляет `audit.chat_threads`, а `chat_messages` уходят каскадом;
-- дополнительно UI удаляет backend-тред через `DELETE /threads/{id}`.
+- дополнительно UI удаляет backend-тред через `DELETE /threads/{id}`;
+- обе операции проверяют владельца: если у чата записан непустой
+  `auditor_id` и он не совпадает с переданным, операция отклоняется;
+- история чужого чата не загружается в контекст ответа.
+
+Это defense-in-depth, а не аутентификация: `auditor_id` выбирается в
+настройках UI. Реальная защита демо — Basic Auth на публичном туннеле,
+подробнее в README.
 
 Переименование и удаление доступны из списка чатов: карандаш и корзина.
-- `pgserver` — встроенный сервер для учебного запуска, не production.
-- Данные синтетические, кроме методичек.

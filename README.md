@@ -13,10 +13,10 @@
 |---|---|
 | Домен и план | ✅ схема «карманы → проверки → акты → пункты → скрипты» |
 | OpenSpec-спецификации | ✅ 13 возможностей, `openspec validate --specs --strict` |
-| PostgreSQL + миграции | ✅ `db/migrations/001–005`, реестр `public.schema_migrations` |
+| PostgreSQL + миграции | ✅ `db/migrations/001–006`, реестр `public.schema_migrations` |
 | Генератор данных | ✅ инварианты `data-generation`, детерминированный seed 42 |
 | QA-проверки данных | ✅ `scripts/qa_checks.py`, включая расписание, дубли, шаблоны |
-| SQL safety | ✅ `src/tools/sql_guard.py`, `src/tools/db.py`, 40 тестов |
+| SQL safety | ✅ `src/tools/sql_guard.py`, `src/tools/db.py`, 33 теста |
 | Agent protocol | ✅ `src/acl.py`: FIPA-ACL, корреляция, JSONL-журнал |
 | Analytics-агент | ✅ LangGraph: NL→SQL, шаблоны, drill-down, multi-tool |
 | Retrieval-агент | ✅ индекс методичек/пунктов/актов, гибридный поиск, цитаты, критик |
@@ -25,9 +25,8 @@
 | Основной граф | ✅ Router + ACL-ветки + `thread_id`-память + профиль аудитора |
 | Guardrails | ✅ блокировка изменения данных, PII, prompt injection, проверка SQL |
 | Веб-интерфейс | ✅ assistant-ui + LangGraph API (`ui/`) |
-| Тесты | ✅ 133 passed |
-| Остальные агенты | ⏳ report, investigation |
-| Чат-интерфейс (assistant-ui) | ⏳ следующий этап |
+| Тесты | ✅ 223 passed (`pytest -q`) |
+| Проверки интерфейса | ✅ `npm --prefix ui run lint`, `npm --prefix ui run build` |
 
 ## Спецификации (OpenSpec)
 
@@ -150,9 +149,13 @@ Copy-Item .env.example .env
 
 ## Результаты оценки
 
-Полный прогон 26 кейсов на seed 42:
+> **Статус измерений.** Таблица ниже — исторический прогон `evaluate.py`
+> на 26 кейсах (seed 42, модель `qwen3.6-35b-a3b-noreason`). Она не
+> пересчитана на текущей ревизии кода. Отчёты `reports/*.csv`,
+> `reports/*.json` и `reports/*.md` не коммитятся: их нужно сгенерировать
+> заново перед сдачей и сверить с этой таблицей.
 
-| Метрика | Значение |
+| Метрика | Значение (исторический прогон) |
 |---|---:|
 | `route_accuracy` | 1.000 |
 | `success_rate` | 0.962 (25/26) |
@@ -162,9 +165,15 @@ Copy-Item .env.example .env
 | `latency_p50_sec` | 10.9 |
 | `latency_p95_sec` | 72.1 |
 
-Единственный сбой (`an_08`, обрезка JSON плана SQL) исправлен и проверен
-отдельным прогоном: `an_08` → OK. Следующий полный прогон должен дать 26/26.
-Лимит free-тарифа — 400 chat-запросов на 3 часа.
+Единственный сбой того прогона (`an_08`, обрезка JSON плана SQL) был
+исправлен и проверен отдельным запуском. Повторный полный прогон не
+выполнялся на текущей ревизии: он расходует лимит free-тарифа
+(400 chat-запросов за 3 часа). Пока новый прогон не сделан, числа выше
+не следует приводить как результат текущей версии.
+
+Бенчмарк `data/benchmark_cases.jsonl` (49 кейсов / 65 реплик) на текущей
+ревизии также не прогонялся вживую; проверена только структура набора
+(`scripts/benchmark.py --dry-run`).
 
 ## Метрики и оценка
 
@@ -179,13 +188,15 @@ Copy-Item .env.example .env
 Результаты: `reports/metrics.csv` и `reports/metrics.md`.
 Набор: `data/test_cases.jsonl` (26 кейсов).
 
-### Бенчмарк: простые, сложные и цепочки
+### Бенчмарк: простые, средние, сложные и цепочки
 
-Дополнительный набор `data/benchmark_cases.jsonl` проверяет три уровня:
-8 простых вопросов, 5 сложных сценариев и 5 цепочек по 3 реплики. В цепочках
-контролируется перенос года, темы и кода проверки в `resolved_query` и в
-ответ, а кейс `chain_ui_recovery` восстанавливает контекст из `client_history`
-после смены нити.
+Дополнительный набор `data/benchmark_cases.jsonl` — 49 кейсов и 65 реплик:
+13 простых, 18 средних, 10 сложных и 8 цепочек по 3 реплики. Кейсы покрывают
+все основные таблицы — от `audit_pockets` и `act_items` до `script_runs`,
+`deviations`, `auditor_memory` и `dataset_metadata`. В цепочках
+контролируется перенос года, темы, типа находки, фильтра риска и кода
+проверки в `resolved_query` и ответ; `chain_ui_recovery` восстанавливает
+контекст из `client_history` после смены нити.
 
 ```powershell
 # структура набора без LLM
@@ -193,15 +204,27 @@ Copy-Item .env.example .env
 
 # уровни и отдельные кейсы
 .venv\Scripts\python.exe scripts\benchmark.py --tier simple
+.venv\Scripts\python.exe scripts\benchmark.py --tier medium
+.venv\Scripts\python.exe scripts\benchmark.py --tier complex
 .venv\Scripts\python.exe scripts\benchmark.py --tier chain
-.venv\Scripts\python.exe scripts\benchmark.py --only chain_year_theme
+.venv\Scripts\python.exe scripts\benchmark.py --only chain_overdue_risk
 ```
 
 Результаты: `reports/benchmark.csv`, `reports/benchmark.json`,
-`reports/benchmark.md`. Метрики: `success_rate` / `error_rate`,
-`route_accuracy`, `numeric_accuracy`, `tool_accuracy`, `evidence_coverage`,
-`context_retention_rate`, `context_rewrite_rate`, latency. Подробно —
-`docs/benchmark.md`.
+`reports/benchmark.md`. Оценивается не только ответ, но и процесс:
+
+- вызовы LLM, инструментов и эмбеддингов, input/output/cached токены,
+  стоимость;
+- шаги `trace`, ACL-конверт, SQL-retries, ACL-раунды Inspector;
+- время: общее, LLM, инструменты, overhead и доли;
+- версии промптов `id@vN:hash` и полный реестр версий;
+- снимок состояния агента (`state`) и `fingerprint` в JSON.
+
+Основные метрики: `answer_success_rate`, `process_success_rate`,
+`success_rate`, `route_accuracy`, `numeric_accuracy`, `tool_accuracy`,
+`steps_ok`, `evidence_coverage`, `citation_coverage`,
+`context_retention_rate`, `tokens_per_success`, `cost_per_success_usd`.
+Подробно — `docs/benchmark.md`.
 
 Документация: `docs/architecture.md`, `docs/metrics.md`,
 `docs/benchmark.md`, `docs/sql_safety.md`, `docs/screencast_script.md`.
@@ -212,6 +235,9 @@ Copy-Item .env.example .env
 # базовая проверка: клон, зависимости, БД, seed, индекс, QA, тесты, API
 python scripts/verify_clean_clone.py
 
+# проверить конкретную ветку/SHA и репозиторий, без секретов в клоне
+python scripts/verify_clean_clone.py --repo origin --ref main --no-env
+
 # плюс production-сборка UI
 python scripts/verify_clean_clone.py --with-ui
 
@@ -219,10 +245,14 @@ python scripts/verify_clean_clone.py --with-ui
 python scripts/verify_clean_clone.py --with-live --index openai
 ```
 
-Скрипт клонирует `origin/main` в отдельный каталог, поднимает БД,
+Скрипт клонирует репозиторий (`--repo`, по умолчанию `origin`) и указанную
+ревизию (`--ref`, по умолчанию `main`) в отдельный каталог, поднимает БД,
 проверяет идемпотентность seed, строит индекс, запускает QA/pytest,
-проверяет API и (опционально) UI. Клон удаляется после проверки;
-`--keep` оставляет его для разбора.
+проверяет API и (опционально) UI, а также отсутствие секретов и файлов
+больше 5 МБ в git. `--no-env` не копирует `.env` и проверяет, что офлайн-этапы
+не зависят от секретов. Клон удаляется после проверки; `--keep` оставляет
+его для разбора. В конце печатается `RESULT: OK` или `RESULT: FAIL <причина>`,
+код возврата 0/1.
 
 ## Веб-интерфейс
 
@@ -315,12 +345,15 @@ powershell -ExecutionPolicy Bypass -File scripts\share_ui.ps1
 ```
 
 Скрипт поднимает API и UI, открывает туннель и печатает адрес
-`https://<...>.trycloudflare.com`. Пароль на ссылку задаётся переменной
-`SHARE_BASIC_AUTH_PASSWORD` в `ui/.env.local`. Если нужен постоянный адрес
-и вход через Cloudflare Access (по email), см. вариант 2 в
-`docs/share_ui.md` и запуск с `-TunnelName <имя> -Hostname <домен>`.
-Если Cloudflare-туннель в вашей сети не держит соединение (`530`/`1033`),
-запускайте с `-Serveo` — тот же скрипт поднимет SSH-туннель.
+`https://<...>.trycloudflare.com`. Пароль на ссылку обязателен: он задаётся
+переменной `SHARE_BASIC_AUTH_PASSWORD` в `ui/.env.local` или скриптом
+`scripts\share_auth.ps1 -On -Password '...'`. Без пароля `share_ui.ps1`
+откажется поднимать туннель; осознанно открыть демо можно флагом `-NoAuth`.
+Если нужен постоянный адрес и вход через Cloudflare Access (по email),
+см. вариант 2 в `docs/share_ui.md` и запуск с
+`-TunnelName <имя> -Hostname <домен>`. Если Cloudflare-туннель в вашей сети
+не держит соединение (`530`/`1033`), запускайте с `-Serveo` — тот же скрипт
+поднимет SSH-туннель.
 
 > `.env` должен оставаться в ASCII. `langgraph dev` читает его через
 > `python-dotenv` с локальной кодировкой Windows (cp1251), и кириллические
@@ -342,13 +375,14 @@ powershell -ExecutionPolicy Bypass -File scripts\share_ui.ps1
 ```text
 openspec/specs/          целевые спецификации по возможностям
 src/                     конфигурация, lifecycle БД, ACL, tools (SQL-guard, templates)
-db/migrations/          001–005: расширения, схема, views, выравнивание со спеками
+src/telemetry.py          процессные метрики: LLM, tools, промпты, время
+db/migrations/          001–006: расширения, схема, views, выравнивание, история чата
 scripts/generate_data.py  детерминированная генерация CSV и методичек
 scripts/init_db.py        pgserver, миграции, read-only роль, загрузка CSV
 scripts/qa_checks.py      проверки качества данных
 scripts/demo_queries.py   демонстрационные read-only запросы
 scripts/evaluate.py       оценка по test_cases.jsonl
-scripts/benchmark.py      бенчмарк simple/complex/chain
+scripts/benchmark.py      бенчмарк simple/medium/complex/chain + процессные метрики
 scripts/run_db.py         живой PostgreSQL для ручной проверки
 scripts/run_analytics.py  CLI Analytics-агента
 scripts/run_retrieval.py  CLI Retrieval-агента
@@ -359,20 +393,96 @@ scripts/build_index.py    построение RAG-индекса
 scripts/share_ui.ps1      API + UI + туннель одной командой (docs/share_ui.md)
 scripts/share_auth.ps1    включить/выключить пароль на лету
 ui/                       assistant-ui (Next.js) поверх LangGraph API
-data/benchmark_cases.jsonl  простые, сложные и цепочечные кейсы
+data/benchmark_cases.jsonl  простые, средние, сложные и цепочечные кейсы
 data/knowledge/           методические документы для RAG
 data/seed/                сгенерированные CSV (не коммитятся)
 data/pg/                  кластер PostgreSQL (не коммитится)
 ```
 
-## Дальше по плану
+## Архитектура
 
-1. Закрыть расхождения генератора и QA со спецификацией `data-generation`.
-2. LangGraph: Router, Analytics (NL→SQL + sql_guard), Retrieval (pgvector + FTS),
-   Report + Inspector, Guardrail, FIPA-ACL между подграфами.
-3. assistant-ui поверх LangGraph API server.
-4. Метрики эффективности и качества, `scripts/evaluate.py`.
-5. A7: investigation-ветка Coordinator ↔ Analytics ↔ Retrieval.
-6. README с архитектурой, метриками и ограничениями; скринкаст ≤ 10 минут.
+```text
+UI (assistant-ui, Next.js) ── /api (same-origin proxy) ── LangGraph API
+                                                            │
+                                    ┌───────────────────────┼───────────────────────┐
+                                    ▼                       ▼                       ▼
+                                 Router              Guardrails              Memory (thread_id)
+                                    │
+        ┌───────────────┬───────────┼────────────┬──────────────────┐
+        ▼               ▼           ▼            ▼                  ▼
+   Analytics        Retrieval    Report +    Investigation      Smalltalk
+   (NL→SQL,         (RAG,       Inspector    (ACL-раунды,
+    шаблоны,         цитаты,      (проект      факт vs
+    drill-down)      критик)      акта)        гипотеза)
+        │               │           │            │
+        └───────────────┴───────────┴────────────┘
+                            │
+                   PostgreSQL: audit.* + pgvector
+```
 
-Подробный план — в `ПЛАН_ПРОЕКТА.md`.
+Подграфы общаются ACL-конвертом (`src/acl.py`), а не прямыми вызовами
+функций на уровне бизнес-логики. Подробнее: `docs/architecture.md`,
+`docs/sql_safety.md`.
+
+## Технологии
+
+- **Backend:** Python 3.12, LangGraph 1.2, OpenAI-совместимый провайдер
+  NeuralDeep (`qwen3.6-35b-a3b-noreason`, эмбеддинги `frida`), Pydantic 2.
+- **Данные:** PostgreSQL 16 (встроенный `pgserver`), pgvector, полнотекстовый
+  поиск `russian`, psycopg 3, sqlglot, миграции `db/migrations/001–006`.
+- **Frontend:** Next.js 16, React 19, `assistant-ui`, TypeScript, Tailwind CSS 4,
+  ESLint.
+- **Проверки:** pytest, `scripts/qa_checks.py`, `scripts/evaluate.py`,
+  `scripts/benchmark.py`, `scripts/verify_clean_clone.py`, OpenSpec.
+
+## Ограничения и безопасность
+
+- **Синтетические данные.** Проект учебный; набор сгенерирован seed 42.
+  Не подключайте реальные банковские данные и персональную информацию.
+- **Демо-доступ.** Публичный туннель запускается только с паролем
+  (Basic Auth) или с явным флагом `-NoAuth`. Пароль общий, персональных
+  учётных записей нет.
+- **Владение чатом.** Переименование и удаление проверяют `auditor_id`
+  владельца в PostgreSQL, но сам `auditor_id` выбирается в настройках UI и
+  не является аутентификацией. Это защита от случайных действий, а не от
+  злоумышленника с доступом к демо.
+- **Секреты.** Ключ LLM и DSN остаются на backend; `.env` и `ui/.env.local`
+  не коммитятся. В браузерном bundle ключей нет.
+- **SQL.** Только read-only `SELECT` по allowlist, роль `audit_ro`,
+  `statement_timeout` 5 секунд и принудительный `LIMIT`.
+- **Память.** Краткосрочная: `thread_id` + история в PostgreSQL и профиль
+  аудитора. Долговременной семантической памяти нет.
+- **Задержки.** Исторический p95 — около 72 секунд. Публичный туннель
+  Cloudflare обрывает запрос на 100 секундах: долгий ответ может не дойти,
+  вопрос придётся повторить.
+- **Free-тариф LLM.** 400 chat-запросов за 3 часа и 20 запросов/мин;
+  полный live-прогон расходует заметную часть лимита.
+
+## Скринкаст
+
+Сценарий на 10 минут: `docs/screencast_script.md` (аналитика, шаблон,
+drill-down, multi-tool, retrieval, отчёт, investigation, память, guardrail,
+метрики, тесты). Перед сдачей видео записывается по этому сценарию и
+проверяется в режиме инкогнито; ссылка добавляется в этот раздел.
+
+> Видео не входит в репозиторий: `*.mp4`, `*.mov` и архивы запрещены
+> правилами сдачи и `.gitignore`.
+
+## Чек-лист перед сдачей
+
+| Проверка | Команда | Ожидание |
+|---|---|---|
+| Тесты | `.venv\Scripts\python.exe -m pytest -q` | все зелёные, 0 failed |
+| QA данных | `.venv\Scripts\python.exe scripts\qa_checks.py` | без нарушений |
+| Набор оценки | `.venv\Scripts\python.exe scripts\evaluate.py --dry-run` | 26 кейсов валидны |
+| Бенчмарк | `.venv\Scripts\python.exe scripts\benchmark.py --dry-run` | 49 кейсов / 65 реплик |
+| Спецификации | `openspec validate --specs --strict` | 13 passed, 0 failed |
+| UI | `npm --prefix ui run lint` и `npm --prefix ui run build` | exit code 0 |
+| Чистый клон | `python scripts/verify_clean_clone.py --no-env --with-ui` | `RESULT: OK` |
+| Секреты | `git status`, `git ls-files` | нет `.env`, ключей, БД, видео |
+| Скринкаст | ссылка из раздела выше в инкогнито | доступна без запроса |
+
+Живой прогон `evaluate.py`/`benchmark.py` не входит в обязательные
+офлайн-проверки: он требует ключ и расходует лимит провайдера. Если он
+выполнен, обновите таблицу метрик выше, укажите дату и `run_id`, а отчёты
+в `reports/` сохраните вне git.
