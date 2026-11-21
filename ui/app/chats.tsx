@@ -315,7 +315,8 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
       }
 
       if (target) {
-        void deleteRemoteChat(target.id).catch((error) => {
+        const { auditorId } = readPreferences();
+        void deleteRemoteChat(target.id, auditorId).catch((error) => {
           console.warn("Не удалось удалить чат из БД:", error);
         });
         void deleteBackendThread(target.backendThreadId).catch((error) => {

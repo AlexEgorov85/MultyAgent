@@ -23,7 +23,12 @@ function envDefaultEnabled(): boolean {
 
 async function readFileState(): Promise<Partial<AuthState> | null> {
   try {
-    const parsed = JSON.parse(await readFile(AUTH_FILE, "utf8")) as Partial<AuthState>;
+    // Путь задаётся в рантайме (SHARE_AUTH_FILE или cwd), поэтому без
+    // turbopackIgnore сборщик трассирует весь проект. Файл читается только
+    // при обработке запроса, в бандл он не нужен.
+    const parsed = JSON.parse(
+      await readFile(/* turbopackIgnore: true */ AUTH_FILE, "utf8"),
+    ) as Partial<AuthState>;
     if (typeof parsed?.enabled !== "boolean") return null;
     return parsed;
   } catch {

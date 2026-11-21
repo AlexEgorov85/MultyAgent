@@ -36,6 +36,24 @@ NEXT_PUBLIC_LANGGRAPH_ASSISTANT_ID=audit_assistant
 LANGGRAPH_API_URL=http://127.0.0.1:2024
 ```
 
+## Пароль обязателен
+
+Публичный туннель нельзя поднять «молча без пароля». Перед запуском
+`share_ui.ps1` проверяет эффективную защиту с приоритетом:
+
+1. `ui/.share-auth.json` (`enabled`, `user`, `password`);
+2. `SHARE_AUTH_ENABLED=on|off`;
+3. `SHARE_BASIC_AUTH_PASSWORD` в окружении или `ui/.env.local`.
+
+Если защиты нет, скрипт завершается с ошибкой и подсказывает три варианта:
+задать `SHARE_BASIC_AUTH_PASSWORD` в `ui/.env.local`, включить пароль
+скриптом `scripts\share_auth.ps1 -On -Password '...'` или осознанно
+запустить с `-NoAuth` (тогда в консоль печатается предупреждение, что демо
+открыто без пароля).
+
+> Если в `ui/.share-auth.json` стоит `"enabled": false`, обычный запуск
+> тоже потребует `-NoAuth`: это защита от случайно открытого демо.
+
 ## Что подготовить заранее
 
 1. Заполнить `.env` (`OPENAI_API_KEY`) по README.
@@ -168,8 +186,10 @@ powershell -ExecutionPolicy Bypass -File scripts\share_ui.ps1 `
 попадает в чат. Доступ отзывается удалением адреса из политики; в Access
 видно, кто и когда заходил.
 
-В `ui/.env.local` при этом `SHARE_BASIC_AUTH_PASSWORD` оставьте пустым,
-иначе будет два экрана входа подряд.
+В `ui/.env.local` при этом `SHARE_BASIC_AUTH_PASSWORD` можно оставить
+пустым: доступ закрывает Cloudflare Access. Но скрипт требует явного
+подтверждения, что защита выключена локально, поэтому запускайте с
+`-NoAuth` — иначе он откажется поднимать туннель.
 
 ### Важное ограничение Cloudflare: 100 секунд
 

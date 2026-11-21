@@ -5,16 +5,9 @@ import { useI18n } from "./i18n";
 import { useSettings } from "./SettingsProvider";
 import {
   ACCENTS,
-  BACKGROUNDS,
   CHAT_FONT_SCALES,
   DEFAULT_AUDITOR_ID,
-  DENSITIES,
-  FONT_FAMILIES,
   FONT_SCALES,
-  RADII,
-  THEMES,
-  TIME_FORMATS,
-  WIDTHS,
   type Accent,
   type ChatBackground,
   type ContentWidth,

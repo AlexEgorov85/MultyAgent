@@ -2,7 +2,6 @@
 
 import {
   ComposerPrimitive,
-  ErrorPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
   useAuiState,

@@ -68,8 +68,13 @@ export async function renameRemoteChat(
 
 export async function deleteRemoteChat(
   conversationId: string,
+  auditorId = "",
 ): Promise<void> {
-  await runAdmin({ action: "delete", conversation_id: conversationId });
+  await runAdmin({
+    action: "delete",
+    conversation_id: conversationId,
+    auditor_id: auditorId,
+  });
 }
 
 export async function deleteBackendThread(

@@ -4,23 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { useChats } from "./chats";
 import { useI18n } from "./i18n";
 
-function ChatIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 9 9 0 0 1-3.8-.8L3 21l1.8-5.2A8.4 8.4 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5Z" />
-    </svg>
-  );
-}
-
 function PlusIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg

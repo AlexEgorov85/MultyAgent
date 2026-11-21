@@ -29,9 +29,12 @@ allowedDevOrigins и HMR; для показа лучше production).
 (ошибки 1033/530, "connection with edge closed").
 
 .PARAMETER NoAuth
-Не требовать логин/пароль на этот запуск (SHARE_AUTH_ENABLED=off для UI).
-Файл ui/.share-auth.json при этом всё равно имеет приоритет: если в нём
-enabled=true, пароль останется.
+Осознанно открыть демо без пароля: передаёт UI SHARE_AUTH_ENABLED=off и
+печатает явное предупреждение. Без этого флага скрипт откажется поднимать
+публичный туннель, если пароль не задан (ни SHARE_BASIC_AUTH_PASSWORD в
+ui/.env.local, ни enabled=true в ui/.share-auth.json). Файл
+ui/.share-auth.json по-прежнему приоритетнее: если в нём enabled=true,
+пароль сохранится, а -NoAuth будет проигнорирован.
 
 .PARAMETER Hostname
 Публичный hostname named-туннеля, например demo.example.com.
@@ -122,7 +125,87 @@ $envText = Get-Content $envLocal -Raw
 if ($envText -notmatch "(?m)^\s*NEXT_PUBLIC_LANGGRAPH_API_URL\s*=\s*/api\s*$") {
     Write-Warning "В ui\.env.local NEXT_PUBLIC_LANGGRAPH_API_URL должен быть /api, иначе браузер зрителя будет искать API на своём компьютере."
 }
-$hasPassword = $envText -match "(?m)^\s*SHARE_BASIC_AUTH_PASSWORD\s*=\s*\S+"
+function Read-EnvLocalValue([string]$key) {
+    if ($envText -match "(?m)^\s*$([regex]::Escape($key))\s*=\s*(.*)$") {
+        return $Matches[1].Trim().Trim('"').Trim("'")
+    }
+    return ""
+}
+
+# Приоритет как в ui/proxy.ts: ui/.share-auth.json > SHARE_AUTH_ENABLED >
+# SHARE_BASIC_AUTH_PASSWORD. Здесь считаем эффективное состояние, чтобы не
+# поднять публичный туннель, который окажется открытым без пароля.
+$authFilePath = Join-Path $uiDir ".share-auth.json"
+$authFile = $null
+if (Test-Path $authFilePath) {
+    try {
+        $authFile = Get-Content $authFilePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        Write-Warning "Не удалось прочитать $authFilePath, считаю, что файла нет."
+        $authFile = $null
+    }
+}
+
+$fileHasEnabled = $false
+$fileEnabled = $false
+$filePassword = ""
+if ($authFile) {
+    if ($authFile.PSObject.Properties.Name -contains "enabled" -and $authFile.enabled -is [bool]) {
+        $fileHasEnabled = $true
+        $fileEnabled = [bool]$authFile.enabled
+    }
+    if ($authFile.PSObject.Properties.Name -contains "password" -and $null -ne $authFile.password) {
+        $filePassword = [string]$authFile.password
+    }
+}
+
+$envPassword = Read-EnvLocalValue "SHARE_BASIC_AUTH_PASSWORD"
+if (-not $envPassword) { $envPassword = [string]$env:SHARE_BASIC_AUTH_PASSWORD }
+
+$envSwitch = Read-EnvLocalValue "SHARE_AUTH_ENABLED"
+if ($env:SHARE_AUTH_ENABLED) { $envSwitch = [string]$env:SHARE_AUTH_ENABLED }
+$envSwitch = $envSwitch.Trim().ToLowerInvariant()
+$envSwitchOff = @("off", "0", "false", "no") -contains $envSwitch
+$envSwitchOn = @("on", "1", "true", "yes") -contains $envSwitch
+
+$effectivePassword = if ($filePassword) { $filePassword } else { $envPassword }
+if ($fileHasEnabled) {
+    $authEnabled = $fileEnabled
+} elseif ($envSwitchOff) {
+    $authEnabled = $false
+} elseif ($envSwitchOn) {
+    $authEnabled = $true
+} else {
+    $authEnabled = $effectivePassword -ne ""
+}
+
+if ($authEnabled -and -not $effectivePassword) {
+    throw ("Защита паролем включена, но пароль пуст.`n" +
+        "Задайте SHARE_BASIC_AUTH_PASSWORD в ui\.env.local или пароль в ui\.share-auth.json:`n" +
+        "  powershell -ExecutionPolicy Bypass -File scripts\share_auth.ps1 -On -Password '<пароль>'")
+}
+
+if (-not $authEnabled) {
+    if ($NoAuth) {
+        Write-Warning ("ВНИМАНИЕ: -NoAuth — публичное демо будет открыто БЕЗ ПАРОЛЯ. " +
+            "Ссылку сможет открыть любой, у кого она есть.")
+    } elseif ($envSwitchOff) {
+        Write-Warning ("ВНИМАНИЕ: SHARE_AUTH_ENABLED=off — публичное демо будет открыто БЕЗ ПАРОЛЯ. " +
+            "Уберите эту настройку или задайте SHARE_BASIC_AUTH_PASSWORD в ui\.env.local.")
+    } elseif ($fileHasEnabled -and -not $fileEnabled) {
+        throw ("Публичный туннель не запущен: в ui\.share-auth.json стоит enabled=false, " +
+            "поэтому демо было бы открыто без пароля.`n" +
+            "Включите пароль: scripts\share_auth.ps1 -On -Password '<пароль>'`n" +
+            "Либо осознанно отключите защиту на этот запуск флагом -NoAuth.")
+    } else {
+        throw ("Публичный туннель не запущен: пароль для демо не задан, и ссылка была бы открыта всем.`n" +
+            "Задайте пароль одним из способов:`n" +
+            "  1. В ui\.env.local: SHARE_BASIC_AUTH_PASSWORD=<пароль> (и при необходимости SHARE_BASIC_AUTH_USER).`n" +
+            "  2. Или горячо, без перезапуска: scripts\share_auth.ps1 -On -Password '<пароль>'.`n" +
+            "Если демо действительно должно быть открытым, запустите скрипт с -NoAuth.")
+    }
+}
+
 if ($NoAuth) {
     # Наследуется процессом UI; файл .share-auth.json всё равно важнее.
     $env:SHARE_AUTH_ENABLED = "off"
@@ -269,14 +352,13 @@ try {
 
     Write-Host ""
     Write-Host "  Публичная ссылка: $publicUrl" -ForegroundColor Green
-    if ($NoAuth) {
-        Write-Host "  Пароль отключён на этот запуск (-NoAuth)." -ForegroundColor Green
-    } elseif ($hasPassword) {
+    if (-not $authEnabled) {
+        Write-Host "  ПАРОЛЬ ОТКЛЮЧЁН: ссылку может открыть любой, у кого она есть." -ForegroundColor Red
+    } elseif ($NoAuth -and $fileHasEnabled -and $fileEnabled) {
+        Write-Host "  -NoAuth проигнорирован: ui\.share-auth.json требует пароль." -ForegroundColor Yellow
         Write-Host "  Вход по паролю: SHARE_BASIC_AUTH_USER / SHARE_BASIC_AUTH_PASSWORD" -ForegroundColor Yellow
-    } elseif ($TunnelName) {
-        Write-Host "  Доступ — по политике Cloudflare Access (проверьте её в дашборде)." -ForegroundColor Yellow
     } else {
-        Write-Host "  Пароля нет: ссылку может открыть любой, у кого она есть." -ForegroundColor Yellow
+        Write-Host "  Вход по паролю: SHARE_BASIC_AUTH_USER / SHARE_BASIC_AUTH_PASSWORD" -ForegroundColor Yellow
     }
     Write-Host "  Локально: http://localhost:$UiPort" -ForegroundColor DarkGray
     Write-Host "  Логи: $logDir" -ForegroundColor DarkGray
