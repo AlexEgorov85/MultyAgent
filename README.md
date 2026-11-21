@@ -25,7 +25,7 @@
 | Основной граф | ✅ Router + ACL-ветки + `thread_id`-память + профиль аудитора |
 | Guardrails | ✅ блокировка изменения данных, PII, prompt injection, проверка SQL |
 | Веб-интерфейс | ✅ assistant-ui + LangGraph API (`ui/`) |
-| Тесты | ✅ 88 passed |
+| Тесты | ✅ 92 passed |
 | Остальные агенты | ⏳ report, investigation |
 | Чат-интерфейс (assistant-ui) | ⏳ следующий этап |
 
@@ -146,6 +146,22 @@ Copy-Item .env.example .env
 ```powershell
 .venv\Scripts\python.exe scripts\run_chat.py --auditor-id AUD-001 --thread-id demo-001
 ```
+
+## Метрики и оценка
+
+```powershell
+# проверить структуру набора без LLM
+.venv\Scripts\python.exe scripts\evaluate.py --dry-run
+
+# полный прогон (нужен OPENAI_API_KEY и построенный индекс)
+.venv\Scripts\python.exe scripts\evaluate.py
+```
+
+Результаты: `reports/metrics.csv` и `reports/metrics.md`.
+Набор: `data/test_cases.jsonl` (26 кейсов).
+
+Документация: `docs/architecture.md`, `docs/metrics.md`,
+`docs/sql_safety.md`, `docs/screencast_script.md`.
 
 ## Веб-интерфейс
 

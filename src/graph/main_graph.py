@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -66,6 +67,7 @@ def build_main_graph(
             "user_query": question,
             "profile": profile,
             "conversation_id": state.get("conversation_id", "conv-main"),
+            "metrics": {"started_at": time.perf_counter()},
         }
 
     def save_memory(state: MainState) -> dict[str, Any]:
@@ -184,9 +186,14 @@ def build_main_graph(
 
     def finalize(state: MainState) -> dict[str, Any]:
         answer = state.get("final_answer", "")
+        metrics = dict(state.get("metrics", {}))
+        started = metrics.pop("started_at", None)
+        if started is not None:
+            metrics["latency_total_sec"] = round(time.perf_counter() - started, 4)
         return {
             "messages": [{"type": "ai", "content": answer}],
             "final_answer": answer,
+            "metrics": metrics,
         }
 
     builder = StateGraph(MainState)
