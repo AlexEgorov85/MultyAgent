@@ -134,11 +134,17 @@ def build_report_graph(server, llm: LLMClient):
     def validate_citations(state: ReportState) -> dict[str, Any]:
         allowed = set(state.get("allowed_ids", []))
         draft_model = state.get("draft", {})
-        citations = [item for item in draft_model.get("citations", []) if item in allowed]
-        invalid = [item for item in draft_model.get("citations", []) if item not in allowed]
+        text = str(draft_model.get("text", "")).replace("<br>", "\n").replace("<br/>", "\n")
+        text = re.sub(r"\[\d+\]", "", text)
+        declared = draft_model.get("citations", [])
+        citations = [item for item in declared if item in allowed]
+        invalid = [item for item in declared if item not in allowed]
+        if not citations:
+            found = re.findall(r"(?:ITM|ACT|AUD)-[A-Z0-9-]+", text)
+            citations = [item for item in dict.fromkeys(found) if item in allowed]
         issues = [f"Несуществующие ID: {', '.join(invalid)}"] if invalid else []
         return {
-            "draft": {**draft_model, "citations": citations},
+            "draft": {**draft_model, "text": text, "citations": citations},
             "citations": citations,
             "citation_issues": issues,
         }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 Route = Literal["analytics", "retrieval", "report", "investigation", "out_of_domain", "unsafe"]
 
@@ -21,18 +21,22 @@ class SQLPlan(BaseModel):
     """План аналитического запроса: готовый шаблон или сгенерированный SQL."""
 
     strategy: Literal["script", "generated"]
-    template_key: str | None = None
+    template_key: str = ""
     parameters: dict[str, Any] = Field(default_factory=dict)
-    sql: str | None = None
+    sql: str = ""
     reason: str = Field(min_length=1)
 
-    @model_validator(mode="after")
-    def check_strategy(self) -> "SQLPlan":
-        if self.strategy == "script" and not self.template_key:
-            raise ValueError("Для strategy=script нужен template_key")
-        if self.strategy == "generated" and not (self.sql and self.sql.strip()):
-            raise ValueError("Для strategy=generated нужен sql")
-        return self
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs):
+        schema = super().model_json_schema(*args, **kwargs)
+        schema["required"] = [
+            "strategy",
+            "template_key",
+            "parameters",
+            "sql",
+            "reason",
+        ]
+        return schema
 
 
 class ToolCall(BaseModel):

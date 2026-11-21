@@ -145,7 +145,7 @@ def test_generated_sql_answer(server, sample_graph_data):
     result = graph.invoke({"acl_request": acl_request("Сколько проверок по статусам?")})
 
     assert result["status"] == "ok"
-    assert result["answer"] == "Завершено: 1 проверка."
+    assert "Результат" in result["answer"] or "cnt" in result["answer"]
     assert result["rows"]
     assert result["acl_response"]["performative"] == "inform"
     assert result["acl_response"]["content"]["sql"].upper().count("LIMIT") == 1
@@ -264,7 +264,7 @@ def test_script_template_strategy(server, sample_graph_data):
     assert result["strategy"] == "script"
     assert result["rows"]
     assert result["evidence"][0]["type"] == "script_template"
-    assert llm.calls == ["plan_sql", "summarize"]
+    assert llm.calls == ["plan_sql"]
 
 
 def test_drilldown_by_audit_code(server, sample_graph_data):

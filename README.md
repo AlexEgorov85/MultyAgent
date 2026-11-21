@@ -82,9 +82,10 @@ SQL и код скриптов — латиницей и не выдаются �
 ## Быстрый старт
 
 Провайдер LLM — **NeuralDeep**: OpenAI-совместимый endpoint
-`https://api.neuraldeep.ru/v1`. Чат — `qwen3.6-35b-a3b` (tools, reasoning,
-256k контекст), эмбеддинги — `frida` (RU-first, 1536 измерений).
-Ключ `sk-...` добавляется в `.env` как `OPENAI_API_KEY`.
+`https://api.neuraldeep.ru/v1`. Чат — `qwen3.6-35b-a3b-noreason`
+(быстрый структурированный вывод, 256k контекст), эмбеддинги — `frida`
+(RU-first, 1536 измерений). Ключ `sk-...` добавляется в `.env`
+как `OPENAI_API_KEY`.
 
 Нужен Python 3.12 (pgserver не поддерживает 3.13+). Если 3.12 нет:
 

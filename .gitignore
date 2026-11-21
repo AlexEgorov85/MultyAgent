@@ -35,3 +35,4 @@ node_modules/
 ui/.env.local
 ui/.next/
 .langgraph_api/
+reports/metrics.md

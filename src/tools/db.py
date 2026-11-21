@@ -29,6 +29,7 @@ audit.v_open_items, audit.v_repeat_items, audit.v_script_usage,
 audit.v_theme_year_dynamics, audit.v_items_without_scripts.
 
 Enum values:
+- theme_code: ипотека, потребкредитование, платежи, карты, вклады
 - risk_level: низкий, средний, высокий, критический
 - audit_status: запланирована, в работе, завершена, отменена
 - act_status: черновик, на согласовании, утверждён

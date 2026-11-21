@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import time
 from typing import Any, Protocol
 
 from .schemas import (
@@ -21,6 +23,22 @@ from .schemas import (
 
 class LLMError(RuntimeError):
     """LLM недоступна или вернула некорректный ответ."""
+
+
+def _extract_json(text: str) -> str:
+    """Достаёт первый JSON-объект из ответа модели."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.startswith("json"):
+            text = text[4:].strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise LLMError("В ответе модели нет JSON-объекта")
+    candidate = text[start : end + 1]
+    json.loads(candidate)
+    return candidate
 
 
 class LLMClient(Protocol):
@@ -138,32 +156,55 @@ class OpenAILLM:
         self.client = client
         self.model = model or os.getenv("LLM_MODEL", "gpt-5-mini")
 
-    def _parse(self, *, system: str, user: str, schema: type) -> Any:
+    def _request(self, **kwargs):
+        """Вызов чата с ожиданием при лимите 429 (3 запроса/мин у провайдера)."""
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                return self.client.chat.completions.create(**kwargs)
+            except Exception as exc:
+                last_error = exc
+                text = str(exc)
+                if "429" in text and attempt < 2:
+                    time.sleep(25)
+                    continue
+                raise
+        raise last_error  # pragma: no cover
+
+    def _parse(self, *, system: str, user: str, schema: type, max_tokens: int = 4096) -> Any:
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
+        schema_name = getattr(schema, "__name__", "Response")
         try:
-            response = self.client.beta.chat.completions.parse(
+            response = self._request(
                 model=self.model,
                 messages=messages,
-                response_format=schema,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": schema_name,
+                        "schema": schema.model_json_schema(),
+                        "strict": True,
+                    },
+                },
+                max_tokens=max_tokens,
                 temperature=0,
             )
-            parsed = response.choices[0].message.parsed
-            if parsed is None:
-                raise LLMError("Модель вернула пустой structured output")
-            return parsed
+            content = response.choices[0].message.content or ""
+            return schema.model_validate_json(content)
         except Exception as first_error:
             try:
-                response = self.client.chat.completions.create(
+                response = self._request(
                     model=self.model,
                     messages=messages,
                     response_format={"type": "json_object"},
+                    max_tokens=max_tokens,
                     temperature=0,
                 )
-                content = response.choices[0].message.content or "{}"
-                return schema.model_validate_json(content)
+                content = response.choices[0].message.content or ""
+                return schema.model_validate_json(_extract_json(content))
             except Exception as second_error:
                 raise LLMError(
                     f"Structured output не получен: {first_error}; {second_error}"
@@ -174,7 +215,18 @@ class OpenAILLM:
             system=(
                 "Ты — маршрутизатор ассистента внутреннего аудитора. "
                 "Выбери ровно один маршрут: analytics, retrieval, report, "
-                "investigation, out_of_domain, unsafe."
+                "investigation, out_of_domain, unsafe. "
+                "analytics — любые вопросы со словами сколько, топ, динамика, доля, "
+                "количество, просрочено, статистика. "
+                "retrieval — поиск похожих формулировок и содержания актов. "
+                "report — проект акта или раздела. "
+                "investigation — вопрос «почему/за счёт чего» с требованием "
+                "и цифр, и подтверждений. "
+                "Примеры: «Сколько завершённых проверок?» — analytics; "
+                "«Покажи пункты без скриптов» — analytics; "
+                "«Какие критические отклонения в AUD-2026-MORTGAGE-03?» — analytics; "
+                "«Найди отклонения про просроченную оценку залога» — retrieval; "
+                "«Что писали в актах про мошеннические операции?» — retrieval."
             ),
             user=(
                 f"Вопрос: {question}\nПрофиль аудитора: {profile_text or 'нет'}\n\n"
@@ -195,7 +247,9 @@ class OpenAILLM:
             system=(
                 "Ты — аналитик внутреннего аудита. Построй один read-only SELECT "
                 "по схеме audit или выбери готовый шаблон. Значения статусов — "
-                "русские строки в кавычках. Не более 200 строк."
+                "русские строки в кавычках. Для темы используй p.theme_code "
+                "('ипотека', 'потребкредитование', 'платежи', 'карты', 'вклады'), "
+                "а не title. Не более 200 строк."
             ),
             user=(
                 f"Вопрос: {question}\n\n"
@@ -263,6 +317,7 @@ class OpenAILLM:
                     },
                 ],
                 temperature=0,
+                max_tokens=1500,
             )
             text = (response.choices[0].message.content or "").strip()
             if text:
@@ -353,9 +408,10 @@ class OpenAILLM:
         return self._parse(
             system=(
                 "Ты — внутренний аудитор. Составь проект раздела акта по-русски "
-                "строго по фактам. Структура: вводная часть, выявленные отклонения "
-                "и проблемы, рекомендации, сроки. Каждое утверждение подкрепи ID "
-                "из списка. Не добавляй факты, которых нет в данных."
+                "строго по фактам. Структура: вводная часть, ключевые отклонения "
+                "и проблемы, рекомендации, сроки. Выбери не более 5 ключевых "
+                "пунктов, каждый — 1–2 предложения. Объём — до 5000 символов. "
+                "Каждое утверждение подкрепи ID из списка."
             ),
             user=(
                 f"Запрос: {question}\n\nФакты:\n{facts_text}\n\n"
@@ -363,6 +419,7 @@ class OpenAILLM:
                 "Верни ReportDraft: text, citations."
             ),
             schema=ReportDraft,
+            max_tokens=8192,
         )
 
     def review_report(
@@ -408,6 +465,7 @@ class OpenAILLM:
                 "Верни исправленный ReportDraft."
             ),
             schema=ReportDraft,
+            max_tokens=8192,
         )
 
     def plan_investigation(
@@ -459,18 +517,30 @@ class OpenAILLM:
         missing: list[str],
         rounds: int,
     ) -> InvestigationAnswer:
+        analytics_short = {
+            "answer": analytics.get("answer"),
+            "rows": (analytics.get("rows") or [])[:10],
+            "evidence": (analytics.get("evidence") or [])[:10],
+        }
+        retrieval_short = {
+            "answer": retrieval.get("answer"),
+            "citations": (retrieval.get("citations") or [])[:10],
+            "sources": (retrieval.get("sources") or [])[:5],
+            "evidence": (retrieval.get("evidence") or [])[:10],
+        }
         return self._parse(
             system=(
                 "Ты синтезируешь итог расследования. Отделяй подтверждённый факт "
                 "от гипотезы. Причинное утверждение допустимо только при наличии "
-                "и количественных, и текстовых доказательств. Если доказательств "
-                "не хватает — скажи об этом прямо."
+                "и количественных, и текстовых доказательств. Ответ — до 1200 "
+                "символов, без пересказа всех входных данных."
             ),
             user=(
                 f"Вопрос: {question}\nРаундов: {rounds}\n"
-                f"Analytics: {analytics}\nRetrieval: {retrieval}\n"
+                f"Analytics: {analytics_short}\nRetrieval: {retrieval_short}\n"
                 f"Не хватает: {', '.join(missing) or 'ничего'}\n\n"
-                "Верни InvestigationAnswer: text, causal_claim."
+                "Верни InvestigationAnswer: text (до 1200 символов), causal_claim."
             ),
             schema=InvestigationAnswer,
+            max_tokens=8192,
         )

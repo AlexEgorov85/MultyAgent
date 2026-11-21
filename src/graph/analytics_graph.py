@@ -100,6 +100,10 @@ def build_analytics_graph(server, llm: LLMClient):
             )
         except Exception as exc:
             return _fail(state, f"Не удалось построить план: {exc}")
+        if plan.strategy == "script" and not plan.template_key.strip():
+            return _fail(state, "Модель выбрала шаблон, но не указала template_key")
+        if plan.strategy == "generated" and not plan.sql.strip():
+            return _fail(state, "Модель не вернула SQL")
         return {"plan": plan.model_dump(), "strategy": plan.strategy}
 
     def run_script(state: AnalyticsState) -> dict[str, Any]:
@@ -210,14 +214,24 @@ def build_analytics_graph(server, llm: LLMClient):
 
         calls: list[dict[str, Any]] = []
         evidence: list[dict[str, Any]] = []
-        lines: list[str] = []
+        code_match = AUDIT_CODE_RE.search(state["question"])
+        audit_code = code_match.group(0).upper() if code_match else ""
+        lines: list[str] = [f"Проверка {audit_code}:" if audit_code else "Результаты:"]
         for call in plan.calls[:5]:
+            name = call.name.split("(", 1)[0].strip()
+            arguments = dict(call.arguments)
+            if name in ("get_audit", "get_act", "get_act_items"):
+                if not arguments.get("audit_code"):
+                    arguments["audit_code"] = audit_code
+                arguments.pop("audit_id", None)
+            if name == "search_acts" and not arguments.get("query"):
+                arguments["query"] = state["question"]
             try:
-                result = execute_tool(server, call.name, call.arguments)
+                result = execute_tool(server, name, arguments)
             except Exception as exc:
-                lines.append(f"{call.name}: ошибка — {exc}")
+                lines.append(f"{name}: ошибка — {exc}")
                 continue
-            calls.append({"name": call.name, "arguments": call.arguments})
+            calls.append({"name": name, "arguments": arguments})
             if isinstance(result, list):
                 lines.append(f"{call.name}: {len(result)} результатов")
                 for row in result[:10]:
@@ -245,6 +259,23 @@ def build_analytics_graph(server, llm: LLMClient):
             "strategy": "multi_tool",
         }
 
+    def _format_rows(rows: list[dict[str, Any]], columns: list[str]) -> str:
+        if not rows:
+            return "По заданным условиям ничего не найдено."
+        if len(rows) == 1:
+            parts = []
+            for column in columns:
+                value = rows[0].get(column)
+                if value is not None:
+                    parts.append(f"{column}: {value}")
+            if parts:
+                return "Результат — " + ", ".join(parts) + "."
+        preview = "; ".join(
+            ", ".join(f"{column}={row.get(column)}" for column in columns)
+            for row in rows[:5]
+        )
+        return f"Найдено строк: {len(rows)}. Первые: {preview}."
+
     def summarize(state: AnalyticsState) -> dict[str, Any]:
         if state.get("status") in ("refused", "failed"):
             return {}
@@ -253,17 +284,7 @@ def build_analytics_graph(server, llm: LLMClient):
             return {}
 
         rows = state.get("rows", [])
-        if not rows:
-            answer = "По заданным условиям ничего не найдено."
-        else:
-            try:
-                answer = llm.summarize(
-                    question=state["question"],
-                    columns=state.get("columns", []),
-                    rows=rows,
-                )
-            except Exception:
-                answer = f"Найдено строк: {len(rows)}."
+        answer = _format_rows(rows, state.get("columns", []))
         return {"answer": answer}
 
     def pack_response(state: AnalyticsState) -> dict[str, Any]:

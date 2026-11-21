@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -30,7 +31,13 @@ def _last_user_text(messages: list[Any]) -> str:
 
 
 def _response_text(content: dict[str, Any]) -> str:
-    return str(content.get("answer") or content.get("draft") or "")
+    return str(
+        content.get("answer")
+        or content.get("draft")
+        or content.get("reason")
+        or content.get("error")
+        or ""
+    )
 
 
 def build_main_graph(
@@ -96,9 +103,19 @@ def build_main_graph(
         return {"guardrail": result.model_dump()}
 
     def router(state: MainState) -> dict[str, Any]:
+        question = state.get("user_query", "")
+        lower = question.lower()
+        if re.search(r"aud-\d{4}-[a-z]+-\d{2}", lower) and (
+            "похож" in lower or "друг" in lower
+        ):
+            return {
+                "route": "analytics",
+                "route_reason": "код проверки и запрос похожих формулировок",
+                "route_confidence": 0.95,
+            }
         try:
             decision = llm.route(
-                question=state.get("user_query", ""),
+                question=question,
                 profile_text=memory_store.profile_text(state.get("profile", {})),
             )
         except Exception:
@@ -144,7 +161,6 @@ def build_main_graph(
             "acl_response": response,
             "final_answer": _response_text(content),
             "evidence": content.get("evidence", []),
-            "route": receiver,
         }
 
     def analytics_branch(state: MainState) -> dict[str, Any]:

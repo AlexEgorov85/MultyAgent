@@ -171,6 +171,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Оценка ассистента")
     parser.add_argument("--dry-run", action="store_true", help="только проверить кейсы")
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--only", nargs="*", default=[], help="ID конкретных кейсов")
     args = parser.parse_args()
 
     cases = load_cases()
@@ -190,7 +191,11 @@ def main() -> int:
             print(f"  {route}: {count}")
         return 0
 
-    selected = cases[: args.limit] if args.limit else cases
+    selected = cases
+    if args.only:
+        selected = [case for case in cases if case["id"] in args.only]
+    elif args.limit:
+        selected = cases[: args.limit]
     server = db_runtime.start_server()
     try:
         llm = OpenAILLM()

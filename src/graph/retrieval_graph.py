@@ -76,6 +76,16 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
             }
         return {"chunks": chunks, "search_mode": result["mode"]}
 
+    def _fallback_answer(chunks: list[dict[str, Any]]) -> RetrievalAnswer:
+        top = chunks[0]
+        return RetrievalAnswer(
+            text=(
+                f"Наиболее релевантный фрагмент «{top['title']}»: "
+                f"{top['content'][:900]}"
+            ),
+            citations=[top["source_id"]],
+        )
+
     def generate(state: RetrievalState) -> dict[str, Any]:
         try:
             answer = llm.answer_from_chunks(
@@ -83,6 +93,9 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
             )
         except Exception as exc:
             return {"status": "failed", "error": f"Не удалось сформировать ответ: {exc}"}
+        text = answer.text.strip().lower()
+        if not answer.citations or "corrected text" in text or len(text) < 5:
+            answer = _fallback_answer(state["chunks"])
         return {"answer": answer.model_dump(), "citations": answer.citations}
 
     def validate_citations(state: RetrievalState) -> dict[str, Any]:
@@ -91,6 +104,13 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
         citations = [item for item in answer.get("citations", []) if item in allowed]
         invalid = [item for item in answer.get("citations", []) if item not in allowed]
         issues = [f"Несуществующие источники: {', '.join(invalid)}"] if invalid else []
+        if not citations and not invalid and state.get("chunks"):
+            fallback = _fallback_answer(state["chunks"])
+            return {
+                "answer": fallback.model_dump(),
+                "citations": fallback.citations,
+                "citation_issues": [],
+            }
         return {
             "answer": {**answer, "citations": citations},
             "citations": citations,
