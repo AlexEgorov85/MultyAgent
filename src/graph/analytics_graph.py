@@ -371,9 +371,17 @@ def build_analytics_graph(server, llm: LLMClient):
                     "completed_audits_count",
                 ):
                     if status_value.startswith("заверш"):
-                        headline_label = "Завершённых проверок"
+                        headline_label = (
+                            "Completed audits"
+                            if english
+                            else "Завершённых проверок"
+                        )
                     elif status_value.startswith("complet"):
-                        headline_label = "Completed audits"
+                        headline_label = (
+                            "Completed audits"
+                            if english
+                            else "Завершённых проверок"
+                        )
                 # Условия вопроса (год, тема, статус) пользователь уже знает:
                 # не дублируем их и не показываем технические имена колонок.
                 return f"{headline_label}: {row[headline]}."

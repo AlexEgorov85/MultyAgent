@@ -9,6 +9,15 @@ export default function GlobalError({
 }) {
   return (
     <html lang="ru">
+      <head>
+        <style>{`
+          body { background: #f8fafc; color: #0f172a; }
+          @media (prefers-color-scheme: dark) {
+            body { background: #0b1120; color: #e2e8f0; }
+            p { color: #94a3b8 !important; }
+          }
+        `}</style>
+      </head>
       <body
         style={{
           margin: 0,
@@ -16,8 +25,6 @@ export default function GlobalError({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#f8fafc",
-          color: "#0f172a",
           fontFamily:
             'Segoe UI, Inter, system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif',
           textAlign: "center",

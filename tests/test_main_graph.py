@@ -133,7 +133,8 @@ def test_short_term_memory_accumulates_messages(server, main_data):
     graph = build_main_graph(server, MainLLM(), analytics_llm=analytics)
 
     first = _invoke(graph, "thread-short", "Сколько проверок?")
-    assert "cnt" in first["final_answer"]
+    assert first["final_answer"] == "Всего: 1."
+    assert "cnt" not in first["final_answer"]
     assert len(first["messages"]) == 2
 
     second = _invoke(graph, "thread-short", "Сколько ещё?")

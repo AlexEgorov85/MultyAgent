@@ -10,6 +10,8 @@ import {
 } from "@assistant-ui/react";
 import { useCallback, useState } from "react";
 import { SettingsDialog } from "./SettingsDialog";
+import { useSettings } from "./SettingsProvider";
+import { AgentTrace } from "./AgentTrace";
 import { LANGUAGES, useI18n } from "./i18n";
 
 function GearIcon({ className = "h-5 w-5" }: { className?: string }) {
@@ -46,11 +48,31 @@ function MenuIcon({ className = "h-5 w-5" }: { className?: string }) {
   );
 }
 
+function MessageTimestamp() {
+  const { settings } = useSettings();
+  const { lang } = useI18n();
+  const createdAt = useAuiState((state) => state.message.createdAt);
+
+  if (!settings.showTimestamps || !createdAt) return null;
+
+  const date = new Date(createdAt as string | number | Date);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const text = new Intl.DateTimeFormat(lang === "en" ? "en-GB" : "ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: settings.timeFormat === "12h",
+  }).format(date);
+
+  return <div className="mt-1 text-[0.65rem] app-muted-2">{text}</div>;
+}
+
 function UserMessage() {
   return (
     <MessagePrimitive.Root className="ml-auto max-w-[85%]">
-      <div className="rounded-2xl rounded-br-md bg-slate-900 px-4 py-3 text-[0.95rem] leading-relaxed text-white shadow-sm">
+      <div className="app-user-bubble app-bubble app-round app-chat-text shadow-sm">
         <MessagePrimitive.Parts />
+        <MessageTimestamp />
       </div>
     </MessagePrimitive.Root>
   );
@@ -58,23 +80,28 @@ function UserMessage() {
 
 function AssistantMessage() {
   const { t } = useI18n();
+  const { settings } = useSettings();
 
   return (
     <MessagePrimitive.Root className="mr-auto max-w-[92%]">
       <div className="flex gap-3">
-        <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-xs font-bold text-white shadow">
-          {t.assistantInitial}
-        </div>
-        <div className="min-w-0 rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 text-[0.95rem] leading-relaxed text-slate-800 shadow-sm">
-          <div className="aui-text">
+        {settings.showAvatars ? (
+          <div className="app-accent-gradient mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold shadow">
+            {t.assistantInitial}
+          </div>
+        ) : null}
+        <div className="app-assistant-bubble app-bubble app-round min-w-0 border shadow-sm">
+          <div className="aui-text app-chat-text">
             <MessagePrimitive.Parts />
           </div>
           <MessagePrimitive.Error>
-            <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-relaxed text-rose-700">
+            <div className="app-danger app-round-sm mt-2 border px-3 py-2 text-xs leading-relaxed">
               <div className="font-semibold">{t.errorTitle}</div>
               <div className="mt-0.5">{t.errorHint}</div>
             </div>
           </MessagePrimitive.Error>
+          {settings.showAgentTrace ? <AgentTrace /> : null}
+          <MessageTimestamp />
         </div>
       </div>
     </MessagePrimitive.Root>
@@ -83,32 +110,37 @@ function AssistantMessage() {
 
 function EmptyState() {
   const { t } = useI18n();
+  const { settings } = useSettings();
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col items-center px-4 py-16 text-center">
-      <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-2xl text-white shadow-lg">
+      <div className="app-accent-gradient app-round mb-5 flex h-14 w-14 items-center justify-center text-2xl shadow-lg">
         {t.assistantInitial}
       </div>
-      <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+      <h1 className="text-2xl font-semibold tracking-tight app-text">
         {t.emptyTitle}
       </h1>
-      <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-500">
+      <p className="mt-2 max-w-md text-sm leading-relaxed app-muted">
         {t.emptyDescription}
       </p>
       <div className="mt-7 grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-        {t.suggestions.map((item) => (
-          <ThreadPrimitive.Suggestion
-            key={item.title}
-            prompt={item.text}
-            send
-            className="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-left transition hover:border-indigo-300 hover:bg-white hover:shadow-sm"
-          >
-            <div className="text-sm font-medium text-slate-800">{item.title}</div>
-            <div className="mt-0.5 line-clamp-2 text-xs text-slate-500">
-              {item.text}
-            </div>
-          </ThreadPrimitive.Suggestion>
-        ))}
+        {settings.showSuggestions
+          ? t.suggestions.map((item) => (
+              <ThreadPrimitive.Suggestion
+                key={item.title}
+                prompt={item.text}
+                send
+                className="app-surface app-border app-round-sm border px-4 py-3 text-left transition app-accent-hover hover:shadow-sm"
+              >
+                <div className="text-sm font-medium app-text">
+                  {item.title}
+                </div>
+                <div className="mt-0.5 line-clamp-2 text-xs app-muted">
+                  {item.text}
+                </div>
+              </ThreadPrimitive.Suggestion>
+            ))
+          : null}
       </div>
     </div>
   );
@@ -121,8 +153,8 @@ function ThinkingStatus() {
   if (!running) return null;
 
   return (
-    <div className="mb-2 flex items-center justify-center gap-2 text-xs text-indigo-600">
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500" />
+    <div className="mb-2 flex items-center justify-center gap-2 text-xs app-accent-text">
+      <span className="app-accent-dot h-1.5 w-1.5 animate-pulse rounded-full" />
       {t.thinking}
     </div>
   );
@@ -158,7 +190,7 @@ function HeaderMenu({
         aria-expanded={open}
         aria-label={t.menuHint}
         onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white/80 px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700"
+        className="app-surface app-border app-muted app-round-sm flex items-center gap-1.5 border px-2.5 py-1.5 text-xs font-medium transition app-accent-hover"
       >
         <MenuIcon className="h-4 w-4" />
         <span className="hidden sm:inline">{t.menu}</span>
@@ -166,13 +198,13 @@ function HeaderMenu({
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 z-40 mt-1 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-sm shadow-xl"
+          className="app-surface app-border app-round-sm absolute right-0 z-40 mt-1 w-48 overflow-hidden border py-1 text-sm shadow-xl"
         >
           <button
             type="button"
             role="menuitem"
             onClick={() => run(onNewChat)}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 transition hover:bg-slate-50"
+            className="app-menu-item flex w-full items-center gap-2 px-3 py-2 text-left transition"
           >
             <span className="text-base leading-none">＋</span>
             {t.newChat}
@@ -181,7 +213,7 @@ function HeaderMenu({
             type="button"
             role="menuitem"
             onClick={() => run(onSettings)}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 transition hover:bg-slate-50"
+            className="app-menu-item flex w-full items-center gap-2 px-3 py-2 text-left transition"
           >
             <GearIcon className="h-4 w-4" />
             {t.settings}
@@ -194,6 +226,7 @@ function HeaderMenu({
 
 export default function Home() {
   const { lang, setLang, t } = useI18n();
+  const { settings } = useSettings();
   const aui = useAui();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -208,30 +241,32 @@ export default function Home() {
 
   return (
     <div className="flex h-dvh flex-col">
-      <header className="border-b border-slate-200/70 bg-white/70 backdrop-blur">
-        <div className="mx-auto flex max-w-4xl items-center gap-3 px-4 py-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-bold text-white shadow">
+      <header className="app-header app-glass border-b">
+        <div className="app-shell app-header-pad mx-auto flex items-center gap-3 px-4">
+          <div className="app-accent-gradient app-round-sm flex h-9 w-9 items-center justify-center text-sm font-bold shadow">
             {t.assistantInitial}
           </div>
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-slate-900">
+            <div className="truncate text-sm font-semibold app-text">
               {t.appTitle}
             </div>
-            <div className="truncate text-[0.7rem] text-slate-500">
+            <div className="truncate text-[0.7rem] app-muted">
               {t.tagline}
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <div className="hidden items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[0.7rem] font-medium text-emerald-700 sm:flex">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              {t.online}
-            </div>
+            {settings.showOnline ? (
+              <div className="app-online hidden items-center gap-2 rounded-full border px-3 py-1 text-[0.7rem] font-medium sm:flex">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                {t.online}
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={() => setLang(lang === "ru" ? "en" : "ru")}
               aria-label={t.interfaceLanguage}
               title={t.interfaceLanguage}
-              className="rounded-xl border border-slate-200 bg-white/80 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700"
+              className="app-surface app-border app-muted app-round-sm border px-2.5 py-1.5 text-xs font-semibold transition app-accent-hover"
             >
               {LANGUAGES.find((item) => item.code === lang)?.short ??
                 lang.toUpperCase()}
@@ -249,7 +284,7 @@ export default function Home() {
           <ThreadPrimitive.Empty>
             <EmptyState />
           </ThreadPrimitive.Empty>
-          <div className="mx-auto flex max-w-4xl flex-col gap-5 px-4 py-6">
+          <div className="app-shell app-msg-gap mx-auto flex flex-col px-4 py-6">
             <ThreadPrimitive.Messages>
               {({ message }) =>
                 message.role === "user" ? <UserMessage /> : <AssistantMessage />
@@ -258,20 +293,21 @@ export default function Home() {
           </div>
         </ThreadPrimitive.Viewport>
 
-        <ThreadPrimitive.ViewportFooter className="border-t border-slate-200/70 bg-white/80 px-4 py-3 backdrop-blur">
-          <div className="mx-auto max-w-4xl">
+        <ThreadPrimitive.ViewportFooter className="app-footer app-glass border-t px-4 app-footer-pad">
+          <div className="app-shell mx-auto">
             <ThinkingStatus />
-            <ComposerPrimitive.Root className="flex items-end gap-2 rounded-2xl border border-slate-300 bg-white p-2 shadow-sm focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100">
+            <ComposerPrimitive.Root className="app-surface app-border app-composer-pad app-round app-ring flex items-end gap-2 border shadow-sm">
               <ComposerPrimitive.Input
                 placeholder={t.placeholder}
                 rows={1}
-                className="max-h-40 flex-1 resize-none bg-transparent px-2 py-2 text-[0.95rem] text-slate-900 outline-none placeholder:text-slate-400"
+                submitMode={settings.enterToSend ? "enter" : "ctrlEnter"}
+                className="app-input app-text max-h-40 flex-1 resize-none bg-transparent px-2 py-2 text-[0.95rem] outline-none"
               />
-              <ComposerPrimitive.Send className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40">
+              <ComposerPrimitive.Send className="app-primary app-round-sm px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40">
                 {t.send}
               </ComposerPrimitive.Send>
             </ComposerPrimitive.Root>
-            <div className="mt-2 text-center text-[0.68rem] text-slate-400">
+            <div className="mt-2 text-center text-[0.68rem] app-muted-2">
               {t.disclaimer}
             </div>
           </div>
@@ -283,7 +319,7 @@ export default function Home() {
         onClick={() => setSettingsOpen(true)}
         aria-label={t.settings}
         title={t.settings}
-        className="fixed bottom-24 left-4 z-40 flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-600 shadow-lg backdrop-blur transition hover:border-indigo-300 hover:text-indigo-600 sm:bottom-4"
+        className="app-surface app-border app-muted app-glass app-accent-hover fixed bottom-24 left-4 z-40 flex h-10 w-10 items-center justify-center rounded-full border shadow-lg transition sm:bottom-4"
       >
         <GearIcon />
       </button>

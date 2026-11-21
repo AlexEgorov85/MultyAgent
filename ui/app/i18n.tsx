@@ -6,15 +6,10 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useState,
   type ReactNode,
 } from "react";
-import {
-  LANGUAGES,
-  readLanguage,
-  writeLanguage,
-  type Lang,
-} from "./preferences";
+import { useSettings } from "./SettingsProvider";
+import { LANGUAGES, type Lang } from "./preferences";
 
 type Suggestion = {
   title: string;
@@ -54,6 +49,80 @@ export type Dictionary = {
   errorTitle: string;
   errorHint: string;
   assistantInitial: string;
+  agentPath: string;
+  appearanceTab: string;
+  behaviorTab: string;
+  dataTab: string;
+  aboutTab: string;
+  theme: string;
+  themeHint: string;
+  themeLight: string;
+  themeDark: string;
+  themeSystem: string;
+  accent: string;
+  accentHint: string;
+  accentIndigo: string;
+  accentViolet: string;
+  accentEmerald: string;
+  accentAmber: string;
+  accentRose: string;
+  accentSky: string;
+  fontSize: string;
+  fontSizeHint: string;
+  chatFontSize: string;
+  chatFontSizeHint: string;
+  density: string;
+  densityHint: string;
+  densityCompact: string;
+  densityCozy: string;
+  densityComfortable: string;
+  corners: string;
+  cornersHint: string;
+  cornersSharp: string;
+  cornersSoft: string;
+  cornersRound: string;
+  contentWidth: string;
+  contentWidthHint: string;
+  widthNarrow: string;
+  widthNormal: string;
+  widthWide: string;
+  animations: string;
+  animationsHint: string;
+  animationsOn: string;
+  animationsOff: string;
+  glass: string;
+  glassHint: string;
+  glassOn: string;
+  glassOff: string;
+  fontFamily: string;
+  fontFamilyHint: string;
+  fontSystem: string;
+  fontSerif: string;
+  fontMono: string;
+  background: string;
+  backgroundHint: string;
+  backgroundGradient: string;
+  backgroundPlain: string;
+  timeFormat: string;
+  timeFormatHint: string;
+  time24: string;
+  time12: string;
+  showAvatars: string;
+  showAvatarsHint: string;
+  showSuggestions: string;
+  showSuggestionsHint: string;
+  showOnline: string;
+  showOnlineHint: string;
+  showAgentTrace: string;
+  showAgentTraceHint: string;
+  enterToSend: string;
+  enterToSendHint: string;
+  showTimestamps: string;
+  showTimestampsHint: string;
+  dataHint: string;
+  resetSettings: string;
+  resetSettingsHint: string;
+  resetConfirm: string;
 };
 
 const DICTIONARIES: Record<Lang, Dictionary> = {
@@ -82,7 +151,7 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     stackLabel: "Стек",
     versionLabel: "Версия",
     versionValue: "0.1.0",
-    preferencesSaved: "Изменения сохраняются автоматически",
+    preferencesSaved: "Изменения сохраняются сразу",
     emptyTitle: "Ассистент внутреннего аудитора",
     emptyDescription:
       "Задайте вопрос по карманам, проверкам и находкам. Ассистент построит безопасный SQL, найдёт подтверждения в актах и подготовит проект раздела.",
@@ -112,6 +181,81 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     errorTitle: "Не удалось получить ответ",
     errorHint: "Проверьте, что LangGraph API запущен, и повторите запрос.",
     assistantInitial: "А",
+    agentPath: "Путь работы агента",
+    appearanceTab: "Интерфейс",
+    behaviorTab: "Поведение",
+    dataTab: "Данные",
+    aboutTab: "О системе",
+    theme: "Тема",
+    themeHint: "Светлая, тёмная или как в системе.",
+    themeLight: "Светлая",
+    themeDark: "Тёмная",
+    themeSystem: "Системная",
+    accent: "Акцентный цвет",
+    accentHint: "Цвет кнопок, ссылок и активных элементов.",
+    accentIndigo: "Индиго",
+    accentViolet: "Фиолетовый",
+    accentEmerald: "Изумрудный",
+    accentAmber: "Янтарный",
+    accentRose: "Розовый",
+    accentSky: "Небесный",
+    fontSize: "Размер интерфейса",
+    fontSizeHint: "Масштаб меню, кнопок и отступов.",
+    chatFontSize: "Размер текста чата",
+    chatFontSizeHint: "Только сообщения ассистента и пользователя.",
+    density: "Плотность",
+    densityHint: "Насколько просторно располагать сообщения.",
+    densityCompact: "Компактная",
+    densityCozy: "Обычная",
+    densityComfortable: "Просторная",
+    corners: "Скругление углов",
+    cornersHint: "Форма карточек, полей и кнопок.",
+    cornersSharp: "Острые",
+    cornersSoft: "Мягкие",
+    cornersRound: "Круглые",
+    contentWidth: "Ширина диалога",
+    contentWidthHint: "Максимальная ширина ленты сообщений.",
+    widthNarrow: "Узкая",
+    widthNormal: "Обычная",
+    widthWide: "Широкая",
+    animations: "Анимации",
+    animationsHint: "Плавные переходы и подсветка.",
+    animationsOn: "Включены",
+    animationsOff: "Выключены",
+    glass: "Стеклянный эффект",
+    glassHint: "Полупрозрачные шапка и панель ввода.",
+    glassOn: "Включён",
+    glassOff: "Выключен",
+    fontFamily: "Шрифт",
+    fontFamilyHint: "Основной шрифт интерфейса.",
+    fontSystem: "Системный",
+    fontSerif: "С засечками",
+    fontMono: "Моноширинный",
+    background: "Фон чата",
+    backgroundHint: "Градиентная подложка или ровный фон.",
+    backgroundGradient: "Градиент",
+    backgroundPlain: "Ровный",
+    timeFormat: "Формат времени",
+    timeFormatHint: "Как показывать время сообщений.",
+    time24: "24 часа",
+    time12: "12 часов",
+    showAvatars: "Аватар ассистента",
+    showAvatarsHint: "Показывать значок рядом с ответами.",
+    showSuggestions: "Подсказки на старте",
+    showSuggestionsHint: "Показывать карточки с примерами вопросов.",
+    showOnline: "Статус «онлайн»",
+    showOnlineHint: "Индикатор доступности в шапке.",
+    showAgentTrace: "Путь работы агента",
+    showAgentTraceHint: "Показывать раскрываемый список шагов под ответом.",
+    enterToSend: "Enter отправляет сообщение",
+    enterToSendHint:
+      "Если выключено, Enter переносит строку, а отправка — Ctrl+Enter.",
+    showTimestamps: "Время сообщений",
+    showTimestampsHint: "Показывать время рядом с каждым сообщением.",
+    dataHint: "Профиль аудитора, новый диалог и сброс настроек.",
+    resetSettings: "Сбросить настройки",
+    resetSettingsHint: "Вернуть тему, цвета, размеры и поведение по умолчанию.",
+    resetConfirm: "Сбросить все настройки интерфейса?",
   },
   en: {
     appTitle: "Internal Audit Assistant",
@@ -138,7 +282,7 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     stackLabel: "Stack",
     versionLabel: "Version",
     versionValue: "0.1.0",
-    preferencesSaved: "Changes are saved automatically",
+    preferencesSaved: "Changes are saved instantly",
     emptyTitle: "Internal Audit Assistant",
     emptyDescription:
       "Ask about audit pockets, audits and findings. The assistant builds safe SQL, finds evidence in acts and drafts a report section.",
@@ -168,6 +312,81 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     errorTitle: "Could not get an answer",
     errorHint: "Make sure the LangGraph API is running and try again.",
     assistantInitial: "A",
+    agentPath: "Agent run path",
+    appearanceTab: "Appearance",
+    behaviorTab: "Behavior",
+    dataTab: "Data",
+    aboutTab: "About",
+    theme: "Theme",
+    themeHint: "Light, dark or follow the system.",
+    themeLight: "Light",
+    themeDark: "Dark",
+    themeSystem: "System",
+    accent: "Accent color",
+    accentHint: "Color of buttons, links and active elements.",
+    accentIndigo: "Indigo",
+    accentViolet: "Violet",
+    accentEmerald: "Emerald",
+    accentAmber: "Amber",
+    accentRose: "Rose",
+    accentSky: "Sky",
+    fontSize: "Interface size",
+    fontSizeHint: "Scale of menus, buttons and spacing.",
+    chatFontSize: "Chat text size",
+    chatFontSizeHint: "Only user and assistant message text.",
+    density: "Density",
+    densityHint: "How spacious the message list is.",
+    densityCompact: "Compact",
+    densityCozy: "Cozy",
+    densityComfortable: "Comfortable",
+    corners: "Corner radius",
+    cornersHint: "Shape of cards, inputs and buttons.",
+    cornersSharp: "Sharp",
+    cornersSoft: "Soft",
+    cornersRound: "Round",
+    contentWidth: "Content width",
+    contentWidthHint: "Maximum width of the message list.",
+    widthNarrow: "Narrow",
+    widthNormal: "Normal",
+    widthWide: "Wide",
+    animations: "Animations",
+    animationsHint: "Smooth transitions and highlights.",
+    animationsOn: "On",
+    animationsOff: "Off",
+    glass: "Glass effect",
+    glassHint: "Translucent header and composer.",
+    glassOn: "On",
+    glassOff: "Off",
+    fontFamily: "Font",
+    fontFamilyHint: "Main interface font.",
+    fontSystem: "System",
+    fontSerif: "Serif",
+    fontMono: "Monospace",
+    background: "Chat background",
+    backgroundHint: "Gradient backdrop or a flat color.",
+    backgroundGradient: "Gradient",
+    backgroundPlain: "Flat",
+    timeFormat: "Time format",
+    timeFormatHint: "How message time is displayed.",
+    time24: "24-hour",
+    time12: "12-hour",
+    showAvatars: "Assistant avatar",
+    showAvatarsHint: "Show the icon next to answers.",
+    showSuggestions: "Starter suggestions",
+    showSuggestionsHint: "Show example question cards on the empty screen.",
+    showOnline: "Online status",
+    showOnlineHint: "Availability indicator in the header.",
+    showAgentTrace: "Agent run path",
+    showAgentTraceHint: "Show a collapsible list of steps under the answer.",
+    enterToSend: "Enter sends the message",
+    enterToSendHint:
+      "When off, Enter inserts a newline and Ctrl+Enter sends.",
+    showTimestamps: "Message time",
+    showTimestampsHint: "Show the time next to each message.",
+    dataHint: "Auditor profile, new chat and settings reset.",
+    resetSettings: "Reset settings",
+    resetSettingsHint: "Restore the default theme, colors, sizes and behavior.",
+    resetConfirm: "Reset all interface settings?",
   },
 };
 
@@ -180,16 +399,15 @@ type LanguageContextValue = {
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [lang, setLangState] = useState<Lang>("ru");
+  const { settings, setSetting } = useSettings();
+  const lang = settings.language;
 
-  useEffect(() => {
-    setLangState(readLanguage());
-  }, []);
-
-  const setLang = useCallback((next: Lang) => {
-    setLangState(next);
-    writeLanguage(next);
-  }, []);
+  const setLang = useCallback(
+    (next: Lang) => {
+      setSetting("language", next);
+    },
+    [setSetting],
+  );
 
   useEffect(() => {
     const desired = DICTIONARIES[lang].appTitle;

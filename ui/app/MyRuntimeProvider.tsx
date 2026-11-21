@@ -18,6 +18,14 @@ type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
+  trace?: TraceStep[];
+};
+
+type TraceStep = {
+  step: string;
+  title: string;
+  detail?: string;
+  status?: string;
 };
 
 type ContentPart = { type?: string; text?: string };
@@ -98,6 +106,10 @@ export function MyRuntimeProvider({
       id: message.id,
       role: message.role,
       content: [{ type: "text", text: message.text }],
+      metadata:
+        message.trace && message.trace.length > 0
+          ? { custom: { trace: message.trace } }
+          : undefined,
     }),
     [],
   );
@@ -115,6 +127,7 @@ export function MyRuntimeProvider({
     setIsRunning(true);
 
     let answer: string;
+    let trace: TraceStep[] = [];
     try {
       threadId.current ??= await createThread(language);
       const waitUrl = `${API_BASE}/threads/${threadId.current}/runs/wait`;
@@ -139,11 +152,13 @@ export function MyRuntimeProvider({
           ? `Ошибка API: ${response.status} ${response.statusText}`
           : `API error: ${response.status} ${response.statusText}`;
       } else {
+        const state = await response.json();
         answer =
-          answerFromState(await response.json()) ||
+          answerFromState(state) ||
           (ru
             ? "Не удалось получить ответ от агента."
             : "The agent did not return an answer.");
+        trace = Array.isArray(state?.trace) ? (state.trace as TraceStep[]) : [];
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
@@ -154,7 +169,7 @@ export function MyRuntimeProvider({
 
     setMessages((prev) => [
       ...prev,
-      { id: newId(), role: "assistant", text: answer },
+      { id: newId(), role: "assistant", text: answer, trace },
     ]);
   }, []);
 
