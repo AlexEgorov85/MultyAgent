@@ -133,6 +133,41 @@ def build_main_graph(
     def router(state: MainState) -> dict[str, Any]:
         question = state.get("user_query", "")
         lower = question.lower()
+        compact = re.sub(r"\s+", " ", lower).strip(" !?.,…")
+        if any(
+            phrase in compact
+            for phrase in (
+                "что ты умеешь",
+                "что ты можешь",
+                "чем ты можешь помочь",
+                "чем можешь помочь",
+                "твои возможности",
+                "кто ты",
+                "расскажи о себе",
+                "what can you do",
+                "who are you",
+            )
+        ):
+            return {
+                "route": "smalltalk",
+                "route_reason": "smalltalk:capabilities",
+                "route_confidence": 0.99,
+            }
+        if re.match(
+            r"^(привет|здравствуй(те)?|добрый (день|вечер)|доброе утро|хай|hello|hi|hey)\b",
+            compact,
+        ):
+            return {
+                "route": "smalltalk",
+                "route_reason": "smalltalk:greeting",
+                "route_confidence": 0.99,
+            }
+        if re.match(r"^(спасибо|благодарю|thanks|thank you)\b", compact):
+            return {
+                "route": "smalltalk",
+                "route_reason": "smalltalk:thanks",
+                "route_confidence": 0.99,
+            }
         if re.search(r"aud-\d{4}-[a-z]+-\d{2}", lower) and (
             "похож" in lower or "друг" in lower
         ):
@@ -245,6 +280,49 @@ def build_main_graph(
             )
         return {"final_answer": answer, "evidence": []}
 
+    def smalltalk(state: MainState) -> dict[str, Any]:
+        reason = str(state.get("route_reason") or "")
+        kind = reason.split(":", 1)[-1] if ":" in reason else "greeting"
+        capabilities = _pick(
+            state,
+            "Я — ассистент внутреннего аудитора. Умею:\n\n"
+            "- считать показатели по базе: проверки, пункты, отклонения, просрочки;\n"
+            "- искать подтверждения в актах и методичках;\n"
+            "- готовить проект раздела акта и проверять его Inspector'ом;\n"
+            "- разбирать причины отклонений по данным и цитатам;\n"
+            "- запоминать профиль аудитора между сессиями.\n\n"
+            "Например: «Сколько завершённых проверок по ипотеке в 2026 году?»",
+            "I am an internal audit assistant. I can:\n\n"
+            "- compute metrics from the database: audits, items, deviations, overdue;\n"
+            "- find evidence in acts and methodologies;\n"
+            "- draft an act section and review it with the Inspector;\n"
+            "- investigate why deviations grew, using data and citations;\n"
+            "- remember the auditor profile between sessions.\n\n"
+            "For example: “How many mortgage audits were completed in 2026?”",
+        )
+        greeting = _pick(
+            state,
+            "Здравствуйте! Я ассистент внутреннего аудитора. Могу посчитать "
+            "показатели по базе, найти подтверждения в актах, подготовить проект "
+            "раздела акта и разобрать причины отклонений. Чем помочь?",
+            "Hello! I am an internal audit assistant. I can compute metrics from "
+            "the database, find evidence in acts, draft an act section and "
+            "investigate deviations. How can I help?",
+        )
+        thanks = _pick(
+            state,
+            "Пожалуйста! Если нужно, задайте следующий вопрос по проверкам, актам "
+            "или отклонениям.",
+            "You are welcome! Ask another question about audits, acts or deviations.",
+        )
+        if kind == "capabilities":
+            answer = capabilities
+        elif kind == "thanks":
+            answer = thanks
+        else:
+            answer = greeting
+        return {"final_answer": answer, "evidence": []}
+
     def guard_answer(state: MainState) -> dict[str, Any]:
         route = state.get("route")
         result = check_final_answer(
@@ -278,6 +356,7 @@ def build_main_graph(
     builder.add_node("retrieval", retrieval_branch)
     builder.add_node("report", report_branch)
     builder.add_node("investigation", investigation_branch)
+    builder.add_node("smalltalk", smalltalk)
     builder.add_node("refusal", refusal)
     builder.add_node("guard_answer", guard_answer)
     builder.add_node("present", present)
@@ -303,11 +382,19 @@ def build_main_graph(
             "retrieval": "retrieval",
             "report": "report",
             "investigation": "investigation",
+            "smalltalk": "smalltalk",
             "out_of_domain": "refusal",
             "unsafe": "refusal",
         },
     )
-    for branch in ("analytics", "retrieval", "report", "investigation", "refusal"):
+    for branch in (
+        "analytics",
+        "retrieval",
+        "report",
+        "investigation",
+        "smalltalk",
+        "refusal",
+    ):
         builder.add_edge(branch, "guard_answer")
     builder.add_edge("guard_answer", "present")
     builder.add_edge("present", "finalize")

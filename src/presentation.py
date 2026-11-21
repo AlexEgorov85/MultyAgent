@@ -481,6 +481,13 @@ def build_presentation(state: dict[str, Any]) -> dict[str, Any]:
             or t(_lang(state), "present_no_answer"),
             "facts": [],
         }
+    if route == "smalltalk":
+        return {
+            "kind": "text",
+            "text": str(state.get("final_answer") or "").strip()
+            or t(_lang(state), "present_no_answer"),
+            "facts": [],
+        }
     if route == "analytics":
         return _present_analytics(state)
     if route == "retrieval":

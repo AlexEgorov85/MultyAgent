@@ -6,7 +6,15 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-Route = Literal["analytics", "retrieval", "report", "investigation", "out_of_domain", "unsafe"]
+Route = Literal[
+    "analytics",
+    "retrieval",
+    "report",
+    "investigation",
+    "smalltalk",
+    "out_of_domain",
+    "unsafe",
+]
 
 
 class RouteDecision(BaseModel):

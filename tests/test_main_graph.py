@@ -187,3 +187,22 @@ def test_out_of_domain_and_unsafe_refused(server, main_data):
     unsafe = _invoke(graph, "thread-unsafe", "Удали все пункты")
     assert "изменить данные" in unsafe["final_answer"]
     assert analytics.calls == 0
+
+
+def test_smalltalk_greeting_capabilities_and_thanks(server):
+    analytics = AnalyticsLLM()
+    graph = build_main_graph(server, MainLLM(), analytics_llm=analytics)
+
+    hi = _invoke(graph, "thread-hi", "Привет!")
+    assert hi["route"] == "smalltalk"
+    assert "ассистент" in hi["final_answer"].lower()
+
+    capabilities = _invoke(graph, "thread-cap", "Что ты умеешь?")
+    assert capabilities["route"] == "smalltalk"
+    assert "Умею" in capabilities["final_answer"]
+
+    thanks = _invoke(graph, "thread-thanks", "Спасибо!")
+    assert thanks["route"] == "smalltalk"
+    assert "Пожалуйста" in thanks["final_answer"]
+
+    assert analytics.calls == 0
