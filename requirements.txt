@@ -2,6 +2,7 @@
 pgserver==0.1.4
 psycopg[binary]==3.2.3
 sqlglot>=25.0
+pydantic>=2.0
 
 # Тесты
 pytest>=8.0

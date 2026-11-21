@@ -17,6 +17,7 @@
 | Генератор данных | ✅ инварианты `data-generation`, детерминированный seed 42 |
 | QA-проверки данных | ✅ `scripts/qa_checks.py`, включая расписание, дубли, шаблоны |
 | SQL safety | ✅ `src/tools/sql_guard.py`, `src/tools/db.py`, 40 тестов |
+| Agent protocol | ✅ `src/acl.py`: FIPA-ACL, корреляция, JSONL-журнал |
 | LangGraph-агенты | ⏳ следующий этап |
 | Чат-интерфейс (assistant-ui) | ⏳ следующий этап |
 
@@ -104,7 +105,7 @@ python -m uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 
 ```text
 openspec/specs/          целевые спецификации по возможностям
-src/                     конфигурация, lifecycle БД, tools (SQL-guard, templates)
+src/                     конфигурация, lifecycle БД, ACL, tools (SQL-guard, templates)
 db/migrations/          001–005: расширения, схема, views, выравнивание со спеками
 scripts/generate_data.py  детерминированная генерация CSV и методичек
 scripts/init_db.py        pgserver, миграции, read-only роль, загрузка CSV
