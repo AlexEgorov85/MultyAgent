@@ -16,6 +16,7 @@
                         создаётся без --branch, а checkout делается внутри клона;
     --no-env            не создавать .env в клоне: проверка, что офлайн-этапы
                         не требуют секретов;
+    --api-port PORT     порт LangGraph API для проверки (по умолчанию 2024);
     --keep              не удалять клон после проверки (путь печатается);
     --workdir PATH      каталог клона;
     --index MODE        hash | openai | skip;
@@ -24,7 +25,8 @@
 
 Скрипт:
 1. клонирует указанную ревизию в отдельный каталог;
-2. создаёт venv на Python 3.12 через uv;
+2. создаёт venv на Python 3.12 через uv, а если uv нет — через текущий
+   интерпретатор 3.12;
 3. ставит requirements.txt;
 4. генерирует данные, поднимает БД, применяет миграции, грузит seed;
 5. проверяет идемпотентность повторной загрузки;
@@ -62,6 +64,7 @@ IS_WINDOWS = os.name == "nt"
 
 DEFAULT_REPO = "origin"
 DEFAULT_REF = "main"
+DEFAULT_API_PORT = 2024
 # Файлы больше этого размера в git считаются тяжёлыми артефактами.
 MAX_TRACKED_FILE_BYTES = 5 * 1024 * 1024
 
@@ -287,7 +290,25 @@ def find_uv() -> list[str]:
 
 def prepare_python(clone: Path) -> Path:
     print("\n=== 2. Python 3.12, venv и зависимости ===")
-    uv = find_uv()
+    try:
+        uv = find_uv()
+    except CheckError as exc:
+        print(f"[python] uv не найден ({exc}); использую venv текущего Python")
+        if sys.version_info[:2] != (3, 12):
+            raise CheckError(
+                "Нужен Python 3.12: uv не найден, а текущий интерпретатор — "
+                f"{sys.version_info.major}.{sys.version_info.minor}. "
+                "Установите uv (`python -m pip install --user uv`) или Python 3.12."
+            ) from exc
+        run([sys.executable, "-m", "venv", ".venv"], cwd=clone, timeout=600)
+        python = venv_python(clone)
+        run(
+            [str(python), "-m", "pip", "install", "-r", "requirements.txt"],
+            cwd=clone,
+            timeout=1800,
+        )
+        return python
+
     run([*uv, "python", "install", "3.12"], cwd=clone, timeout=600)
     run(
         [*uv, "venv", "--python", "3.12", ".venv"],
@@ -391,15 +412,15 @@ def stop_process(process: subprocess.Popen) -> None:
         process.kill()
 
 
-def check_api(clone: Path) -> None:
+def check_api(clone: Path, api_port: int = DEFAULT_API_PORT) -> None:
     print("\n=== 8. LangGraph API ===")
-    url = "http://127.0.0.1:2024"
+    url = f"http://127.0.0.1:{api_port}"
     executable = venv_tool(clone, "langgraph")
     log_path = clone / "data" / "pg" / "langgraph-dev.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = log_path.open("w", encoding="utf-8")
     process = subprocess.Popen(
-        [str(executable), "dev", "--port", "2024", "--no-browser"],
+        [str(executable), "dev", "--port", str(api_port), "--no-browser"],
         cwd=str(clone),
         stdout=log_file,
         stderr=subprocess.STDOUT,
@@ -606,6 +627,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="не создавать .env в клоне (проверка работы без секретов)",
     )
+    parser.add_argument(
+        "--api-port",
+        type=int,
+        default=DEFAULT_API_PORT,
+        metavar="PORT",
+        help=(
+            "порт LangGraph API для проверки "
+            f"(по умолчанию {DEFAULT_API_PORT}); задайте свободный, "
+            "если 2024 уже занят"
+        ),
+    )
     parser.add_argument("--with-ui", action="store_true", help="собрать Next.js UI")
     parser.add_argument("--with-live", action="store_true", help="живой LLM-запрос")
     parser.add_argument("--keep", action="store_true", help="не удалять клон")
@@ -626,7 +658,7 @@ def run_verification(args: argparse.Namespace) -> None:
         prepare_env(clone, no_env=args.no_env)
         prepare_data(python, clone, args.index)
         run_checks(python, clone)
-        check_api(clone)
+        check_api(clone, api_port=args.api_port)
         if args.with_ui:
             check_ui(clone)
         if args.with_live:

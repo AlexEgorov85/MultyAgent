@@ -28,6 +28,7 @@ def test_parser_defaults():
     assert args.keep is False
     assert args.workdir is None
     assert args.index == "hash"
+    assert args.api_port == 2024
 
 
 def test_parser_accepts_new_flags():
@@ -52,7 +53,7 @@ def test_help_lists_new_flags(capsys):
         build_parser().parse_args(["--help"])
     assert excinfo.value.code == 0
     output = capsys.readouterr().out
-    for flag in ("--repo", "--ref", "--no-env", "--keep", "--workdir"):
+    for flag in ("--repo", "--ref", "--no-env", "--keep", "--workdir", "--api-port"):
         assert flag in output
 
 
