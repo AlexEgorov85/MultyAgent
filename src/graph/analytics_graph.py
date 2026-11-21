@@ -296,10 +296,16 @@ def build_analytics_graph(server, llm: LLMClient):
     COLUMN_LABELS = {
         "year": "год",
         "period_year": "год",
+        "pocket_year": "год",
         "theme_code": "тема",
+        "theme": "тема",
         "status": "статус",
+        "act_status": "статус акта",
+        "item_status": "статус пункта",
+        "risk_level": "уровень риска",
         "audit_code": "проверка",
         "audit_count": "Проверок",
+        "completed_count": "Завершённых проверок",
         "completed_audits_count": "Завершённых проверок",
         "count": "Всего",
         "total": "Всего",
@@ -313,6 +319,7 @@ def build_analytics_graph(server, llm: LLMClient):
     }
     HEADLINE_COLUMNS = (
         "completed_audits_count",
+        "completed_count",
         "audit_count",
         "overdue_open_items_count",
         "critical_open_count",
@@ -354,15 +361,22 @@ def build_analytics_graph(server, llm: LLMClient):
                 None,
             )
             if headline is not None:
-                text = f"{label(headline)}: {row[headline]}"
-                details = [
-                    f"{label(column)}: {row[column]}"
-                    for column in columns
-                    if column != headline and row.get(column) is not None
-                ]
-                if details:
-                    text += " (" + ", ".join(details) + ")"
-                return text + "."
+                headline_label = label(headline)
+                status_value = str(
+                    row.get("status") or row.get("act_status") or ""
+                ).strip().lower()
+                if headline in (
+                    "audit_count",
+                    "completed_count",
+                    "completed_audits_count",
+                ):
+                    if status_value.startswith("заверш"):
+                        headline_label = "Завершённых проверок"
+                    elif status_value.startswith("complet"):
+                        headline_label = "Completed audits"
+                # Условия вопроса (год, тема, статус) пользователь уже знает:
+                # не дублируем их и не показываем технические имена колонок.
+                return f"{headline_label}: {row[headline]}."
             parts = [
                 f"{label(column)}: {rows[0].get(column)}"
                 for column in columns
