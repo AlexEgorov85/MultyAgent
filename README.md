@@ -91,6 +91,16 @@ python -m uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 .venv\Scripts\python.exe -m pytest -q
 ```
 
+Проверить базу вручную:
+
+```powershell
+# поднять сервер и получить DSN (Ctrl+C — остановить)
+.venv\Scripts\python.exe scripts\run_db.py
+
+# прогнать демонстрационные read-only запросы через sql_guard
+.venv\Scripts\python.exe scripts\demo_queries.py --json reports\demo_queries.json
+```
+
 `init_db.py` поднимает встроенный PostgreSQL 16 через `pgserver`,
 применяет миграции и создаёт read-only роль `audit_ro`.
 
@@ -110,6 +120,8 @@ db/migrations/          001–005: расширения, схема, views, вы
 scripts/generate_data.py  детерминированная генерация CSV и методичек
 scripts/init_db.py        pgserver, миграции, read-only роль, загрузка CSV
 scripts/qa_checks.py      проверки качества данных
+scripts/demo_queries.py   демонстрационные read-only запросы
+scripts/run_db.py         живой PostgreSQL для ручной проверки
 data/knowledge/           методические документы для RAG
 data/seed/                сгенерированные CSV (не коммитятся)
 data/pg/                  кластер PostgreSQL (не коммитится)

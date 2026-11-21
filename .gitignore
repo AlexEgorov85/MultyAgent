@@ -18,6 +18,7 @@ data/pg/
 data/seed/
 logs/
 reports/*.csv
+reports/*.json
 
 # сборка
 dist/
