@@ -417,3 +417,17 @@ def test_summarize_and_write_reports(tmp_path):
     assert "Бенчмарк ассистента аудитора" in markdown
     assert "chain_test" in markdown
     assert "boom" in markdown
+
+
+def test_summary_counts_sql_queries():
+    rows = [
+        {
+            "case_id": "sql_queries_case",
+            "tier": "simple",
+            "success": True,
+            "latency_sec": 1.0,
+            "sql_queries": 3,
+        }
+    ]
+    summary = summarize(rows)
+    assert summary["sql_queries_total"] == 3

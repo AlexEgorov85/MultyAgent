@@ -471,6 +471,7 @@ def _base_row(case: dict[str, Any], turn: dict[str, Any], step: int) -> dict[str
         "acl_receiver": "",
         "state_fingerprint": "",
         "sql_retries": 0,
+        "sql_queries": 0,
         "inspector_iterations": 0,
         "retrieval_chunks": 0,
         "prompts": "",
@@ -554,6 +555,7 @@ def evaluate_turn(
     metrics = content.get("metrics") if isinstance(content.get("metrics"), dict) else {}
     acl_rounds = int(metrics.get("acl_rounds") or content.get("rounds") or 0)
     sql_retries = int(metrics.get("sql_retries") or 0)
+    sql_queries = int(process.get("sql_queries", 0) or 0)
     inspector_iterations = int(metrics.get("inspector_iterations") or 0)
     retrieval_chunks = int(metrics.get("chunks") or 0)
     evidence_applicable = bool(
@@ -715,6 +717,7 @@ def evaluate_turn(
             "acl_receiver": str(acl_state.get("receiver") or ""),
             "state_fingerprint": str(state.get("fingerprint") or ""),
             "sql_retries": sql_retries,
+            "sql_queries": sql_queries,
             "inspector_iterations": inspector_iterations,
             "retrieval_chunks": retrieval_chunks,
             "prompts": prompt_text,
@@ -881,6 +884,7 @@ def summarize(rows: Sequence[dict[str, Any]]) -> dict[str, float | int]:
             total_tool_calls / successful_count if successful_count else 0.0
         ),
         "sql_retries_total": sum(int(row.get("sql_retries", 0)) for row in rows),
+        "sql_queries_total": sum(int(row.get("sql_queries", 0)) for row in rows),
         "acl_rounds_total": sum(int(row.get("acl_rounds", 0)) for row in rows),
         "inspector_iterations_total": sum(
             int(row.get("inspector_iterations", 0)) for row in rows
