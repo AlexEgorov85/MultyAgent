@@ -30,6 +30,18 @@ build/
 course/
 *.pdf
 
+# видео и архивы не входят в репозиторий
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.zip
+*.7z
+*.rar
+*.tar
+*.gz
+
 # node_modules для будущего UI
 node_modules/
 .next/
@@ -38,6 +50,9 @@ ui/.next/
 .langgraph_api/
 reports/metrics.md
 reports/benchmark.md
+reports/benchmark_diff.md
+reports/benchmark_backlog.md
+reports/improvement_proposal*.md
 
 # next dev regenerates this file
 ui/AGENTS.md
