@@ -8,7 +8,7 @@ assistant-ui (Next.js)
         ▼
 MainGraph: Router + Guardrails + память + диалоговый контекст
         │ FIPA-ACL
-        ├── AnalyticsAgent   (NL→SQL, шаблоны, drill-down, multi-tool)
+        ├── AnalyticsAgent   (QueryPlan/semantic layer + шаблоны, fallback NL→SQL)
         ├── RetrievalAgent   (pgvector + FTS, цитаты, критик)
         ├── ReportAgent      (проект акта + Inspector)
         └── InvestigationCoordinator (2 раунда ACL)
@@ -70,10 +70,24 @@ audit.chat_messages  (conversation_id, turn_id, role, content, trace)
 
 | Агент | Состояние | Ключевые узлы |
 |---|---|---|
-| Analytics | `AnalyticsState` | plan → validate → execute → repair → summarize |
+| Analytics | `AnalyticsState` | capability/QueryPlan → compile/validate → execute → repair → summarize, fallback на свободный SQL |
 | Retrieval | `RetrievalState` | retrieve → generate → critic → rewrite |
 | Report | `ReportState` | collect_facts → draft → inspector → revise |
 | Investigation | `InvestigationState` | plan → round1 → round2 → synthesize |
+
+## Query IR и capability
+
+Analytics не просит LLM писать SQL сразу:
+
+1. deterministic matcher выбирает typed capability для явных вопросов
+   (сводка по статусам, топ находок, динамика, просрочки, пункты без скриптов);
+2. иначе LLM возвращает `QueryPlan(metric, dimensions, filters)` по каталогу
+   `src/semantic/catalog.py`, а SQL собирает `src/query/compiler.py`;
+3. при неподдержанной метрике — fallback на свободный `SQLPlan`, который
+   проходит тот же `sql_guard`.
+
+Так модель не придумывает колонки и `template_key`, а допустимые значения
+проверяются до выполнения. Подробнее — `docs/query_ir.md`.
 
 ## Данные
 

@@ -287,12 +287,15 @@
 # один кейс или подмножество
 .venv\Scripts\python.exe scripts\benchmark.py --only chain_overdue_risk
 .venv\Scripts\python.exe scripts\benchmark.py --limit 5
+
+# пересчитать отчёты после исправления самого бенчмарка, без LLM
+.venv\Scripts\python.exe scripts\benchmark_rescore.py --backup
 ```
 
 Полный прогон требует `OPENAI_API_KEY`, построенный RAG-индекс и свободный
 лимит провайдера. На free-тарифе NeuralDeep — 400 chat-запросов за 3 часа.
 65 реплик — это не 65 запросов: с учётом router, SQL-плана, саммари,
-Inspector и investigation полный прогон может занять 150–250 chat-запросов,
+Inspector и investigation полный прогон занял 263 chat-запроса,
 поэтому запускайте его после сброса лимита или используйте `--tier`/`--limit`.
 Количество фактических вызовов LLM видно в `llm_calls_total` и
 `llm_attempts_total`.
@@ -335,6 +338,40 @@ Inspector и investigation полный прогон может занять 150
 - провал `medium_template_*` при успешных обычных SQL-кейсах → модель
   игнорирует готовые шаблоны.
 
+## Исторический прогон 22.11.2026 (baseline до Query IR)
+
+Полный прогон 22.11.2026, `qwen3.6-35b-a3b-noreason`, seed 42,
+`run_id` `1795295013-13fd4f`.
+Это baseline **до** внедрения Query IR; после архитектурных изменений нужен
+новый прогон.
+
+| Метрика | Значение |
+|---|---:|
+| `answer_success_rate` | 0.631 |
+| `process_success_rate` | 0.677 |
+| `success_rate` | 0.538 |
+| `case_success_rate` | 0.449 |
+| `route_accuracy` | 0.985 |
+| `numeric_accuracy` | 0.651 |
+| `context_retention_rate` | 0.938 |
+| `context_rewrite_rate` | 0.812 |
+| `tool_accuracy` | 0.500 |
+| `strategy_accuracy` | 0.500 |
+| `evidence_coverage` | 0.774 |
+| `citation_coverage` | 0.800 |
+| `latency_mean_sec` | 15.676 |
+| `latency_p95_sec` | 61.979 |
+| `llm_calls_total` | 263 |
+| `total_tokens_total` | 419568 |
+| `cost_usd_total` | 0.275 |
+| `tokens_per_success` | 11988 |
+| `sql_retries_total` | 8 |
+| `llm_errors_total` | 0 |
+
+Первичный JSON до исправления matcher чисел сохранён как
+`reports/benchmark_unresolved.json`; исправленный — `reports/benchmark.json`.
+Разбор провалов — `reports/benchmark_backlog.md`.
+
 ## Воспроизводимость
 
 - seed данных 42;
@@ -349,17 +386,24 @@ Inspector и investigation полный прогон может занять 150
 Если данные перегенерированы с другим seed, числа в `expected_numbers`
 нужно пересчитать.
 
-## Статус текущего прогона
-
-На текущей ревизии живой прогон бенчмарка **не выполнялся**. Проверено
-только:
-
-- `scripts/benchmark.py --dry-run` — структура 49 кейсов / 65 реплик,
-  уровни и покрытие таблиц;
-- `pytest -q` — unit-тесты валидации, скоринга и отчётов.
+## Как перепроверить прогон
 
 Файлы `reports/benchmark.csv`, `reports/benchmark.json` и
-`reports/benchmark.md` не коммитятся. Если в них остался частичный прогон
-(например, один кейс с `error_rate = 1.0`), это артефакт прерванного
-запуска, а не оценка системы. Перед сдачей бенчмарк нужно прогнать целиком
-и сохранить свежие отчёты вместе с `run_id` и версиями промптов.
+`reports/benchmark.md` не коммитятся, поэтому в чистом клоне их нет.
+Чтобы получить свежие цифры:
+
+```powershell
+.venv\Scripts\python.exe scripts\benchmark.py
+.venv\Scripts\python.exe scripts\benchmark_triage.py
+```
+
+Если изменился только скоринг (matcher чисел, разметка проверок), повторный
+прогон LLM не нужен:
+
+```powershell
+.venv\Scripts\python.exe scripts\benchmark_rescore.py --backup
+```
+
+Сравнивать прогоны нужно через `scripts/benchmark_diff.py` с `--gate`.
+Числа выше не следует выдавать за результат текущей ревизии, пока не
+выполнен новый прогон и не сохранён его `run_id`.

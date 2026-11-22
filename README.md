@@ -13,19 +13,22 @@
 |---|---|
 | Домен и план | ✅ схема «карманы → проверки → акты → пункты → скрипты» |
 | OpenSpec-спецификации | ✅ 13 возможностей, `openspec validate --specs --strict` |
-| PostgreSQL + миграции | ✅ `db/migrations/001–006`, реестр `public.schema_migrations` |
+| PostgreSQL + миграции | ✅ `db/migrations/001–007`, реестр `public.schema_migrations` |
 | Генератор данных | ✅ инварианты `data-generation`, детерминированный seed 42 |
 | QA-проверки данных | ✅ `scripts/qa_checks.py`, включая расписание, дубли, шаблоны |
 | SQL safety | ✅ `src/tools/sql_guard.py`, `src/tools/db.py`, 33 теста |
 | Agent protocol | ✅ `src/acl.py`: FIPA-ACL, корреляция, JSONL-журнал |
-| Analytics-агент | ✅ LangGraph: NL→SQL, шаблоны, drill-down, multi-tool |
+| Analytics-агент | ✅ QueryPlan → детерминированный SQL, шаблоны, drill-down, multi-tool, fallback NL→SQL |
+| Query IR | ✅ semantic catalog + детерминированный SQL-компилятор |
+| Capabilities | ✅ typed templates + deterministic matcher |
+| Dialogue slots | ✅ year/theme/item_type/risk/status/audit_code |
 | Retrieval-агент | ✅ индекс методичек/пунктов/актов, гибридный поиск, цитаты, критик |
 | Report + Inspector | ✅ проект акта, проверка ID и evidence, до 2 исправлений |
 | Investigation (A7) | ✅ Coordinator, два раунда ACL, факт vs гипотеза |
 | Основной граф | ✅ Router + ACL-ветки + `thread_id`-память + профиль аудитора |
 | Guardrails | ✅ блокировка изменения данных, PII, prompt injection, проверка SQL |
 | Веб-интерфейс | ✅ assistant-ui + LangGraph API (`ui/`) |
-| Тесты | ✅ 223 passed (`pytest -q`) |
+| Тесты | ✅ 284 passed (`pytest -q`) |
 | Проверки интерфейса | ✅ `npm --prefix ui run lint`, `npm --prefix ui run build` |
 
 ## Спецификации (OpenSpec)
@@ -69,7 +72,7 @@ openspec list --specs
   дублей внутри акта нет, проверки одного аудитора не пересекаются по датам.
 - Ловушки для демонстрации: отменённая проверка без акта, акт на согласовании,
   пункт без скрипта, просроченный открытый пункт, запуск со статусом `ошибка`,
-  трёхуровневый номер пункта (`5.2.1`).
+  трёхуровневый номер пункта (`5.1.1`).
 
 Baseline соответствует спецификациям `data-platform` и `data-generation`.
 Остальные спецификации реализуются поэтапно.
@@ -152,8 +155,9 @@ Copy-Item .env.example .env
 > **Статус измерений.** Таблица ниже — исторический прогон `evaluate.py`
 > на 26 кейсах (seed 42, модель `qwen3.6-35b-a3b-noreason`). Она не
 > пересчитана на текущей ревизии кода. Отчёты `reports/*.csv`,
-> `reports/*.json` и `reports/*.md` не коммитятся: их нужно сгенерировать
-> заново перед сдачей и сверить с этой таблицей.
+> `reports/*.json` и сгенерированные `reports/*.md` не коммитятся
+> (кроме `reports/README.md`): их нужно сгенерировать заново перед сдачей
+> и сверить с этой таблицей.
 
 | Метрика | Значение (исторический прогон) |
 |---|---:|
@@ -171,9 +175,15 @@ Copy-Item .env.example .env
 (400 chat-запросов за 3 часа). Пока новый прогон не сделан, числа выше
 не следует приводить как результат текущей версии.
 
-Бенчмарк `data/benchmark_cases.jsonl` (49 кейсов / 65 реплик) на текущей
-ревизии также не прогонялся вживую; проверена только структура набора
-(`scripts/benchmark.py --dry-run`).
+Бенчмарк `data/benchmark_cases.jsonl` (49 кейсов / 65 реплик) прогнан
+22.11.2026 на `qwen3.6-35b-a3b-noreason` (baseline до внедрения Query IR,
+`run_id` `1795295013-13fd4f`): `answer_success_rate` 0.631,
+`process_success_rate` 0.677, `success_rate` 0.538, `case_success_rate` 0.449,
+`route_accuracy` 0.985, `numeric_accuracy` 0.651, `context_retention_rate` 0.938.
+Расход: 263 LLM-вызова, 419 568 токенов, $0.275; p95 latency 62 с.
+Первичный отчёт до исправления matcher чисел сохранён как
+`reports/benchmark_unresolved.json`, исправленный — `reports/benchmark.json`,
+разбор провалов — `reports/benchmark_backlog.md`.
 
 ## Метрики и оценка
 
@@ -183,6 +193,9 @@ Copy-Item .env.example .env
 
 # полный прогон (нужен OPENAI_API_KEY и построенный индекс)
 .venv\Scripts\python.exe scripts\evaluate.py
+
+# три прогона с mean/std (расходует лимит провайдера)
+.venv\Scripts\python.exe scripts\evaluate.py --repeat 3
 ```
 
 Результаты: `reports/metrics.csv` и `reports/metrics.md`.
@@ -226,8 +239,31 @@ Copy-Item .env.example .env
 `context_retention_rate`, `tokens_per_success`, `cost_per_success_usd`.
 Подробно — `docs/benchmark.md`.
 
+### Автоматическая доработка по бенчмарку
+
+```powershell
+# backlog провалов: категории, приоритеты, файлы и команды проверки
+.venv\Scripts\python.exe scripts\benchmark_triage.py
+
+# безопасное предложение по топ-кластеру (без изменения кода)
+.venv\Scripts\python.exe scripts\improve_agent.py --index 1
+
+# сравнение baseline/candidate и regression-gate
+Copy-Item reports\benchmark.json reports\benchmark_baseline.json
+# ... изменение и новый прогон ...
+.venv\Scripts\python.exe scripts\benchmark_diff.py ^
+    reports\benchmark_baseline.json reports\benchmark.json --gate
+```
+
+Triage отделяет провайдера/runtime от ошибок агента, группирует провалы по
+router/context/tools/SQL/evidence/citations/numeric/efficiency и пишет
+`reports/benchmark_backlog.md`. Diff считает Δ success, токенов, latency и
+стоимости; `--gate` возвращает код 1 при регрессиях. Архитектура цикла —
+`docs/improvement_loop.md`.
+
 Документация: `docs/architecture.md`, `docs/metrics.md`,
-`docs/benchmark.md`, `docs/sql_safety.md`, `docs/screencast_script.md`.
+`docs/benchmark.md`, `docs/improvement_loop.md`, `docs/improvement_plan.md`,
+`docs/query_ir.md`, `docs/sql_safety.md`, `docs/screencast_script.md`.
 
 ## Проверка чистого клона
 
@@ -273,7 +309,7 @@ npm --prefix ui run dev
 Ключ LLM остаётся только на backend.
 
 Слева расположен список чатов: можно создать новый диалог, вернуться
-к предыдущему или удалить его. История сообщений и названия хранятся
+к предыдущему или удалить его. Список и локальный кэш сообщений хранятся
 в `localStorage` браузера, а серверная нить продолжается по сохранённому
 `thread_id`.
 
@@ -281,10 +317,12 @@ npm --prefix ui run dev
 а уточнения вроде «а за 2025 год?» или «а по картам?» переформулируются в
 самостоятельный вопрос.
 
-История диалога сохраняется в PostgreSQL (`audit.chat_threads` и
-`audit.chat_messages`) по стабильному `conversation_id` чата. Поэтому
-перезапуск backend не теряет контекст. Если недоступна и серверная история,
-UI присылает `client_history` из `localStorage`.
+Сообщения и заголовки чатов сохраняются в PostgreSQL (`audit.chat_threads`
+и `audit.chat_messages`) по стабильному `conversation_id`. Состояние
+LangGraph checkpointer (`InMemorySaver`) перезапуск backend не переживает,
+но контекст последних реплик восстанавливается из истории в PostgreSQL.
+Если недоступна и серверная история, UI присылает `client_history`
+из `localStorage`.
 
 После обновления кода примените миграции:
 
@@ -351,9 +389,10 @@ powershell -ExecutionPolicy Bypass -File scripts\share_ui.ps1
 откажется поднимать туннель; осознанно открыть демо можно флагом `-NoAuth`.
 Если нужен постоянный адрес и вход через Cloudflare Access (по email),
 см. вариант 2 в `docs/share_ui.md` и запуск с
-`-TunnelName <имя> -Hostname <домен>`. Если Cloudflare-туннель в вашей сети
-не держит соединение (`530`/`1033`), запускайте с `-Serveo` — тот же скрипт
-поднимет SSH-туннель.
+`-TunnelName <имя> -Hostname <домен> -NoAuth`: Access закрывает доступ,
+поэтому локальный Basic Auth отключается осознанно. Если Cloudflare-туннель
+в вашей сети не держит соединение (`530`/`1033`), запускайте с `-Serveo` —
+тот же скрипт поднимет SSH-туннель.
 
 > `.env` должен оставаться в ASCII. `langgraph dev` читает его через
 > `python-dotenv` с локальной кодировкой Windows (cp1251), и кириллические
@@ -376,13 +415,22 @@ powershell -ExecutionPolicy Bypass -File scripts\share_ui.ps1
 openspec/specs/          целевые спецификации по возможностям
 src/                     конфигурация, lifecycle БД, ACL, tools (SQL-guard, templates)
 src/telemetry.py          процессные метрики: LLM, tools, промпты, время
-db/migrations/          001–006: расширения, схема, views, выравнивание, история чата
+src/improvement.py        triage, diff и regression-gate бенчмарка
+src/semantic/             каталог метрик, измерений и допустимых значений
+src/query/                QueryPlan и детерминированный SQL-компилятор
+src/capabilities/         typed template capabilities и deterministic matcher
+src/dialogue_slots.py     слоты диалога: год, тема, тип, риск, код
+db/migrations/          001–007: расширения, схема, views, история чата, as_of_date
 scripts/generate_data.py  детерминированная генерация CSV и методичек
 scripts/init_db.py        pgserver, миграции, read-only роль, загрузка CSV
 scripts/qa_checks.py      проверки качества данных
 scripts/demo_queries.py   демонстрационные read-only запросы
 scripts/evaluate.py       оценка по test_cases.jsonl
 scripts/benchmark.py      бенчмарк simple/medium/complex/chain + процессные метрики
+scripts/benchmark_rescore.py пересчёт отчётов после правки бенчмарка
+scripts/benchmark_triage.py backlog провалов и файлы-кандидаты
+scripts/benchmark_diff.py сравнение прогонов и regression-gate
+scripts/improve_agent.py  безопасное предложение по доработке
 scripts/run_db.py         живой PostgreSQL для ручной проверки
 scripts/run_analytics.py  CLI Analytics-агента
 scripts/run_retrieval.py  CLI Retrieval-агента
@@ -429,9 +477,9 @@ UI (assistant-ui, Next.js) ── /api (same-origin proxy) ── LangGraph API
 - **Backend:** Python 3.12, LangGraph 1.2, OpenAI-совместимый провайдер
   NeuralDeep (`qwen3.6-35b-a3b-noreason`, эмбеддинги `frida`), Pydantic 2.
 - **Данные:** PostgreSQL 16 (встроенный `pgserver`), pgvector, полнотекстовый
-  поиск `russian`, psycopg 3, sqlglot, миграции `db/migrations/001–006`.
-- **Frontend:** Next.js 16, React 19, `assistant-ui`, TypeScript, Tailwind CSS 4,
-  ESLint.
+  поиск `russian`, psycopg 3, sqlglot, миграции `db/migrations/001–007`.
+- **Frontend:** Node.js 20+ (`ui/.nvmrc`), Next.js 16, React 19,
+  `assistant-ui`, TypeScript, Tailwind CSS 4, ESLint.
 - **Проверки:** pytest, `scripts/qa_checks.py`, `scripts/evaluate.py`,
   `scripts/benchmark.py`, `scripts/verify_clean_clone.py`, OpenSpec.
 

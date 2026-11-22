@@ -29,14 +29,12 @@
 #### Scenario: Обязательный минимум
 
 - **WHEN** запускается оценка
-- **THEN** рассчитываются `route_accuracy`, `sql_validity_rate`, `sql_execution_success_rate`, `numeric_accuracy`, `evidence_coverage`, `citation_precision`, `success_rate`
-- **AND** для investigation — `investigation_completeness`
+- **THEN** рассчитываются `route_accuracy`, `sql_validity_rate`, `numeric_accuracy`, `evidence_coverage` и `success_rate`
+- **AND** для investigation дополнительно сохраняются ACL-раунды и типы evidence
 
-#### Scenario: LLM-judge
-
-- **WHEN** оценивается качество ответа или акта
-- **THEN** используется рубрика 1–10
-- **AND** результат сохраняется вместе с моделью-judge и настройками
+> `sql_execution_success_rate`, `citation_precision`, `investigation_completeness`
+> и LLM-judge с рубрикой 1–10 вынесены в план развития после сдачи
+> (`docs/improvement_plan.md`); в текущей реализации они не считаются.
 
 ### Requirement: Процессные метрики и снимок состояния
 
@@ -65,6 +63,32 @@
   `forbidden_tools`
 - **THEN** превышение или нарушение делает `process_success = false`
 - **AND** ответ может остаться корректным, но общий `success` будет false
+
+### Requirement: Triage, diff и regression-gate
+
+Система SHALL превращать результаты бенчмарка в backlog доработок и
+проверять изменения перед принятием.
+
+#### Scenario: Разбор провалов
+
+- **WHEN** выполняется `scripts/benchmark_triage.py`
+- **THEN** создаются `reports/benchmark_backlog.md` и `.json`
+- **AND** провалы классифицируются по слоям: routing, context, tool_policy,
+  sql, evidence, citations, numeric, answer, steps, efficiency
+- **AND** `provider` и `runtime` отделяются от ошибок качества агента
+- **AND** для кластера указаны файлы-кандидаты и команда целевого прогона
+
+#### Scenario: Сравнение baseline и candidate
+
+- **WHEN** выполняется `scripts/benchmark_diff.py baseline.json candidate.json --gate`
+- **THEN** отчёт содержит улучшения, регрессии и Δ summary/tokens/latency/cost
+- **AND** gate возвращает код 1 при падении success, росте бюджета или регрессиях
+
+#### Scenario: Предложение по доработке
+
+- **WHEN** выполняется `scripts/improve_agent.py`
+- **THEN** создаётся безопасное предложение без изменения кода
+- **AND** предложение не меняет разметку бенчмарка и guardrails
 
 ### Requirement: Структурированный журнал запуска
 
@@ -121,30 +145,15 @@
 
 ### Requirement: Воспроизводимый прогон оценки
 
-Система SHALL запускать оценку три раза при temperature 0 и публиковать среднее и разброс.
+Система SHALL поддерживать повторный прогон оценки при temperature 0 с публикацией среднего и стандартного отклонения.
 
 #### Scenario: Три прогона
 
-- **WHEN** выполняется `scripts/evaluate.py`
-- **THEN** создаются `reports/metrics.csv` и `reports/metrics.md`
-- **AND** для метрик указаны mean и стандартное отклонение
+- **WHEN** выполняется `scripts/evaluate.py --repeat 3`
+- **THEN** каждый кейс выполняется три раза в изолированной нити
+- **AND** создаются `reports/metrics.csv` и `reports/metrics.md`
+- **AND** для метрик указаны mean и стандартное отклонение (population std)
 - **AND** настройки модели и seed зафиксированы
-
-### Requirement: Сравнительные эксперименты
-
-Система SHALL поддерживать сравнение полной MAS с baseline и с конфигурацией без Inspector.
-
-#### Scenario: Вклад Inspector
-
-- **WHEN** запускается конфигурация без Inspector
-- **THEN** измеряются `groundedness` и `hallucination_rate`
-- **AND** результат сравнивается с полной системой
-
-#### Scenario: Готовый скрипт против генерации
-
-- **WHEN** один и тот же вопрос решается шаблоном и сгенерированным SQL
-- **THEN** сравниваются точность, latency и риск ошибки
-- **AND** вывод фиксируется в README
 
 ### Requirement: Публикация результатов
 
