@@ -140,8 +140,8 @@ free-тарифом (400 запросов / 3 часа) и на текущей �
 
 - **Бенчмарк:** полный прогон 49 кейсов / 65 реплик выполнен 22.11.2026
   (модель `qwen3.6-35b-a3b-noreason`, seed 42, `run_id` и версии промптов —
-  в `reports/benchmark.json`). Сводка опубликована в `docs/benchmark.md`
-  и README. Часть метрик пересчитана `benchmark_rescore.py` после
+  в `reports/benchmark.json`). Сводка опубликована в `docs/benchmark.md`.
+  Часть метрик пересчитана `benchmark_rescore.py` после
   исправления matcher чисел; исходный JSON сохранён как
   `reports/benchmark_unresolved.json`.
 - **`evaluate.py`:** последний полный прогон 26 кейсов относится к более
