@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from src import db_runtime
@@ -65,13 +67,31 @@ class ReportLLM:
 
     def draft_report(self, **kwargs):
         self.questions.append(kwargs["question"])
-        return ReportDraft(text="Краткий проект акта.", citations=["ITM-MAIN-01"])
+        # Черновик должен содержать обязательные разделы, иначе Inspector
+        # отправит его на доработку (revise), а этот фейк её не поддерживает.
+        return ReportDraft(
+            text=(
+                "Вводная часть. Проверка AUD-2026-DEPOSITS-88.\n"
+                "Выявленные отклонения и проблемы: некорректное начисление "
+                "процентов.\n"
+                "Рекомендации: автоматизировать контроль.\n"
+                "Сроки устранения: 2026-06-01."
+            ),
+            citations=["ITM-MAIN-01"],
+        )
 
     def review_report(self, **kwargs):
         return ReportReview(verdict="ok")
 
     def revise_report(self, **kwargs):
         raise AssertionError("revise не ожидался")
+
+
+@pytest.fixture(autouse=True)
+def acl_log_path(tmp_path, monkeypatch):
+    path = tmp_path / "acl.jsonl"
+    monkeypatch.setenv("ACL_LOG_PATH", str(path))
+    return path
 
 
 @pytest.fixture()
@@ -191,7 +211,8 @@ def test_long_term_memory_between_sessions(server, main_data):
         "session-2",
         "Сформируй раздел акта по AUD-2026-DEPOSITS-88",
     )
-    assert second["final_answer"] == "Краткий проект акта."
+    assert "Вводная часть" in second["final_answer"]
+    assert "Сроки устранения" in second["final_answer"]
     assert report.questions
     assert "Формат: краткий" in report.questions[-1]
     assert "Тема: ипотека" in report.questions[-1]
@@ -485,3 +506,35 @@ def test_history_from_db_survives_new_thread(server, main_data):
     assert "2026" in resolver.resolve_calls[-1]["context"]
     assert "2025" in analytics.questions[-1]
     assert "вкладам" in analytics.questions[-1]
+
+
+def test_acl_exchange_is_logged_and_write_error_is_safe(
+    server, main_data, acl_log_path, monkeypatch
+):
+    graph = build_main_graph(server, MainLLM(), analytics_llm=AnalyticsLLM())
+
+    result = _invoke(graph, "thread-acl-log", "Сколько проверок?")
+    assert result["final_answer"] == "Проверок: 1."
+
+    messages = [
+        json.loads(line)
+        for line in acl_log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(messages) == 2
+    request, response = messages
+    assert request["performative"] == "request"
+    assert request["receiver"] == "analytics_agent"
+    assert request["conversation_id"] == "thread-acl-log"
+    assert response["in_reply_to"] == request["reply_with"]
+    assert response["conversation_id"] == request["conversation_id"]
+
+    def broken_append(*args, **kwargs):
+        raise OSError("журнал недоступен")
+
+    monkeypatch.setattr("src.graph.main_graph.append_acl_log", broken_append)
+
+    failed = _invoke(graph, "thread-acl-log-fail", "Сколько проверок ещё?")
+    assert failed["final_answer"] == "Проверок: 1."
+    assert failed["route"] == "analytics"
+    assert len(acl_log_path.read_text(encoding="utf-8").splitlines()) == 2

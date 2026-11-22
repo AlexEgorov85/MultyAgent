@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
 
-from ..acl import ACLMessage, ACLValidationError, make_acl_message, make_reply, validate_acl
+from ..acl import (
+    ACLMessage,
+    ACLValidationError,
+    append_acl_log,
+    make_acl_message,
+    make_reply,
+    resolve_acl_log_path,
+    validate_acl,
+)
 from ..i18n import t
 from ..llm import LLMClient
 from ..schemas import InvestigationAnswer, InvestigationPlan
@@ -15,6 +24,8 @@ from ..tools import db as db_tools
 from .analytics_graph import build_analytics_graph
 from .retrieval_graph import build_retrieval_graph
 
+logger = logging.getLogger(__name__)
+
 EVIDENCE_MAP = {
     "sql_result": "sql_result",
     "item": "item",
@@ -22,6 +33,16 @@ EVIDENCE_MAP = {
     "act": "act",
     "акт": "act",
 }
+
+
+def _log_acl(message: dict[str, Any]) -> None:
+    """Дописывает ACL-сообщение в журнал, не ломая расследование."""
+    if not message:
+        return
+    try:
+        append_acl_log(message)
+    except Exception as exc:  # журнал не должен ломать ответ
+        logger.warning("Не удалось записать ACL-журнал: %s", exc)
 
 
 def _reply(
@@ -91,8 +112,11 @@ def build_investigation_graph(
             },
             conversation_id=conversation_id,
         )
+        _log_acl(request.model_dump())
         result = graph.invoke({"acl_request": request.model_dump()})
         response = result.get("acl_response", {})
+        if isinstance(response, dict) and response:
+            _log_acl(response)
         return request, response
 
     def parse_acl(state: InvestigationState) -> dict[str, Any]:
@@ -334,7 +358,11 @@ def build_investigation_graph(
                 "evidence": state.get("evidence", []),
                 "rounds": int(state.get("rounds", 0)),
                 "missing": state.get("missing", []),
-                "metrics": {"acl_rounds": int(state.get("rounds", 0))},
+                "metrics": {
+                    "acl_rounds": int(state.get("rounds", 0)),
+                    "acl_log_count": len(state.get("acl_log", [])),
+                    "acl_log_path": str(resolve_acl_log_path()),
+                },
             },
         )
 

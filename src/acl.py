@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+from .config import ROOT
 
 Performative = Literal["request", "inform", "refuse", "failure", "propose", "agree"]
 
@@ -95,6 +98,37 @@ def validate_acl(data: ACLMessage | dict[str, Any]) -> ACLMessage:
         return ACLMessage.model_validate(data)
     except Exception as exc:  # pydantic.ValidationError и вложенные ошибки
         raise ACLValidationError(str(exc)) from exc
+
+
+def resolve_acl_log_path(path: str | Path | None = None) -> Path:
+    """Возвращает путь ACL-журнала: аргумент, env ACL_LOG_PATH или logs/acl.jsonl."""
+    if path is not None:
+        return Path(path)
+    env_path = os.getenv("ACL_LOG_PATH", "").strip()
+    if env_path:
+        return Path(env_path)
+    return ROOT / "logs" / "acl.jsonl"
+
+
+def append_acl_log(
+    message: ACLMessage | dict[str, Any],
+    path: str | Path | None = None,
+    *,
+    reset: bool = False,
+) -> ACLMessage:
+    """Дописывает одно ACL-сообщение в JSONL-журнал, не затирая предыдущие.
+
+    По умолчанию файл открывается в режиме append; ``reset=True`` очищает его
+    перед записью (нужно только для явного старта нового журнала).
+    """
+    validated = validate_acl(message)
+    target = resolve_acl_log_path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("w" if reset else "a", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps(validated.model_dump(), ensure_ascii=False) + "\n"
+        )
+    return validated
 
 
 class ACLRecorder:

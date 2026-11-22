@@ -10,6 +10,7 @@ from src.acl import (
     ACLMessage,
     ACLRecorder,
     ACLValidationError,
+    append_acl_log,
     make_acl_message,
     make_reply,
     validate_acl,
@@ -103,3 +104,42 @@ def test_recorder_keeps_dialog_and_writes_jsonl(tmp_path):
     stored = [json.loads(line) for line in lines]
     assert stored[1]["in_reply_to"] == request.reply_with
     assert stored[1]["conversation_id"] == reply.conversation_id
+
+
+def test_append_acl_log_writes_lines_without_truncation(tmp_path):
+    path = tmp_path / "nested" / "acl.jsonl"
+    request = append_acl_log(_request(), path)
+    reply = make_reply(
+        request,
+        performative="inform",
+        sender="analytics_agent",
+        content={"answer": "12"},
+    )
+    append_acl_log(reply, path)
+
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 2
+    stored = [json.loads(line) for line in lines]
+    assert stored[0]["performative"] == "request"
+    assert stored[0]["conversation_id"] == "conv-001"
+    assert stored[1]["in_reply_to"] == request.reply_with
+    assert stored[1]["conversation_id"] == request.conversation_id
+    assert all("\n" not in line for line in lines)
+
+
+def test_append_acl_log_uses_env_path(tmp_path, monkeypatch):
+    path = tmp_path / "env" / "acl.jsonl"
+    monkeypatch.setenv("ACL_LOG_PATH", str(path))
+
+    message = append_acl_log(_request())
+
+    assert path.exists()
+    stored = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(stored) == 1
+    assert stored[0]["conversation_id"] == message.conversation_id
+    assert stored[0]["reply_with"] == message.reply_with
+    assert stored[0]["content"]["question"] == "Сколько проверок завершено?"

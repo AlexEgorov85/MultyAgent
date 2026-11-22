@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from src import db_runtime
@@ -91,6 +93,13 @@ def acl_request(question: str) -> dict:
         content={"question": question, "auditor_id": "AUD-001"},
         conversation_id="conv-inv-001",
     ).model_dump()
+
+
+@pytest.fixture(autouse=True)
+def acl_log_path(tmp_path, monkeypatch):
+    path = tmp_path / "acl.jsonl"
+    monkeypatch.setenv("ACL_LOG_PATH", str(path))
+    return path
 
 
 @pytest.fixture()
@@ -206,6 +215,52 @@ def test_two_agents_in_one_round(server, investigation_data):
     assert types & {"item", "пункт"}
     # 2 запроса + 2 ответа в ACL-журнале
     assert len(result["acl_log"]) == 4
+
+
+def test_acl_journal_persists_round_correlation(
+    server, investigation_data, acl_log_path
+):
+    coordinator = CoordinatorLLM(
+        plans=[_plan()],
+        answers=[
+            InvestigationAnswer(
+                text="Динамика подтверждена SQL и пунктом акта.",
+                causal_claim=True,
+            )
+        ],
+    )
+    graph = build_investigation_graph(
+        server,
+        coordinator,
+        analytics_llm=AnalyticsLLM(),
+        retrieval_llm=RetrievalLLM(),
+        embeddings=HashEmbeddings(),
+    )
+
+    result = graph.invoke(
+        {"acl_request": acl_request("Почему выросла доля просроченных пунктов?")}
+    )
+
+    lines = acl_log_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 4
+    messages = [json.loads(line) for line in lines]
+    assert all(message["conversation_id"] == "conv-inv-001" for message in messages)
+
+    requests = [m for m in messages if m["performative"] == "request"]
+    responses = [m for m in messages if m["performative"] == "inform"]
+    assert len(requests) == 2
+    assert len(responses) == 2
+    assert {m["receiver"] for m in requests} == {
+        "analytics_agent",
+        "retrieval_agent",
+    }
+    assert {m["in_reply_to"] for m in responses} == {
+        m["reply_with"] for m in requests
+    }
+
+    content = result["acl_response"]["content"]
+    assert content["metrics"]["acl_log_count"] == 4
+    assert content["metrics"]["acl_log_path"] == str(acl_log_path)
 
 
 def test_second_round_when_evidence_missing(server, investigation_data):
