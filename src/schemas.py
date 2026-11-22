@@ -132,3 +132,4 @@ class GuardrailResult(BaseModel):
     safe: bool
     final_answer: str
     reason: str = ""
+    warnings: list[str] = Field(default_factory=list)

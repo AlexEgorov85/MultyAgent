@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
 from .schemas import GuardrailResult
 from .tools.sql_guard import UnsafeSQLError, validate_readonly_sql
+
+logger = logging.getLogger(__name__)
 
 UNSAFE_PATTERNS = (
     r"\bудали\b",
@@ -59,27 +62,43 @@ def _matches(patterns: tuple[str, ...], text: str) -> str | None:
     return None
 
 
+def _blocked(
+    final_answer: str,
+    reason: str,
+    *,
+    route: str | None = None,
+    log_reason: str | None = None,
+) -> GuardrailResult:
+    """Возвращает блокирующий результат и пишет лог без текста запроса/ответа."""
+    logger.warning(
+        "guardrail blocked: %s (route=%s)",
+        log_reason or reason,
+        route or "unknown",
+    )
+    return GuardrailResult(safe=False, final_answer=final_answer, reason=reason)
+
+
 def check_request(question: str) -> GuardrailResult:
     """Блокирует изменение данных, PII и попытки раскрыть промпт."""
     text = question.lower()
 
     if _matches(UNSAFE_PATTERNS, text):
-        return GuardrailResult(
-            safe=False,
-            final_answer="",
-            reason="Запрос пытается изменить данные. Доступны только read-only выборки.",
+        return _blocked(
+            "",
+            "Запрос пытается изменить данные. Доступны только read-only выборки.",
+            route="request",
         )
     if _matches(PII_PATTERNS, text):
-        return GuardrailResult(
-            safe=False,
-            final_answer="",
-            reason="Запрос затрагивает персональные данные, которые недоступны ассистенту.",
+        return _blocked(
+            "",
+            "Запрос затрагивает персональные данные, которые недоступны ассистенту.",
+            route="request",
         )
     if _matches(PROMPT_PATTERNS, text):
-        return GuardrailResult(
-            safe=False,
-            final_answer="",
-            reason="Запрос пытается раскрыть внутренние инструкции системы.",
+        return _blocked(
+            "",
+            "Запрос пытается раскрыть внутренние инструкции системы.",
+            route="request",
         )
     return GuardrailResult(safe=True, final_answer="", reason="")
 
@@ -89,33 +108,65 @@ def check_final_answer(
     sql: str | None = None,
     *,
     is_domain: bool = True,
+    evidence: list | None = None,
+    is_factual: bool = False,
+    route: str | None = None,
 ) -> GuardrailResult:
-    """Проверяет SQL и текст перед показом пользователю."""
+    """Проверяет SQL и текст перед показом пользователю.
+
+    Args:
+        answer: текст ответа.
+        sql: SQL, использованный для ответа (если был).
+        is_domain: относится ли ответ к внутреннему аудиту.
+        evidence: собранные доказательства (например, ``["sql_result"]``).
+            Пустой список/``None`` при ``is_factual=True`` даёт warning, но не блокирует.
+        is_factual: ответ содержит фактические утверждения, требующие evidence.
+        route: маршрут запроса — только для контекста в логе.
+    """
+    route_context = route or ("domain" if is_domain else "out_of_domain")
+
     if sql:
         try:
             validate_readonly_sql(sql)
         except UnsafeSQLError as exc:
-            return GuardrailResult(
-                safe=False,
-                final_answer="Не могу показать результат: SQL не прошёл проверку безопасности.",
-                reason=str(exc),
+            return _blocked(
+                "Не могу показать результат: SQL не прошёл проверку безопасности.",
+                str(exc),
+                route=route_context,
+                log_reason="SQL не прошёл проверку безопасности",
             )
 
     if _matches(PROMPT_PATTERNS, answer.lower()):
-        return GuardrailResult(
-            safe=False,
-            final_answer="Не могу раскрывать внутренние инструкции системы.",
-            reason="Ответ содержит внутренние инструкции",
+        return _blocked(
+            "Не могу раскрывать внутренние инструкции системы.",
+            "Ответ содержит внутренние инструкции",
+            route=route_context,
+        )
+
+    if _matches(PII_PATTERNS, answer.lower()):
+        return _blocked(
+            "Не могу показать ответ: он содержит персональные данные.",
+            "Ответ содержит персональные данные",
+            route=route_context,
         )
 
     if not is_domain:
-        return GuardrailResult(
-            safe=False,
-            final_answer="Я помогаю только по вопросам внутреннего аудита.",
-            reason="Ответ вне домена",
+        return _blocked(
+            "Я помогаю только по вопросам внутреннего аудита.",
+            "Ответ вне домена",
+            route=route_context,
         )
 
-    return GuardrailResult(safe=True, final_answer=answer, reason="")
+    warnings: list[str] = []
+    if is_factual and not evidence:
+        warnings.append("Ответ сформирован без evidence")
+
+    return GuardrailResult(
+        safe=True,
+        final_answer=answer,
+        reason="",
+        warnings=warnings,
+    )
 
 
 def extract_sql(acl_response: dict[str, Any] | None) -> str | None:
