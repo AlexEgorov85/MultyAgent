@@ -598,7 +598,19 @@ class OpenAILLM:
             ),
             max_tokens=2500,
         )
-        return ReportDraft(text=text or facts_text[:5000], citations=[])
+        import re
+
+        text = text or facts_text[:5000]
+        citations: list[str] = []
+        for allowed_id in allowed_ids:
+            pattern = (
+                r"(?<![A-Za-z0-9_-])"
+                + re.escape(allowed_id)
+                + r"(?![A-Za-z0-9_-])"
+            )
+            if re.search(pattern, text, re.IGNORECASE):
+                citations.append(allowed_id)
+        return ReportDraft(text=text, citations=citations)
 
     def review_report(
         self,
@@ -638,7 +650,20 @@ class OpenAILLM:
             ),
             max_tokens=2500,
         )
-        return ReportDraft(text=text or draft.text, citations=[])
+        import re
+
+        text = text or draft.text
+        citations = list(draft.citations)
+        if not citations:
+            for allowed_id in allowed_ids:
+                pattern = (
+                    r"(?<![A-Za-z0-9_-])"
+                    + re.escape(allowed_id)
+                    + r"(?![A-Za-z0-9_-])"
+                )
+                if re.search(pattern, text, re.IGNORECASE):
+                    citations.append(allowed_id)
+        return ReportDraft(text=text, citations=citations)
 
     def plan_investigation(
         self,

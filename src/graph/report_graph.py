@@ -17,6 +17,54 @@ from ..tools import db as db_tools
 
 AUDIT_CODE_RE = re.compile(r"AUD-\d{4}-[A-Z]+-\d{2}", re.IGNORECASE)
 
+# Обязательные разделы проекта акта: заголовок → ключевые корни для проверки.
+REQUIRED_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Вводная часть", ("вводн",)),
+    ("Выявленные отклонения и проблемы", ("отклонени", "проблем")),
+    ("Рекомендации", ("рекомендац", "рекоменд")),
+    ("Сроки устранения", ("срок",)),
+)
+
+
+def _missing_sections(text: str) -> list[str]:
+    """Детерминированно проверяет наличие обязательных разделов отчёта.
+
+    Если в черновике нет ни одного раздела, структуру оценивает Inspector:
+    детерминированная проверка имеет смысл только для размеченного текста.
+    """
+    lowered = text.lower()
+    present = {
+        title
+        for title, keywords in REQUIRED_SECTIONS
+        if any(keyword in lowered for keyword in keywords)
+    }
+    if not present:
+        return []
+    return [title for title, _ in REQUIRED_SECTIONS if title not in present]
+
+
+def _citation_pattern(allowed_ids: list[str]) -> re.Pattern[str]:
+    """Собирает regex по префиксам допустимых ID, чтобы ловить и опечатки."""
+    prefixes = sorted(
+        {
+            item.split("-", 1)[0].upper()
+            for item in allowed_ids
+            if "-" in item and item.split("-", 1)[0]
+        }
+    )
+    if prefixes:
+        bodies = "|".join(re.escape(prefix) for prefix in prefixes)
+        return re.compile(
+            rf"(?<![A-Za-z0-9_-])(?:{bodies})-[A-Z0-9]+(?:-[A-Z0-9]+)*"
+            r"(?![A-Z0-9_-])",
+            re.IGNORECASE,
+        )
+    return re.compile(
+        r"(?<![A-Za-z0-9_-])[A-Z]{2,4}-\d{4}-[A-Z0-9]+(?:-[A-Z0-9]+)*"
+        r"(?![A-Z0-9_-])",
+        re.IGNORECASE,
+    )
+
 
 def _reply(
     state: ReportState,
@@ -156,17 +204,37 @@ def build_report_graph(server, llm: LLMClient):
         return {"draft": draft_model.model_dump(), "status": "ok"}
 
     def validate_citations(state: ReportState) -> dict[str, Any]:
-        allowed = set(state.get("allowed_ids", []))
+        allowed_ids = [str(item) for item in state.get("allowed_ids", [])]
+        canonical = {item.upper(): item for item in allowed_ids}
         draft_model = state.get("draft", {})
         text = str(draft_model.get("text", "")).replace("<br>", "\n").replace("<br/>", "\n")
         text = re.sub(r"\[\d+\]", "", text)
-        declared = draft_model.get("citations", [])
-        citations = [item for item in declared if item in allowed]
-        invalid = [item for item in declared if item not in allowed]
-        if not citations:
-            found = re.findall(r"(?:ITM|ACT|AUD)-[A-Z0-9-]+", text)
-            citations = [item for item in dict.fromkeys(found) if item in allowed]
-        issues = [f"Несуществующие ID: {', '.join(invalid)}"] if invalid else []
+
+        declared_raw = [str(item) for item in draft_model.get("citations", [])]
+        declared = [
+            canonical[item.upper()] for item in declared_raw if item.upper() in canonical
+        ]
+        invalid = [item for item in declared_raw if item.upper() not in canonical]
+
+        found_raw = [
+            match.upper()
+            for match in _citation_pattern(allowed_ids).findall(text)
+        ]
+        found = [
+            canonical[item] for item in dict.fromkeys(found_raw) if item in canonical
+        ]
+        invalid.extend(item for item in dict.fromkeys(found_raw) if item not in canonical)
+
+        citations: list[str] = []
+        for item in declared + found:
+            if item not in citations:
+                citations.append(item)
+
+        issue_items = list(dict.fromkeys(invalid))
+        issues = (
+            [f"Несуществующие ID: {', '.join(issue_items)}"] if issue_items else []
+        )
+        issues.extend(f"Нет раздела: {title}" for title in _missing_sections(text))
         return {
             "draft": {**draft_model, "text": text, "citations": citations},
             "citations": citations,
@@ -186,8 +254,9 @@ def build_report_graph(server, llm: LLMClient):
                 "status": "failed",
                 "error": t(state.get("language"), "inspector_failed", error=exc),
             }
+        citations = draft_model.citations or state.get("citations", [])
         issues = list(review_model.issues) + list(state.get("citation_issues", []))
-        if not draft_model.citations:
+        if not citations:
             issues.append("В черновике нет ссылок на источники")
         ok = (
             review_model.verdict == "ok"
@@ -196,10 +265,18 @@ def build_report_graph(server, llm: LLMClient):
             and not review_model.missing_sections
             and not issues
         )
+        structure_only = (
+            int(state.get("iterations", 0)) >= 1
+            and review_model.verdict == "ok"
+            and review_model.citations_ok
+            and not review_model.unsupported_claims
+            and bool(issues)
+            and all(issue.startswith("Нет раздела:") for issue in issues)
+        )
         return {
             "review": review_model.model_dump(),
             "review_issues": issues,
-            "status": "ok" if ok else "needs_revision",
+            "status": "ok" if ok else ("finalize" if structure_only else "needs_revision"),
         }
 
     def revise(state: ReportState) -> dict[str, Any]:
@@ -218,9 +295,12 @@ def build_report_graph(server, llm: LLMClient):
                 "status": "failed",
                 "error": t(state.get("language"), "revise_failed", error=exc),
             }
+        citations = list(revised.citations) or list(draft_model.citations)
+        revised_payload = revised.model_dump()
+        revised_payload["citations"] = citations
         return {
-            "draft": revised.model_dump(),
-            "citations": revised.citations,
+            "draft": revised_payload,
+            "citations": citations,
             "iterations": int(state.get("iterations", 0)) + 1,
             "citation_issues": [],
             "review_issues": [],
@@ -308,14 +388,18 @@ def build_report_graph(server, llm: LLMClient):
         lambda s: "validate" if s.get("status") == "ok" else "pack",
         {"validate": "validate", "pack": "pack"},
     )
+    def after_review(state: ReportState) -> str:
+        status = state.get("status")
+        if status in ("ok", "failed"):
+            return "pack"
+        if status == "finalize":
+            return "finalize"
+        return "revise" if int(state.get("iterations", 0)) < 2 else "finalize"
+
     builder.add_edge("validate", "review")
     builder.add_conditional_edges(
         "review",
-        lambda s: (
-            "pack"
-            if s.get("status") in ("ok", "failed")
-            else ("revise" if int(s.get("iterations", 0)) < 2 else "finalize")
-        ),
+        after_review,
         {"pack": "pack", "revise": "revise", "finalize": "finalize"},
     )
     builder.add_conditional_edges(
