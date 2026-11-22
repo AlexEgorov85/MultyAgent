@@ -79,6 +79,7 @@ def estimate_cost(
 
 
 def percentile(values: Iterable[float], p: float) -> float:
+    """Линейно интерполированный перцентиль (p в диапазоне 0..1)."""
     data = sorted(values)
     if not data:
         return 0.0
@@ -92,5 +93,6 @@ def percentile(values: Iterable[float], p: float) -> float:
 
 
 def mean(values: Iterable[float]) -> float:
+    """Среднее арифметическое; для пустого набора возвращает 0.0."""
     data = list(values)
     return sum(data) / len(data) if data else 0.0

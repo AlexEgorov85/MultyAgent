@@ -205,11 +205,13 @@ def build_index(
 
 
 def clear_index(server) -> None:
+    """Очищает таблицу чанков перед полной перестройкой индекса."""
     with db_runtime.connect(server) as conn:
         conn.execute("TRUNCATE audit.knowledge_chunks")
 
 
 def iter_chunks(server) -> Iterable[dict[str, Any]]:
+    """Потоково отдаёт чанки индекса для эмбеддингов и проверок."""
     with db_runtime.connect(server, role=db_runtime.READ_ONLY_ROLE) as conn:
         rows = conn.execute(
             "SELECT chunk_id, source_type, source_id, title, content "

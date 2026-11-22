@@ -110,10 +110,12 @@ def load_prompt(name: str) -> str:
 
 
 def prompt_version(name: str) -> int:
+    """Возвращает версию промпта из front matter."""
     return _load(name).version
 
 
 def prompt_meta(name: str) -> dict[str, str | int]:
+    """Возвращает id, версию и хеш промпта для логов."""
     prompt = _load(name)
     return {
         "id": prompt.name,

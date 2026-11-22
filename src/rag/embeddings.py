@@ -12,6 +12,8 @@ TOKEN_RE = re.compile(r"[0-9a-zA-Zа-яА-ЯёЁ]+")
 
 
 class EmbeddingClient(Protocol):
+    """Контракт клиента эмбеддингов: текст → векторы."""
+
     def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 

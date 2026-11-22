@@ -15,6 +15,8 @@ from .. import config
 
 @dataclass(frozen=True)
 class Capability:
+    """Typed-действие, которое matcher выбирает до LLM-планировщика."""
+
     id: str
     title: str
     description: str
@@ -23,6 +25,8 @@ class Capability:
 
 @dataclass(frozen=True)
 class CapabilityMatch:
+    """Результат сопоставления вопроса с capability и извлечёнными параметрами."""
+
     capability: Capability
     parameters: dict[str, Any]
     reason: str

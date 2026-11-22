@@ -106,6 +106,7 @@ def _select(server, sql: str, params: Any = None) -> list[dict[str, Any]]:
 
 @telemetry.timed_tool("get_pocket")
 def get_pocket(server, pocket_id: str) -> dict[str, Any] | None:
+    """Возвращает карман аудита по id или None, если его нет."""
     rows = _select(
         server,
         "SELECT pocket_id, pocket_year, theme_code, title, owner_unit, "
@@ -118,6 +119,7 @@ def get_pocket(server, pocket_id: str) -> dict[str, Any] | None:
 
 @telemetry.timed_tool("get_audit")
 def get_audit(server, audit_code: str) -> dict[str, Any] | None:
+    """Возвращает проверку с карманом, руководителем и актом по коду."""
     rows = _select(
         server,
         "SELECT a.audit_id, a.audit_code, a.title, a.audit_type, a.start_date, "
@@ -137,6 +139,7 @@ def get_audit(server, audit_code: str) -> dict[str, Any] | None:
 
 @telemetry.timed_tool("get_act")
 def get_act(server, audit_code: str) -> dict[str, Any] | None:
+    """Возвращает акт проверки по коду проверки или None."""
     rows = _select(
         server,
         "SELECT ac.act_id, ac.act_number, ac.act_date, ac.status, ac.summary, "
@@ -158,6 +161,7 @@ def get_act_items(
     status: str | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
+    """Возвращает пункты акта с необязательными фильтрами по типу/риску/статусу."""
     clauses = ["a.audit_code = %(audit_code)s"]
     params: dict[str, Any] = {"audit_code": audit_code, "limit": int(limit)}
     if item_type:
@@ -184,6 +188,7 @@ def get_act_items(
 
 @telemetry.timed_tool("search_acts")
 def search_acts(server, query: str, limit: int = 5) -> list[dict[str, Any]]:
+    """Полнотекстовый поиск по актам (russian) с релевантными фрагментами."""
     return _select(
         server,
         "SELECT a.audit_code, ac.act_number, ac.act_date, "

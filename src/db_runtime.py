@@ -35,6 +35,8 @@ class SeedChecksumError(RuntimeError):
 
 @dataclass(frozen=True)
 class MigrationResult:
+    """Итог применения миграций: что применено и что пропущено."""
+
     applied: list[str]
     skipped: list[str]
 
@@ -458,4 +460,5 @@ def reset_data_dir(pgdata: Path | str | None = None) -> None:
 
 
 def migration_files(migrations_dir: Path | None = None) -> Iterable[Path]:
+    """Возвращает SQL-миграции в лексикографическом порядке имён."""
     return sorted(Path(migrations_dir or config.MIGRATIONS_DIR).glob("*.sql"))

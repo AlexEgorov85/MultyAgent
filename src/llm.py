@@ -46,6 +46,8 @@ def _extract_json(text: str) -> str:
 
 
 class LLMClient(Protocol):
+    """Контракт LLM-клиента: structured output и генерация текста."""
+
     def resolve_followup(
         self,
         *,

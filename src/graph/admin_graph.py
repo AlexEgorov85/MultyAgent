@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 
 class AdminState(TypedDict, total=False):
+    """Вход и результат служебной операции над чатом."""
+
     action: str
     conversation_id: str
     title: str
@@ -26,6 +28,8 @@ class AdminState(TypedDict, total=False):
 
 
 def build_admin_graph(server):
+    """Собирает граф rename/delete чатов без участия LLM."""
+
     def run_action(state: AdminState) -> dict[str, Any]:
         action = str(state.get("action") or "").strip().lower()
         conversation_id = str(state.get("conversation_id") or "").strip()

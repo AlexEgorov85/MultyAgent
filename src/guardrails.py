@@ -170,6 +170,7 @@ def check_final_answer(
 
 
 def extract_sql(acl_response: dict[str, Any] | None) -> str | None:
+    """Достаёт SQL из ACL-ответа агента, если он там есть."""
     if not acl_response:
         return None
     content = acl_response.get("content", {})

@@ -43,10 +43,12 @@ def start_run() -> RequestMetrics:
 
 
 def stop_run() -> None:
+    """Сбрасывает текущий сбор метрик для потока."""
     _CURRENT.set(None)
 
 
 def current() -> RequestMetrics | None:
+    """Возвращает сборщик метрик текущего запроса, если он активен."""
     return _CURRENT.get()
 
 
@@ -64,6 +66,7 @@ def record_llm(
     latency_sec: float = 0.0,
     schema: str = "",
 ) -> None:
+    """Учитывает успешный вызов LLM: токены, стоимость и латентность."""
     metrics = current()
     if metrics is None:
         return
@@ -94,6 +97,7 @@ def record_llm(
 
 
 def record_llm_retry() -> None:
+    """Учитывает повторную попытку вызова LLM (например, после 429)."""
     metrics = current()
     if metrics is not None:
         metrics.incr("llm_attempts")
@@ -135,6 +139,7 @@ def record_tool(
     status: str = "ok",
     details: dict[str, Any] | None = None,
 ) -> None:
+    """Учитывает вызов инструмента: имя, статус и латентность."""
     metrics = current()
     if metrics is None:
         return
@@ -159,6 +164,7 @@ def record_embedding(
     input_tokens: int = 0,
     status: str = "ok",
 ) -> None:
+    """Учитывает вызов эмбеддингов: латентность и токены."""
     metrics = current()
     if metrics is None:
         return
@@ -180,6 +186,7 @@ def record_embedding(
 
 
 def record_prompt(name: str, version: int, prompt_hash: str) -> None:
+    """Запоминает использованную версию промпта для отчёта."""
     metrics = current()
     if metrics is None:
         return
@@ -196,6 +203,7 @@ def record_step(
     status: str = "ok",
     details: dict[str, Any] | None = None,
 ) -> None:
+    """Учитывает шаг агента в trace: статус, время и детали."""
     metrics = current()
     if metrics is None:
         return

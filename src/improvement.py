@@ -520,6 +520,7 @@ def format_backlog_md(
     *,
     source: str = "reports/benchmark.json",
 ) -> str:
+    """Формирует Markdown-backlog провалов бенчмарка с командами проверки."""
     lines = [
         "# Backlog доработок по бенчмарку",
         "",
@@ -581,6 +582,7 @@ def format_backlog_md(
 
 
 def format_diff_md(diff: dict[str, Any], gate: dict[str, Any] | None = None) -> str:
+    """Формирует Markdown-отчёт о разнице двух прогонов и regression-gate."""
     lines = [
         "# Сравнение прогонов бенчмарка",
         "",

@@ -116,6 +116,7 @@ def missing_question_filters(
 
 
 def known_themes(server) -> list[str]:
+    """Возвращает список тем (theme_code) из карманов аудита."""
     from .. import db_runtime
 
     with db_runtime.connect(server, role=db_runtime.APP_ROLE) as conn:

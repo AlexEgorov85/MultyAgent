@@ -333,10 +333,12 @@ def get_metric(metric_id: str) -> MetricSpec:
 
 
 def metric_ids() -> tuple[str, ...]:
+    """Возвращает все id метрик каталога."""
     return tuple(METRICS)
 
 
 def allowed_values(metric_id: str, field_name: str) -> tuple[str, ...]:
+    """Допустимые значения измерения для метрики (пусто, если не заданы)."""
     spec = get_metric(metric_id)
     return tuple(spec.allowed_values.get(field_name, ()))
 
