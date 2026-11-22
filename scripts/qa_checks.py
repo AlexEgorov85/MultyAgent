@@ -95,7 +95,7 @@ CHECKS: list[tuple[str, str, str]] = [
         "Скрипты: SQL начинается с SELECT/WITH и без DDL/DML",
         "SELECT count(*) FROM audit.scripts "
         "WHERE language = 'SQL' AND ("
-        "  code !~* '^\\s*(--[^\\n]*\\n\\s*)*(SELECT|WITH)' "
+        "  code !~* '^[[:space:]]*(SELECT|WITH)([[:space:]]|$)' "
         "  OR code ~* '\\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|COPY|CALL|DO)\\b'"
         ")",
         "= 0",
@@ -143,7 +143,7 @@ CHECKS: list[tuple[str, str, str]] = [
     (
         "Ловушки: есть просроченный открытый пункт",
         "SELECT count(*) FROM audit.act_items "
-        "WHERE status <> 'закрыт' AND deadline < CURRENT_DATE",
+        "WHERE status <> 'закрыт' AND deadline < audit.as_of_date()",
         "> 0",
     ),
     (

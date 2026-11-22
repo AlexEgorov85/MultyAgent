@@ -116,3 +116,40 @@ def test_template_missing_parameters(server, sample_data):
             conn.execute(
                 "DELETE FROM audit.script_templates WHERE template_id = 'TPL-TEST2'"
             )
+
+
+def test_script_templates_use_readonly_role(server, monkeypatch):
+    with db_runtime.connect(server) as conn:
+        conn.execute(
+            "INSERT INTO audit.script_templates "
+            "(template_id, template_key, title, description, sql_template, "
+            " parameters, max_rows_default, is_active) "
+            "VALUES ('TPL-RO', 'test_readonly_role', 'Тест', 'Описание', "
+            "        'SELECT count(*) AS cnt FROM audit.audits', '{}', 50, true) "
+            "ON CONFLICT (template_id) DO UPDATE "
+            "SET sql_template = EXCLUDED.sql_template, is_active = true"
+        )
+
+    roles: list[str] = []
+    original_connect = db_runtime.connect
+
+    def recording_connect(server_, **kwargs):
+        roles.append(kwargs.get("role", db_runtime.ADMIN_ROLE))
+        return original_connect(server_, **kwargs)
+
+    monkeypatch.setattr(db_runtime, "connect", recording_connect)
+    try:
+        listed = db_tools.list_script_templates(server)
+        assert any(row["template_key"] == "test_readonly_role" for row in listed)
+
+        result = db_tools.run_script_template(server, "test_readonly_role")
+        assert result["rows"][0]["cnt"] >= 0
+    finally:
+        with original_connect(server) as conn:
+            conn.execute(
+                "DELETE FROM audit.script_templates WHERE template_id = 'TPL-RO'"
+            )
+
+    assert roles, "tools did not open a connection"
+    assert set(roles) == {db_runtime.READ_ONLY_ROLE}
+    assert db_runtime.ADMIN_ROLE not in roles

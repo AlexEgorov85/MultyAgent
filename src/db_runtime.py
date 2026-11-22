@@ -29,6 +29,10 @@ class MigrationError(RuntimeError):
     """Миграция не может быть применена или изменена."""
 
 
+class SeedChecksumError(RuntimeError):
+    """CSV-файлы не соответствуют checksum из manifest.json."""
+
+
 @dataclass(frozen=True)
 class MigrationResult:
     applied: list[str]
@@ -208,6 +212,47 @@ def _checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def seed_checksum(seed_dir: Path | None = None) -> str:
+    """SHA-256 набора CSV по тем же правилам, что scripts/generate_data.py.
+
+    В хеш входят имена файлов и их байты в лексикографическом порядке.
+    """
+    directory = Path(seed_dir or config.SEED_DIR)
+    digest = hashlib.sha256()
+    for path in sorted(directory.glob("*.csv")):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def _verify_seed_checksum(directory: Path, *, allow_mismatch: bool) -> None:
+    manifest_path = directory / "manifest.json"
+    if not manifest_path.exists():
+        return
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SeedChecksumError(
+            f"Не удалось прочитать {manifest_path}: {exc}"
+        ) from exc
+
+    expected = str(manifest.get("sha256") or "")
+    if not expected:
+        return
+    actual = seed_checksum(directory)
+    if actual == expected:
+        return
+    if allow_mismatch:
+        return
+    raise SeedChecksumError(
+        f"Checksum seed не совпадает с manifest.json: "
+        f"ожидалось {expected[:12]}..., получено {actual[:12]}.... "
+        f"Перегенерируйте данные: .venv\\Scripts\\python.exe "
+        f"scripts\\generate_data.py --deviations. "
+        f"Проверку можно пропустить флагом --allow-checksum-mismatch."
+    )
+
+
 def apply_migrations(
     server,
     migrations_dir: Path | None = None,
@@ -279,6 +324,15 @@ def ensure_roles(server) -> None:
             f"ALTER DEFAULT PRIVILEGES IN SCHEMA audit "
             f"GRANT SELECT ON TABLES TO {READ_ONLY_ROLE}, {APP_ROLE}"
         )
+        # audit.as_of_date() вызывается из представлений и QA под обеими ролями.
+        conn.execute(
+            f"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA audit "
+            f"TO {READ_ONLY_ROLE}, {APP_ROLE}"
+        )
+        conn.execute(
+            f"ALTER DEFAULT PRIVILEGES IN SCHEMA audit "
+            f"GRANT EXECUTE ON FUNCTIONS TO {READ_ONLY_ROLE}, {APP_ROLE}"
+        )
 
         conn.execute(
             f"GRANT INSERT, UPDATE, DELETE ON audit.auditor_memory TO {APP_ROLE}"
@@ -327,15 +381,20 @@ def seed_from_csv(
     server,
     seed_dir: Path | None = None,
     tables: Sequence[str] | None = None,
+    *,
+    allow_checksum_mismatch: bool = False,
 ) -> dict[str, int]:
     """Идемпотентно заменяет синтетический набор данных.
 
     Все таблицы очищаются и загружаются в одной транзакции: повторный запуск
-    даёт тот же результат и не создаёт дубликатов.
+    даёт тот же результат и не создаёт дубликатов. Перед загрузкой CSV
+    сверяются с sha256 из manifest.json.
     """
     directory = Path(seed_dir or config.SEED_DIR)
     if not directory.exists():
         raise FileNotFoundError(f"Каталог seed не найден: {directory}")
+
+    _verify_seed_checksum(directory, allow_mismatch=allow_checksum_mismatch)
 
     selected = tuple(tables or SEED_TABLES)
     available = [

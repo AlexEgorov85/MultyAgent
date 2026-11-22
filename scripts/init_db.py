@@ -33,6 +33,11 @@ def main() -> int:
         action="store_true",
         help="подтвердить разрушающий сброс",
     )
+    parser.add_argument(
+        "--allow-checksum-mismatch",
+        action="store_true",
+        help="загрузить seed, даже если CSV не совпадают с manifest.json",
+    )
     args = parser.parse_args()
 
     if args.reset_db and not args.yes:
@@ -59,7 +64,10 @@ def main() -> int:
         print("[db] роли audit_ro и audit_app готовы")
 
         if args.seed:
-            counts = db_runtime.seed_from_csv(server)
+            counts = db_runtime.seed_from_csv(
+                server,
+                allow_checksum_mismatch=args.allow_checksum_mismatch,
+            )
             for table, count in counts.items():
                 print(f"[seed] {table}: {count} строк")
             meta = db_runtime.upsert_dataset_metadata(server)

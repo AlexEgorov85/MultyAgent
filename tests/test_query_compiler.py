@@ -54,7 +54,7 @@ def test_overdue_uses_dataset_as_of_date():
             filters=[QueryFilter(field="theme", value="карты")],
         )
     )
-    assert "audit.dataset_metadata" in sql
+    assert "audit.as_of_date()" in sql
     assert "i.status <> 'закрыт'" in sql
     assert "p.theme_code = 'карты'" in sql
 

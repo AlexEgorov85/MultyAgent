@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import sys
 from collections import Counter, defaultdict
 from datetime import date
@@ -121,3 +122,21 @@ def test_dataset_invariants(tmp_path, monkeypatch):
         for a in audits
     )
     assert act_by_id
+
+
+def test_sql_scripts_start_without_leading_comments(tmp_path, monkeypatch):
+    seed, _ = _run(tmp_path, monkeypatch)
+
+    scripts = [s for s in _rows(seed, "scripts") if s["language"] == "SQL"]
+    assert scripts
+    for script in scripts:
+        code = script["code"]
+        assert not code.lstrip().startswith("--"), script["script_id"]
+        assert re.match(r"^(SELECT|WITH)\b", code, re.IGNORECASE), script["script_id"]
+
+    for template in _rows(seed, "script_templates"):
+        sql = template["sql_template"]
+        assert not sql.lstrip().startswith("--"), template["template_key"]
+        assert re.match(r"^(SELECT|WITH)\b", sql, re.IGNORECASE), template[
+            "template_key"
+        ]

@@ -16,13 +16,16 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import random
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SEED_DIR = ROOT / "data" / "seed"
-KNOWLEDGE_DIR = ROOT / "data" / "knowledge"
+SEED_DIR = Path(os.environ.get("SEED_DIR") or ROOT / "data" / "seed")
+KNOWLEDGE_DIR = Path(
+    os.environ.get("KNOWLEDGE_DIR") or ROOT / "data" / "knowledge"
+)
 
 SEED = 42
 TODAY = date(2026, 11, 21)
@@ -951,8 +954,7 @@ def gen_script_code(rng: random.Random, language: str, theme: dict, finding: dic
     title = finding["title"]
     if language == "SQL":
         return (
-            f"-- Проверка: {title}\n"
-            f"WITH base AS (\n"
+            f"WITH base AS (  -- Проверка: {title}\n"
             f"    SELECT entity_id, {field}\n"
             f"    FROM {table}\n"
             f"    WHERE report_date >= :date_from\n"

@@ -75,12 +75,15 @@ Domain terms:
   если тема не названа явно.
 - «закрытая проверка» — audit.audits.status = 'завершена'.
 - «закрытый пункт» — audit.act_items.status = 'закрыт'.
-- «просроченный пункт» — status <> 'закрыт' и deadline < CURRENT_DATE.
+- «просроченный пункт» — status <> 'закрыт' и deadline < as_of_date
+  (audit.dataset_metadata.as_of_date или audit.as_of_date()).
 - «пункт без скрипта/доказательства» — нет строки в audit.scripts по item_id.
 - «повторная находка» — audit.act_items.is_repeat = true.
 - «черновик», «на согласовании», «утверждён» — статусы акта.
 - «скрипт с ошибкой» — audit.script_runs.status = 'ошибка'.
 - «критическое отклонение» — audit.deviations.severity = 'критический'.
+- Не использовать CURRENT_DATE: дата среза задана в audit.dataset_metadata.as_of_date
+  и доступна через audit.as_of_date().
 """.strip()
 
 
@@ -208,6 +211,9 @@ def _execute(
 ) -> dict[str, Any]:
     safe_sql = validate_readonly_sql(sql, max_rows)
     timeout_ms = int(config.SQL_TIMEOUT_SEC * 1000)
+    metrics = telemetry.current()
+    if metrics is not None:
+        metrics.incr("sql_queries")
 
     with db_runtime.connect(server, role=db_runtime.READ_ONLY_ROLE) as conn:
         conn.execute(f"SET statement_timeout = {timeout_ms}")
@@ -242,7 +248,7 @@ def run_readonly_sql(
 @telemetry.timed_tool("list_script_templates")
 def list_script_templates(server) -> list[dict[str, Any]]:
     """Возвращает активные шаблоны без выполнения."""
-    with db_runtime.connect(server) as conn:
+    with db_runtime.connect(server, role=db_runtime.READ_ONLY_ROLE) as conn:
         rows = conn.execute(
             "SELECT template_key, title, description, parameters, max_rows_default "
             "FROM audit.script_templates WHERE is_active ORDER BY template_key"
@@ -267,7 +273,7 @@ def run_script_template(
     max_rows: int | None = None,
 ) -> dict[str, Any]:
     """Выполняет готовый шаблон с bind-параметрами и SQL-guard."""
-    with db_runtime.connect(server) as conn:
+    with db_runtime.connect(server, role=db_runtime.READ_ONLY_ROLE) as conn:
         row = conn.execute(
             "SELECT sql_template, parameters, max_rows_default "
             "FROM audit.script_templates "

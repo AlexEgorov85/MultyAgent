@@ -224,9 +224,7 @@ METRICS: dict[str, MetricSpec] = {
         dimensions=ITEM_DIMENSIONS,
         extra_where=(
             "i.status <> 'закрыт'",
-            "i.deadline < COALESCE("
-            "(SELECT as_of_date FROM audit.dataset_metadata WHERE metadata_id = 1), "
-            "CURRENT_DATE)",
+            "i.deadline < audit.as_of_date()",
         ),
         allowed_values={
             "risk_level": RISK_LEVELS,
