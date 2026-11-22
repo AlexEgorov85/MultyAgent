@@ -13,6 +13,7 @@ class AnalyticsState(TypedDict, total=False):
     request: dict[str, Any]
     question: str
     conversation_context: str
+    dialogue_slots: dict[str, Any]
     auditor_id: str
     language: str
     conversation_id: str
@@ -42,6 +43,7 @@ class RetrievalState(TypedDict, total=False):
     request: dict[str, Any]
     question: str
     conversation_context: str
+    dialogue_slots: dict[str, Any]
     auditor_id: str
     language: str
     conversation_id: str
@@ -68,6 +70,7 @@ class ReportState(TypedDict, total=False):
     request: dict[str, Any]
     question: str
     conversation_context: str
+    dialogue_slots: dict[str, Any]
     auditor_id: str
     language: str
     conversation_id: str
@@ -95,6 +98,7 @@ class InvestigationState(TypedDict, total=False):
     request: dict[str, Any]
     question: str
     conversation_context: str
+    dialogue_slots: dict[str, Any]
     auditor_id: str
     language: str
     conversation_id: str
@@ -120,6 +124,7 @@ class MainState(TypedDict, total=False):
     resolved_query: str
     resolved_reason: str
     dialogue_context: str
+    dialogue_slots: dict[str, Any]
     turn_id: str
     client_history: list[dict[str, Any]]
     auditor_id: str

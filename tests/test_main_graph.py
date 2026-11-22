@@ -314,6 +314,20 @@ def test_followup_uses_previous_thread_history(server, main_data):
     assert "2025" in second["resolved_query"]
 
 
+def test_dialogue_slots_preserve_item_type_across_year_change(server, main_data):
+    analytics = DialogueAnalyticsLLM()
+    graph = build_main_graph(server, MainLLM(), analytics_llm=analytics)
+
+    _invoke(graph, "thread-slots", "Сколько отклонений по ипотеке в 2026 году?")
+    _invoke(graph, "thread-slots", "Нет, я имел в виду проблемы")
+    third = _invoke(graph, "thread-slots", "А за 2025 год?")
+
+    assert third["dialogue_slots"]["item_type"] == "проблема"
+    assert "2025" in third["resolved_query"]
+    assert "проблем" in third["resolved_query"].lower()
+    assert "проблем" in analytics.questions[-1].lower()
+
+
 def test_followup_uses_client_history_after_thread_loss(server, main_data):
     resolver = DialogueLLM()
     analytics = DialogueAnalyticsLLM()

@@ -217,7 +217,10 @@ def answer_has_number(answer: Any, value: int | float) -> bool:
     """Ищет самостоятельное число, не часть года, кода или номера пункта."""
     text = normalize_text(answer)
     number = f"{value:g}" if isinstance(value, float) else str(value)
-    pattern = rf"(?<![\d.,]){re.escape(number)}(?![\d.,])"
+    # Разрешаем точку/запятую после числа («273.»), но не десятичную
+    # дробь или номер пункта («5.1», «1,5»). Годы не совпадают из-за
+    # цифры перед числом.
+    pattern = rf"(?<![\d.,]){re.escape(number)}(?!\d)(?![.,]\d)"
     return bool(re.search(pattern, text))
 
 
@@ -290,6 +293,26 @@ def extract_agent_state(
             }
         )
 
+    content_summary = {
+        key: content.get(key)
+        for key in (
+            "strategy",
+            "search_mode",
+            "citations",
+            "rounds",
+            "missing",
+            "metrics",
+            "review",
+            "sources",
+        )
+        if content.get(key) not in (None, "", [], {})
+    }
+    if content.get("sql"):
+        content_summary["sql"] = str(content["sql"])[:2000]
+    if content.get("columns"):
+        content_summary["columns"] = content["columns"]
+    content_summary["row_count"] = len(content.get("rows") or [])
+
     answer = str(result.get("final_answer", "") or "")
     state = {
         "route": result.get("route"),
@@ -310,20 +333,7 @@ def extract_agent_state(
             "conversation_id": acl.get("conversation_id"),
             "reply_with": acl.get("reply_with"),
         },
-        "content": {
-            key: content.get(key)
-            for key in (
-                "strategy",
-                "search_mode",
-                "citations",
-                "rounds",
-                "missing",
-                "metrics",
-                "review",
-                "sources",
-            )
-            if content.get(key) not in (None, "", [], {})
-        },
+        "content": content_summary,
         "evidence": _compact_evidence(extract_evidence(result)),
         "steps": steps,
         "metrics": result.get("metrics") or {},
@@ -769,7 +779,7 @@ def summarize(rows: Sequence[dict[str, Any]]) -> dict[str, float | int]:
             row.get("success")
         )
 
-    latencies = [float(row["latency_sec"]) for row in rows]
+    latencies = [float(row.get("latency_sec", 0.0)) for row in rows]
     successful = [row for row in rows if row.get("success")]
     successful_count = len(successful)
     total_tokens = sum(int(row.get("total_tokens", 0)) for row in rows)
@@ -948,6 +958,54 @@ def summarize_cases(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
                 "tables": ordered[0].get("tables", ""),
             }
         )
+    return result
+
+
+def rescore_report(
+    report: dict[str, Any],
+    cases: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    """Пересчитывает производные проверки по сохранённому benchmark.json.
+
+    Нужен после исправления самого бенчмарка (например, matcher чисел),
+    чтобы не тратить LLM-лимит на повторный прогон.
+    """
+    case_by_id = {str(case.get("id")): case for case in cases}
+    rescored: list[dict[str, Any]] = []
+    for original in report.get("turns", []):
+        row = dict(original)
+        case = case_by_id.get(str(row.get("case_id")), {})
+        turns = case.get("turns") or []
+        step = int(row.get("step", 1))
+        turn = turns[step - 1] if 0 < step <= len(turns) else {}
+        expected_numbers = turn.get("expected_numbers", [])
+        numbers_ok = all(
+            answer_has_number(row.get("answer", ""), value)
+            for value in expected_numbers
+        )
+        row["numbers_applicable"] = bool(expected_numbers)
+        row["numbers_ok"] = numbers_ok
+        row["answer_success"] = all(
+            bool(row.get(key, True))
+            for key in (
+                "route_ok",
+                "context_ok",
+                "include_ok",
+                "exclude_ok",
+                "evidence_ok",
+                "rounds_ok",
+                "citations_ok",
+                "sql_ok",
+                "answer_ok",
+            )
+        ) and numbers_ok
+        row["success"] = bool(row["answer_success"] and row.get("process_success"))
+        rescored.append(row)
+
+    result = dict(report)
+    result["turns"] = rescored
+    result["summary"] = summarize(rescored)
+    result["cases"] = summarize_cases(rescored)
     return result
 
 

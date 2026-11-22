@@ -10,6 +10,7 @@ from src.benchmark import (
     extract_agent_state,
     failed_turn_row,
     load_cases,
+    rescore_report,
     summarize,
     summarize_prompts,
     summarize_table_coverage,
@@ -80,8 +81,11 @@ def test_validate_cases_reports_structural_errors():
 def test_answer_has_number_ignores_years_and_item_numbers():
     assert answer_has_number("Всего 5 завершённых проверок", 5)
     assert answer_has_number("В 2025 году завершено 8 проверок", 8)
+    assert answer_has_number("Всего 273.", 273)
+    assert answer_has_number("Отклонений: 104, проблем: 25", 104)
     assert not answer_has_number("В 2025 году завершено 8 проверок", 5)
     assert not answer_has_number("Пункт 5.1 закрыт", 5)
+    assert not answer_has_number("Значение 1,5", 1)
 
 
 def _result(
@@ -290,6 +294,44 @@ def test_extract_agent_state_is_compact_and_stable():
     assert [item["step"] for item in state["steps"]] == ["route", "sql"]
     assert state["answer_chars"] == len("5 проверок.")
     assert len(state["fingerprint"]) == 16
+
+
+def test_rescore_report_recomputes_numbers_after_matcher_fix():
+    case = {
+        "id": "rescore",
+        "tier": "simple",
+        "title": "Пересчёт",
+        "auditor_id": "AUD-004",
+        "turns": [{"query": "Сколько?", "expected_route": "analytics", "expected_numbers": [273]}],
+    }
+    row = {
+        "case_id": "rescore",
+        "step": 1,
+        "tier": "simple",
+        "query": "Сколько?",
+        "expected_route": "analytics",
+        "route": "analytics",
+        "success": False,
+        "answer_success": False,
+        "process_success": True,
+        "route_ok": True,
+        "context_ok": True,
+        "numbers_applicable": True,
+        "numbers_ok": False,
+        "include_ok": True,
+        "exclude_ok": True,
+        "evidence_ok": True,
+        "rounds_ok": True,
+        "citations_ok": True,
+        "sql_ok": True,
+        "answer_ok": True,
+        "answer": "Всего 273.",
+    }
+    report = {"summary": {}, "turns": [row]}
+    rescored = rescore_report(report, [case])
+    assert rescored["turns"][0]["numbers_ok"]
+    assert rescored["turns"][0]["answer_success"]
+    assert rescored["turns"][0]["success"]
 
 
 def test_failed_turn_row_keeps_structure():

@@ -8,6 +8,7 @@ import time
 from typing import Any, Protocol
 
 from .prompts import format_guide, load_prompt
+from .query.plan import QueryPlan
 from . import telemetry
 from .schemas import (
     AnswerDraft,
@@ -57,6 +58,14 @@ class LLMClient(Protocol):
     def route(
         self, *, question: str, profile_text: str, context: str = ""
     ) -> "RouteDecision": ...
+
+    def plan_query(
+        self,
+        *,
+        question: str,
+        catalog_text: str,
+        context: str = "",
+    ) -> QueryPlan: ...
 
     def plan_sql(
         self,
@@ -332,6 +341,25 @@ class OpenAILLM:
                 "Верни RouteDecision: route, reason, confidence."
             ),
             schema=RouteDecision,
+        )
+
+    def plan_query(
+        self,
+        *,
+        question: str,
+        catalog_text: str,
+        context: str = "",
+    ) -> QueryPlan:
+        return self._parse(
+            system=load_prompt("analytics_plan_query"),
+            user=(
+                f"{self._context_block(context)}"
+                f"Вопрос: {question}\n\n"
+                f"Каталог метрик и измерений:\n{catalog_text}\n\n"
+                "Верни QueryPlan: metric, dimensions, filters, order_by, limit, reason."
+            ),
+            schema=QueryPlan,
+            max_tokens=1500,
         )
 
     def plan_sql(

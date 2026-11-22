@@ -10,11 +10,15 @@ from typing import Any, Literal
 import psycopg
 from langgraph.graph import END, START, StateGraph
 
+from .. import config
 from ..acl import ACLMessage, ACLValidationError, make_reply, validate_acl
+from ..capabilities import match_capability
 from ..dialogue import last_audit_code
 from ..i18n import t
 from ..llm import LLMClient
+from ..query.compiler import QueryCompileError, compile_query_plan
 from ..schemas import SQLPlan, ToolPlan
+from ..semantic.catalog import catalog_text
 from ..state import AnalyticsState
 from ..tools import db as db_tools
 from ..tools.registry import TOOL_SPECS, execute_tool
@@ -366,6 +370,7 @@ def build_analytics_graph(server, llm: LLMClient):
             "conversation_context": str(
                 message.content.get("conversation_context", "")
             ),
+            "dialogue_slots": dict(message.content.get("dialogue_slots") or {}),
             "auditor_id": str(message.content.get("auditor_id", "")),
             "language": str(message.content.get("language", "ru")),
             "conversation_id": message.conversation_id,
@@ -388,6 +393,54 @@ def build_analytics_graph(server, llm: LLMClient):
         return {"mode": "sql"}
 
     def plan_sql(state: AnalyticsState) -> dict[str, Any]:
+        # 1. Typed capability: явные template-вопросы не отдаём LLM.
+        capability = match_capability(
+            state["question"],
+            state.get("dialogue_slots") or {},
+        )
+        if capability is not None:
+            return {
+                "plan": {
+                    "strategy": "script",
+                    "template_key": capability.capability.id,
+                    "parameters": capability.parameters,
+                    "sql": "",
+                    "reason": capability.reason,
+                    "plan_source": "capability",
+                },
+                "strategy": "script",
+            }
+
+        # 2. Query IR: LLM выбирает метрику/разрезы/фильтры, SQL
+        # собирает детерминированный компилятор semantic layer.
+        planner = getattr(llm, "plan_query", None)
+        if planner is not None:
+            try:
+                query_plan = planner(
+                    question=state["question"],
+                    catalog_text=catalog_text(),
+                    context=state.get("conversation_context", ""),
+                )
+                sql = compile_query_plan(query_plan)
+            except (QueryCompileError, KeyError):
+                query_plan = None
+            except Exception:
+                query_plan = None
+            if query_plan is not None:
+                return {
+                    "plan": {
+                        "strategy": "generated",
+                        "template_key": "",
+                        "parameters": {},
+                        "sql": sql,
+                        "reason": query_plan.reason or "query_ir",
+                        "plan_source": "query_ir",
+                        "query_plan": query_plan.model_dump(),
+                    },
+                    "strategy": "generated",
+                }
+
+        # Fallback: старый свободный SQL-план для запросов вне каталога.
         try:
             plan = llm.plan_sql(
                 question=state["question"],
@@ -571,6 +624,10 @@ def build_analytics_graph(server, llm: LLMClient):
 
         calls: list[dict[str, Any]] = []
         evidence: list[dict[str, Any]] = []
+        requested = len(plan.calls)
+        limit = config.MAX_AGENT_ITERATIONS
+        truncated = requested > limit
+        english = str(state.get("language")).lower() == "en"
         code_match = AUDIT_CODE_RE.search(state["question"])
         audit_code = (
             code_match.group(0).upper()
@@ -578,7 +635,7 @@ def build_analytics_graph(server, llm: LLMClient):
             else last_audit_code(state.get("conversation_context", ""))
         )
         lines: list[str] = [f"Проверка {audit_code}:" if audit_code else "Результаты:"]
-        for call in plan.calls[:5]:
+        for call in plan.calls[:limit]:
             name = call.name.split("(", 1)[0].strip()
             arguments = dict(call.arguments)
             if name in ("get_audit", "get_act", "get_act_items"):
@@ -618,6 +675,20 @@ def build_analytics_graph(server, llm: LLMClient):
             kind="tools",
             facts=calls,
         )
+        truncation_metrics: dict[str, Any] = {}
+        if truncated:
+            # Часть плана не выполнена — сообщаем об этом явно, а не молча.
+            note = (
+                f"Only the first {len(calls)} of {requested} tools were run."
+                if english
+                else f"Выполнены первые {len(calls)} из {requested} инструментов."
+            )
+            answer = f"{answer}\n\n{note}" if answer else note
+            truncation_metrics = {
+                "tool_calls_requested": requested,
+                "tool_calls_truncated": True,
+                "tool_calls_executed": len(calls),
+            }
         return {
             "answer": answer,
             "rows": [],
@@ -626,6 +697,7 @@ def build_analytics_graph(server, llm: LLMClient):
             "evidence": evidence,
             "strategy": "multi_tool",
             "answer_source": answer_source,
+            "metrics": truncation_metrics,
         }
 
     COLUMN_LABELS = {
@@ -799,16 +871,27 @@ def build_analytics_graph(server, llm: LLMClient):
                 },
             )
 
+        metrics: dict[str, Any] = {
+            "sql_retries": int(state.get("retries", 0)),
+            "tool_calls": len(state.get("tool_calls", [])),
+            "plan_source": str(
+                (state.get("plan") or {}).get("plan_source", "llm_sql")
+            ),
+        }
+        # Флаги усечения плана инструментов, выставленные в multi_tool.
+        metrics.update(state.get("metrics") or {})
         content: dict[str, Any] = {
             "answer": state.get("answer", ""),
             "answer_source": state.get("answer_source", "template"),
             "strategy": state.get("strategy", "sql"),
             "evidence": state.get("evidence", []),
-            "metrics": {
-                "sql_retries": int(state.get("retries", 0)),
-                "tool_calls": len(state.get("tool_calls", [])),
-            },
+            "metrics": metrics,
         }
+        if metrics.get("tool_calls_truncated"):
+            content["tool_calls_truncated"] = True
+            content["tool_calls_requested"] = int(
+                metrics.get("tool_calls_requested", 0)
+            )
         if state.get("sql"):
             content["sql"] = state["sql"]
         if state.get("columns"):

@@ -13,8 +13,9 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from .. import dialogue_store
-from ..acl import make_acl_message
+from ..acl import append_acl_log, make_acl_message
 from ..dialogue import build_dialogue_context, is_followup
+from ..dialogue_slots import DialogueSlots, augment_query, merge_slots
 from ..guardrails import check_final_answer, check_request, extract_sql
 from ..llm import LLMClient
 from ..memory import store as memory_store
@@ -26,6 +27,16 @@ from .report_graph import build_report_graph
 from .retrieval_graph import build_retrieval_graph
 
 logger = logging.getLogger(__name__)
+
+
+def _log_acl(message: dict[str, Any]) -> None:
+    """Дописывает ACL-сообщение в журнал, не ломая ответ при ошибке записи."""
+    if not message:
+        return
+    try:
+        append_acl_log(message)
+    except Exception as exc:  # журнал не должен ломать ответ
+        logger.warning("Не удалось записать ACL-журнал: %s", exc)
 
 
 def _content_text(content: Any) -> str:
@@ -129,11 +140,13 @@ def build_main_graph(
         )
         auditor_id = state.get("auditor_id", "")
         profile = memory_store.load_profile(server, auditor_id)
+        slots = merge_slots(state.get("dialogue_slots"), question)
         return {
             "user_query": question,
             "resolved_query": question,
             "resolved_reason": "",
             "dialogue_context": context,
+            "dialogue_slots": slots.model_dump(),
             "profile": profile,
             "conversation_id": conversation_id,
             "turn_id": uuid.uuid4().hex,
@@ -152,31 +165,39 @@ def build_main_graph(
         }
 
     def resolve_query(state: MainState) -> dict[str, Any]:
-        """Переформулирует уточнение с учётом предыдущих реплик."""
+        """Переформулирует уточнение и сохраняет структурированные слоты."""
         question = state.get("user_query", "")
         context = state.get("dialogue_context", "")
-        if not context or not is_followup(question, True):
-            return {"resolved_query": question, "resolved_reason": ""}
+        text = question
+        reason = ""
 
-        resolver = getattr(llm, "resolve_followup", None)
-        if resolver is None:
-            return {"resolved_query": question, "resolved_reason": ""}
+        if context and is_followup(question, True):
+            resolver = getattr(llm, "resolve_followup", None)
+            if resolver is not None:
+                try:
+                    resolved = resolver(
+                        question=question,
+                        context=context,
+                        profile_text=memory_store.profile_text(
+                            state.get("profile", {})
+                        ),
+                        language=str(state.get("language") or "ru"),
+                    )
+                    candidate = " ".join(str(resolved.question or "").split()).strip()
+                    if resolved.is_followup and candidate and len(candidate) <= 500:
+                        text = candidate
+                        reason = str(resolved.reason or "")
+                except Exception:
+                    text = question
+                    reason = ""
 
-        try:
-            resolved = resolver(
-                question=question,
-                context=context,
-                profile_text=memory_store.profile_text(state.get("profile", {})),
-                language=str(state.get("language") or "ru"),
-            )
-        except Exception:
-            return {"resolved_query": question, "resolved_reason": ""}
-
-        text = " ".join(str(resolved.question or "").split()).strip()
-        if not resolved.is_followup or not text or len(text) > 500:
-            text = question
-        reason = str(resolved.reason or "") if resolved.is_followup else ""
-        return {"resolved_query": text, "resolved_reason": reason}
+        slots = merge_slots(state.get("dialogue_slots"), question, text)
+        text = augment_query(text, slots)
+        return {
+            "resolved_query": text,
+            "resolved_reason": reason,
+            "dialogue_slots": slots.model_dump(),
+        }
 
     def save_memory(state: MainState) -> dict[str, Any]:
         question = state.get("resolved_query") or state.get("user_query", "")
@@ -314,13 +335,17 @@ def build_main_graph(
                 "question": _question_with_profile(state, receiver),
                 "original_question": state.get("user_query", ""),
                 "conversation_context": state.get("dialogue_context", ""),
+                "dialogue_slots": state.get("dialogue_slots", {}),
                 "auditor_id": state.get("auditor_id", ""),
                 "language": state.get("language", "ru"),
             },
             conversation_id=state.get("conversation_id", "conv-main"),
         )
+        _log_acl(request.model_dump())
         result = graph.invoke({"acl_request": request.model_dump()})
         response = result.get("acl_response", {})
+        if isinstance(response, dict) and response:
+            _log_acl(response)
         content = response.get("content", {})
         return {
             "acl_response": response,
