@@ -9,6 +9,8 @@ import pytest
 from src import db_runtime
 from src.graph.main_graph import build_main_graph
 from src.schemas import (
+    MemoryFact,
+    MemoryUpdate,
     ReportDraft,
     ReportReview,
     ResolvedQuery,
@@ -42,7 +44,39 @@ class MainLLM:
             return RouteDecision(
                 route="smalltalk", reason="smalltalk:greeting", confidence=0.95
             )
+        if (
+            "забудь" in question
+            or "запомни" in question
+            or "профиль" in question
+            or ("я проверяю" in question and "акт нужен" in question)
+        ):
+            return RouteDecision(route="memory", reason="профиль", confidence=0.9)
         return RouteDecision(route="analytics", reason="числа", confidence=0.8)
+
+
+class MemoryLLM(MainLLM):
+    """Фейковый экстрактор памяти: повторяет контракт extract_memory."""
+
+    def __init__(self):
+        self.extract_calls: list[dict] = []
+
+    def extract_memory(self, **kwargs):
+        self.extract_calls.append(kwargs)
+        question = kwargs["question"].lower()
+        facts: list[MemoryFact] = []
+        forget: list[str] = []
+        if "забудь" in question or "сбрось" in question:
+            forget = ["focus_theme", "default_format", "signature"]
+        else:
+            if "ипотек" in question:
+                facts.append(MemoryFact(key="focus_theme", value="ипотека"))
+            if "кратк" in question:
+                facts.append(MemoryFact(key="default_format", value="краткий"))
+            elif "подробн" in question:
+                facts.append(MemoryFact(key="default_format", value="подробный"))
+            if "подписывай" in question:
+                facts.append(MemoryFact(key="signature", value="Иванов И.И."))
+        return MemoryUpdate(facts=facts, forget=forget, reason="тест")
 
 
 class AnalyticsLLM:
@@ -51,11 +85,16 @@ class AnalyticsLLM:
 
     def plan_sql(self, **kwargs):
         self.calls += 1
-        return SQLPlan(
-            strategy="generated",
-            sql="SELECT count(*) AS cnt FROM audit.audits",
-            reason="количество",
-        )
+        question = kwargs["question"].lower()
+        if "ипотек" in question:
+            sql = (
+                "SELECT count(*) AS cnt FROM audit.audits AS a "
+                "JOIN audit.audit_pockets AS p ON a.pocket_id = p.pocket_id "
+                "WHERE p.theme_code = 'ипотека'"
+            )
+        else:
+            sql = "SELECT count(*) AS cnt FROM audit.audits"
+        return SQLPlan(strategy="generated", sql=sql, reason="количество")
 
     def summarize(self, **kwargs):
         return "Проверок: 1."
@@ -64,18 +103,37 @@ class AnalyticsLLM:
 class ReportLLM:
     def __init__(self):
         self.questions: list[str] = []
+        self.formats: list[str] = []
 
     def draft_report(self, **kwargs):
         self.questions.append(kwargs["question"])
+        self.formats.append(kwargs.get("report_format", "подробный"))
         # Черновик должен содержать обязательные разделы, иначе Inspector
         # отправит его на доработку (revise), а этот фейк её не поддерживает.
+        if kwargs.get("report_format") == "краткий":
+            return ReportDraft(
+                text=(
+                    "Вводная часть: проверка AUD-2026-DEPOSITS-88.\n"
+                    "Выявленные отклонения и проблемы: начисление процентов.\n"
+                    "Рекомендации: автоматизировать контроль.\n"
+                    "Сроки устранения: 2026-06-01."
+                ),
+                citations=["ITM-MAIN-01"],
+            )
         return ReportDraft(
             text=(
-                "Вводная часть. Проверка AUD-2026-DEPOSITS-88.\n"
+                "Вводная часть. Проверка AUD-2026-DEPOSITS-88 проведена в "
+                "период с 2026-02-01 по 2026-03-01, руководитель — MAIN-001, "
+                "команда из двух аудиторов. Предмет проверки — начисление "
+                "процентов по вкладам.\n"
                 "Выявленные отклонения и проблемы: некорректное начисление "
-                "процентов.\n"
-                "Рекомендации: автоматизировать контроль.\n"
-                "Сроки устранения: 2026-06-01."
+                "процентов по трём договорам из ста проверенных; отклонение "
+                "зафиксировано в пункте ITM-MAIN-01 и требует устранения.\n"
+                "Рекомендации: автоматизировать контроль начисления процентов, "
+                "пересчитать проценты по затронутым договорам и уведомить "
+                "владельцев процесса о результатах пересчёта.\n"
+                "Сроки устранения: 2026-06-01 согласно пункту ITM-MAIN-01; "
+                "ответственное подразделение — Департамент вкладов."
             ),
             citations=["ITM-MAIN-01"],
         )
@@ -109,6 +167,14 @@ def main_data(server):
             " period_start, period_end, planned_audit_count) "
             "VALUES ('PKT-2026-DEPOSITS', 2026, 'вклады', '2026. Вклады', "
             "        'Департамент вкладов', '2026-01-01', '2026-12-31', 5) "
+            "ON CONFLICT (pocket_id) DO NOTHING"
+        )
+        conn.execute(
+            "INSERT INTO audit.audit_pockets "
+            "(pocket_id, pocket_year, theme_code, title, owner_unit, "
+            " period_start, period_end, planned_audit_count) "
+            "VALUES ('PKT-2026-MORTGAGE', 2026, 'ипотека', '2026. Ипотека', "
+            "        'Департамент ипотеки', '2026-01-01', '2026-12-31', 5) "
             "ON CONFLICT (pocket_id) DO NOTHING"
         )
         conn.execute(
@@ -154,6 +220,9 @@ def main_data(server):
         conn.execute(
             "DELETE FROM audit.audit_pockets WHERE pocket_id = 'PKT-2026-DEPOSITS'"
         )
+        conn.execute(
+            "DELETE FROM audit.audit_pockets WHERE pocket_id = 'PKT-2026-MORTGAGE'"
+        )
         conn.execute("DELETE FROM audit.auditors WHERE auditor_id = 'MAIN-001'")
 
 
@@ -187,13 +256,14 @@ def test_short_term_memory_accumulates_messages(server, main_data):
 
 def test_long_term_memory_between_sessions(server, main_data):
     report = ReportLLM()
-    graph = build_main_graph(server, MainLLM(), report_llm=report)
+    graph = build_main_graph(server, MemoryLLM(), report_llm=report)
 
     first = _invoke(
         graph,
         "session-1",
         "Я проверяю ипотеку, акт нужен в кратком формате",
     )
+    assert first["route"] == "memory"
     assert "Профиль сохранён" in first["final_answer"]
 
     with db_runtime.connect(server) as conn:
@@ -216,6 +286,126 @@ def test_long_term_memory_between_sessions(server, main_data):
     assert report.questions
     assert "Формат: краткий" in report.questions[-1]
     assert "Тема: ипотека" in report.questions[-1]
+    assert report.formats[-1] == "краткий"
+
+
+def test_mixed_question_is_not_hijacked_by_memory(server, main_data):
+    """«Я проверяю ипотеку, сколько проверок?» — аналитика, не память."""
+    llm = MemoryLLM()
+    analytics = AnalyticsLLM()
+    graph = build_main_graph(server, llm, analytics_llm=analytics)
+
+    result = _invoke(
+        graph, "thread-mixed", "Я проверяю ипотеку, сколько проверок?"
+    )
+
+    assert result["route"] == "analytics"
+    assert result["final_answer"] == "Проверок: 1."
+    assert llm.extract_calls == []
+    with db_runtime.connect(server) as conn:
+        count = conn.execute(
+            "SELECT count(*) FROM audit.auditor_memory "
+            "WHERE auditor_id = 'MAIN-001'"
+        ).fetchone()[0]
+    assert count == 0
+
+
+def test_memory_forget_and_profile_query(server, main_data):
+    graph = build_main_graph(server, MemoryLLM())
+
+    saved = _invoke(
+        graph,
+        "session-forget-1",
+        "Я проверяю ипотеку, акт нужен в кратком формате",
+    )
+    assert "Профиль сохранён" in saved["final_answer"]
+
+    shown = _invoke(graph, "session-forget-2", "Какой у меня профиль?")
+    assert shown["route"] == "memory"
+    assert "Ваш профиль" in shown["final_answer"]
+    assert "краткий" in shown["final_answer"]
+
+    forgot = _invoke(graph, "session-forget-3", "Забудь мой профиль")
+    assert forgot["route"] == "memory"
+    assert "Профиль сброшен" in forgot["final_answer"]
+    with db_runtime.connect(server) as conn:
+        count = conn.execute(
+            "SELECT count(*) FROM audit.auditor_memory "
+            "WHERE auditor_id = 'MAIN-001'"
+        ).fetchone()[0]
+    assert count == 0
+
+
+def test_memory_fallback_when_extraction_unavailable(server, main_data):
+    """Без extract_memory (или при его сбое) работает детерминированный fallback."""
+
+    class BrokenExtractLLM(MainLLM):
+        def extract_memory(self, **kwargs):
+            raise RuntimeError("LLM недоступна")
+
+    for llm in (MainLLM(), BrokenExtractLLM()):
+        graph = build_main_graph(server, llm)
+        result = _invoke(
+            graph,
+            "thread-memory-fallback",
+            "Я проверяю ипотеку, акт нужен в кратком формате",
+        )
+        assert result["route"] == "memory"
+        assert "Профиль сохранён" in result["final_answer"]
+        with db_runtime.connect(server) as conn:
+            conn.execute(
+                "DELETE FROM audit.auditor_memory WHERE auditor_id = 'MAIN-001'"
+            )
+
+
+def test_memory_without_auditor_id_is_graceful(server, main_data):
+    graph = build_main_graph(server, MemoryLLM())
+
+    result = graph.invoke(
+        {
+            "messages": [
+                {"role": "user", "content": "Запомни: я проверяю ипотеку"}
+            ],
+            "auditor_id": "",
+            "conversation_id": "thread-no-auditor",
+        },
+        config={"configurable": {"thread_id": "thread-no-auditor"}},
+    )
+
+    assert result["route"] == "memory"
+    assert "не задан идентификатор" in result["final_answer"]
+
+
+def test_report_format_and_signature_follow_profile(server, main_data):
+    report = ReportLLM()
+    graph = build_main_graph(server, MemoryLLM(), report_llm=report)
+
+    _invoke(
+        graph,
+        "session-brief-1",
+        "Запомни: я проверяю ипотеку, акт нужен в кратком формате, "
+        "подписывай акты Иванов И.И.",
+    )
+    brief = _invoke(
+        graph,
+        "session-brief-2",
+        "Сформируй раздел акта по AUD-2026-DEPOSITS-88",
+    )
+    assert report.formats[-1] == "краткий"
+    assert brief["final_answer"].rstrip().endswith("Иванов И.И.")
+    assert "Вводная часть" in brief["final_answer"]
+    assert "Сроки устранения" in brief["final_answer"]
+
+    _invoke(
+        graph, "session-brief-3", "Запомни: акт нужен в подробном формате"
+    )
+    detailed = _invoke(
+        graph,
+        "session-brief-4",
+        "Сформируй раздел акта по AUD-2026-DEPOSITS-88",
+    )
+    assert report.formats[-1] == "подробный"
+    assert len(brief["final_answer"]) < len(detailed["final_answer"])
 
 
 def test_out_of_domain_and_unsafe_refused(server, main_data):
@@ -304,7 +494,13 @@ class DialogueAnalyticsLLM(AnalyticsLLM):
         self.contexts.append(kwargs.get("context", ""))
         question = kwargs["question"].lower()
         year = "2025" if "2025" in question else "2026"
-        theme = "вклады" if "вклад" in question else "карты"
+        theme = (
+            "ипотека"
+            if "ипотек" in question
+            else "вклады"
+            if "вклад" in question
+            else "карты"
+        )
         status = " AND a.status = 'завершена'" if "заверш" in question else ""
         return SQLPlan(
             strategy="generated",

@@ -326,6 +326,7 @@ def _format_with_llm(
             ),
             language=str(state.get("language") or "ru"),
             context=state.get("conversation_context", ""),
+            profile_text=state.get("profile_text", ""),
         )
     except Exception:
         text = ""
@@ -373,6 +374,7 @@ def build_analytics_graph(server, llm: LLMClient):
             ),
             "dialogue_slots": dict(message.content.get("dialogue_slots") or {}),
             "auditor_id": str(message.content.get("auditor_id", "")),
+            "profile_text": str(message.content.get("profile_text", "")),
             "language": str(message.content.get("language", "ru")),
             "conversation_id": message.conversation_id,
             "retries": 0,
@@ -421,6 +423,7 @@ def build_analytics_graph(server, llm: LLMClient):
                     question=state["question"],
                     catalog_text=catalog_text(),
                     context=state.get("conversation_context", ""),
+                    profile_text=state.get("profile_text", ""),
                 )
                 sql = compile_query_plan(query_plan)
             except (QueryCompileError, KeyError):
@@ -448,6 +451,7 @@ def build_analytics_graph(server, llm: LLMClient):
                 schema_text=db_tools.get_schema(),
                 templates=db_tools.list_script_templates(server),
                 context=state.get("conversation_context", ""),
+                profile_text=state.get("profile_text", ""),
             )
         except Exception as exc:
             detail = str(exc).strip() or repr(exc)
@@ -486,7 +490,7 @@ def build_analytics_graph(server, llm: LLMClient):
         try:
             safe = validate_readonly_sql(state["plan"]["sql"])
         except UnsafeSQLError as exc:
-            return _refuse(state, f"SQL отклонён: {exc}")
+            return {**_refuse(state, f"SQL отклонён: {exc}"), "retry": False}
 
         missing = missing_question_filters(
             state.get("question", ""),
@@ -504,7 +508,9 @@ def build_analytics_graph(server, llm: LLMClient):
                     "retries": retries + 1,
                     "error": message + ". Добавь соответствующие фильтры.",
                 }
-            return _fail(state, message + ".")
+            # Флаг retry обязательно сбрасываем: иначе цикл
+            # validate → repair → validate не завершится.
+            return {**_fail(state, message + "."), "retry": False}
         return {"sql": safe, "retry": False}
 
     def execute_sql(state: AnalyticsState) -> dict[str, Any]:
@@ -544,13 +550,17 @@ def build_analytics_graph(server, llm: LLMClient):
                 error=state.get("error", ""),
                 schema_text=db_tools.get_schema(),
                 context=state.get("conversation_context", ""),
+                profile_text=state.get("profile_text", ""),
             )
         except Exception as exc:
-            return _fail(
-                state,
-                t(state.get("language"), "repair_failed", error=exc),
-            )
-        return {"plan": plan.model_dump(), "strategy": "generated"}
+            return {
+                **_fail(
+                    state,
+                    t(state.get("language"), "repair_failed", error=exc),
+                ),
+                "retry": False,
+            }
+        return {"plan": plan.model_dump(), "strategy": "generated", "retry": False}
 
     def drilldown(state: AnalyticsState) -> dict[str, Any]:
         code = AUDIT_CODE_RE.search(state["question"])
@@ -616,6 +626,7 @@ def build_analytics_graph(server, llm: LLMClient):
                 question=state["question"],
                 tools_text=TOOL_SPECS,
                 context=state.get("conversation_context", ""),
+                profile_text=state.get("profile_text", ""),
             )
         except Exception as exc:
             return _fail(
@@ -827,6 +838,7 @@ def build_analytics_graph(server, llm: LLMClient):
                         question=state.get("question", ""),
                         columns=columns,
                         rows=rows,
+                        profile_text=state.get("profile_text", ""),
                     )
                 except Exception:
                     text = ""

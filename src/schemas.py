@@ -11,6 +11,7 @@ Route = Literal[
     "retrieval",
     "report",
     "investigation",
+    "memory",
     "smalltalk",
     "out_of_domain",
     "unsafe",
@@ -31,6 +32,30 @@ class ResolvedQuery(BaseModel):
     question: str = Field(min_length=1)
     is_followup: bool
     reason: str
+
+
+MemoryKey = Literal["focus_theme", "default_format", "signature"]
+
+
+class MemoryFact(BaseModel):
+    """Одно предпочтение аудитора для долгосрочной памяти."""
+
+    key: MemoryKey
+    value: str = Field(min_length=1, max_length=200)
+
+
+class MemoryUpdate(BaseModel):
+    """Извлечённые предпочтения и ключи памяти, которые нужно забыть."""
+
+    facts: list[MemoryFact] = Field(default_factory=list)
+    forget: list[MemoryKey] = Field(default_factory=list)
+    reason: str = ""
+
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs):
+        schema = super().model_json_schema(*args, **kwargs)
+        schema["required"] = ["facts", "forget", "reason"]
+        return schema
 
 
 class SQLPlan(BaseModel):

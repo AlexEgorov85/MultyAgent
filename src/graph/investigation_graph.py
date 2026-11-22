@@ -99,6 +99,7 @@ def build_investigation_graph(
         auditor_id: str = "",
         language: str = "ru",
         conversation_context: str = "",
+        profile_text: str = "",
     ):
         request = make_acl_message(
             performative="request",
@@ -109,6 +110,7 @@ def build_investigation_graph(
                 "conversation_context": conversation_context,
                 "auditor_id": auditor_id or "AUD-001",
                 "language": language,
+                "profile_text": profile_text,
             },
             conversation_id=conversation_id,
         )
@@ -149,6 +151,7 @@ def build_investigation_graph(
                 message.content.get("conversation_context", "")
             ),
             "auditor_id": str(message.content.get("auditor_id", "")),
+            "profile_text": str(message.content.get("profile_text", "")),
             "language": str(message.content.get("language", "ru")),
             "conversation_id": message.conversation_id,
             "rounds": 0,
@@ -163,6 +166,7 @@ def build_investigation_graph(
                 question=state["question"],
                 schema_text=db_tools.get_schema(),
                 context=state.get("conversation_context", ""),
+                profile_text=state.get("profile_text", ""),
             )
         except Exception as exc:
             return {
@@ -185,6 +189,7 @@ def build_investigation_graph(
             auditor_id=state.get("auditor_id", ""),
             language=state.get("language", "ru"),
             conversation_context=state.get("conversation_context", ""),
+            profile_text=state.get("profile_text", ""),
         )
         r_req, r_resp = _call(
             retrieval_graph,
@@ -195,6 +200,7 @@ def build_investigation_graph(
             auditor_id=state.get("auditor_id", ""),
             language=state.get("language", "ru"),
             conversation_context=state.get("conversation_context", ""),
+            profile_text=state.get("profile_text", ""),
         )
         log.extend(
             [
@@ -233,6 +239,7 @@ def build_investigation_graph(
                 plan=plan_model,
                 missing=missing,
                 context=state.get("conversation_context", ""),
+                profile_text=state.get("profile_text", ""),
             )
         except Exception:
             return {"rounds": 2, "status": "ok"}
@@ -252,6 +259,7 @@ def build_investigation_graph(
                 auditor_id=state.get("auditor_id", ""),
                 language=state.get("language", "ru"),
                 conversation_context=state.get("conversation_context", ""),
+                profile_text=state.get("profile_text", ""),
             )
             log.extend(
                 [
@@ -273,6 +281,7 @@ def build_investigation_graph(
                 auditor_id=state.get("auditor_id", ""),
                 language=state.get("language", "ru"),
                 conversation_context=state.get("conversation_context", ""),
+                profile_text=state.get("profile_text", ""),
             )
             log.extend(
                 [
@@ -308,6 +317,7 @@ def build_investigation_graph(
                 missing=state.get("missing", []),
                 rounds=int(state.get("rounds", 0)),
                 context=state.get("conversation_context", ""),
+                profile_text=state.get("profile_text", ""),
             )
         except Exception as exc:
             return {

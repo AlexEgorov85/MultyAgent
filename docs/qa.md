@@ -7,7 +7,7 @@
 | Тесты | `.venv\Scripts\python.exe -m pytest -q` | все зелёные, 0 failed |
 | QA данных | `.venv\Scripts\python.exe scripts\qa_checks.py` | без нарушений |
 | Набор оценки | `.venv\Scripts\python.exe scripts\evaluate.py --dry-run` | 26 кейсов валидны |
-| Бенчмарк | `.venv\Scripts\python.exe scripts\benchmark.py --dry-run` | 49 кейсов / 65 реплик |
+| Бенчмарк | `.venv\Scripts\python.exe scripts\benchmark.py --dry-run` | 51 кейс / 67 реплик |
 | Спецификации | `openspec validate --specs --strict` | 13 passed, 0 failed |
 | UI | `npm --prefix ui run lint` и `npm --prefix ui run build` | exit code 0 |
 | Чистый клон | `python scripts/verify_clean_clone.py --no-env --with-ui` | `RESULT: OK` |
@@ -76,7 +76,7 @@ openspec list --specs
 
 - `scripts/evaluate.py` — 26 кейсов `data/test_cases.jsonl`;
   метрики и исторические прогоны — [metrics.md](metrics.md).
-- `scripts/benchmark.py` — 49 кейсов / 65 реплик
+- `scripts/benchmark.py` — 51 кейс / 67 реплик
   `data/benchmark_cases.jsonl`, процессные метрики —
   [benchmark.md](benchmark.md).
 - `scripts/benchmark_triage.py`, `scripts/benchmark_diff.py`,

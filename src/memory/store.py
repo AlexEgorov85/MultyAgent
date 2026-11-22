@@ -17,18 +17,23 @@ class MemoryError(ValueError):
     """Некорректный ключ или значение памяти."""
 
 
-def load_profile(server, auditor_id: str) -> dict[str, str]:
-    """Читает профиль аудитора; при отсутствии возвращает значения по умолчанию."""
+def load_stored(server, auditor_id: str) -> dict[str, str]:
+    """Читает только сохранённые факты, без значений по умолчанию."""
     if not auditor_id:
-        return dict(DEFAULT_VALUES)
+        return {}
     with db_runtime.connect(server, role=db_runtime.APP_ROLE) as conn:
         rows = conn.execute(
             "SELECT memory_key, memory_value FROM audit.auditor_memory "
             "WHERE auditor_id = %s ORDER BY memory_key",
             (auditor_id,),
         ).fetchall()
+    return {key: value for key, value in rows}
+
+
+def load_profile(server, auditor_id: str) -> dict[str, str]:
+    """Читает профиль аудитора; при отсутствии возвращает значения по умолчанию."""
     profile = dict(DEFAULT_VALUES)
-    profile.update({key: value for key, value in rows})
+    profile.update(load_stored(server, auditor_id))
     return profile
 
 
@@ -52,6 +57,68 @@ def save_fact(server, auditor_id: str, key: str, value: str) -> None:
         )
 
 
+def delete_fact(server, auditor_id: str, key: str) -> None:
+    """Удаляет один факт профиля («забудь формат»)."""
+    if not auditor_id:
+        raise MemoryError("Не задан auditor_id")
+    if key not in ALLOWED_KEYS:
+        raise MemoryError(f"Недопустимый ключ памяти: {key}")
+    with db_runtime.connect(server, role=db_runtime.APP_ROLE) as conn:
+        conn.execute(
+            "DELETE FROM audit.auditor_memory "
+            "WHERE auditor_id = %s AND memory_key = %s",
+            (auditor_id, key),
+        )
+
+
+def clear_profile(server, auditor_id: str) -> None:
+    """Сбрасывает весь профиль аудитора («забудь всё», кнопка в UI)."""
+    if not auditor_id:
+        raise MemoryError("Не задан auditor_id")
+    with db_runtime.connect(server, role=db_runtime.APP_ROLE) as conn:
+        conn.execute(
+            "DELETE FROM audit.auditor_memory WHERE auditor_id = %s",
+            (auditor_id,),
+        )
+
+
+def normalize_fact(
+    key: str, value: str, themes: tuple[str, ...] | list[str] = ()
+) -> str | None:
+    """Приводит значение к каноническому виду; None — значение не распознано.
+
+    LLM извлекает факты свободно, но в базу попадают только допустимые
+    значения: формат — «краткий»/«подробный», тема — из списка тем базы.
+    """
+    if key not in ALLOWED_KEYS:
+        return None
+    text = " ".join(str(value or "").split()).strip()
+    if not text:
+        return None
+    if key == "default_format":
+        lower = text.lower()
+        if any(stem in lower for stem in ("кратк", "коротк", "сжат", "brief", "short")):
+            return "краткий"
+        if any(
+            stem in lower
+            for stem in ("подробн", "полн", "развёрнут", "развернут", "detailed", "full")
+        ):
+            return "подробный"
+        return None
+    if key == "focus_theme":
+        lower = text.lower()
+        for theme in themes:
+            if lower == str(theme).lower():
+                return str(theme)
+        for theme in themes:
+            value = str(theme).lower()
+            stem = value[:-1] if value.endswith(("а", "я", "ы")) else value
+            if len(stem) >= 4 and stem in lower:
+                return str(theme)
+        return None
+    return text[:200]
+
+
 def profile_text(profile: Mapping[str, str]) -> str:
     """Форматирует профиль для промпта и ответа."""
     parts = []
@@ -65,7 +132,12 @@ def profile_text(profile: Mapping[str, str]) -> str:
 
 
 def infer_memory(question: str) -> dict[str, str]:
-    """Извлекает простые предпочтения, только если пользователь просит запомнить."""
+    """Аварийный детерминированный fallback без LLM.
+
+    Основной путь извлечения — ``LLMClient.extract_memory`` (маршрут
+    ``memory`` выбирает router). Этот парсер используется только когда
+    LLM-извлечение недоступно, поэтому намеренно консервативен.
+    """
     text = question.lower()
     triggers = (
         "запомни",

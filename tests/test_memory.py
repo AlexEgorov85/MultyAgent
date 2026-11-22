@@ -66,3 +66,43 @@ def test_memory_intent_detection():
     assert store.infer_memory("Сколько проверок по ипотеке?") == {}
     facts = store.infer_memory("Я проверяю ипотеку, акт нужен в кратком формате")
     assert facts == {"focus_theme": "ипотека", "default_format": "краткий"}
+
+
+def test_normalize_fact():
+    assert store.normalize_fact("default_format", "Краткий формат") == "краткий"
+    assert store.normalize_fact("default_format", "keep it brief") == "краткий"
+    assert store.normalize_fact("default_format", "подробный") == "подробный"
+    assert store.normalize_fact("default_format", "синий") is None
+    assert (
+        store.normalize_fact("focus_theme", "Ипотека", ["ипотека", "вклады"])
+        == "ипотека"
+    )
+    assert (
+        store.normalize_fact("focus_theme", "по ипотеке", ["ипотека", "вклады"])
+        == "ипотека"
+    )
+    assert store.normalize_fact("focus_theme", "криптовалюта", ["ипотека"]) is None
+    assert store.normalize_fact("signature", "  Иванов И.И. ") == "Иванов И.И."
+    assert store.normalize_fact("favourite_color", "синий") is None
+    assert store.normalize_fact("default_format", "   ") is None
+
+
+def test_delete_and_clear_profile(server, memory_auditor):
+    store.save_fact(server, memory_auditor, "focus_theme", "ипотека")
+    store.save_fact(server, memory_auditor, "default_format", "краткий")
+
+    store.delete_fact(server, memory_auditor, "default_format")
+    profile = store.load_profile(server, memory_auditor)
+    assert profile["default_format"] == "подробный"  # значение по умолчанию
+    assert store.load_stored(server, memory_auditor) == {"focus_theme": "ипотека"}
+
+    store.clear_profile(server, memory_auditor)
+    assert store.load_stored(server, memory_auditor) == {}
+    assert store.load_profile(server, memory_auditor) == dict(store.DEFAULT_VALUES)
+
+
+def test_delete_unknown_key_rejected(server, memory_auditor):
+    with pytest.raises(store.MemoryError):
+        store.delete_fact(server, memory_auditor, "favourite_color")
+    with pytest.raises(store.MemoryError):
+        store.clear_profile(server, "")

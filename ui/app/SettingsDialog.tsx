@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useI18n } from "./i18n";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useI18n, type Dictionary } from "./i18n";
 import { useSettings } from "./SettingsProvider";
+import {
+  fetchAuditorProfile,
+  resetAuditorProfile,
+} from "./dialogueAdmin";
 import {
   ACCENTS,
   CHAT_FONT_SCALES,
@@ -132,6 +136,96 @@ function Toggle({
         }`}
       />
     </button>
+  );
+}
+
+function AuditorProfilePanel({
+  auditorId,
+  t,
+}: {
+  auditorId: string;
+  t: Dictionary;
+}) {
+  const [profile, setProfile] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [resetDone, setResetDone] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!auditorId) {
+      setProfile({});
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      setProfile(await fetchAuditorProfile(auditorId));
+    } catch {
+      setError(t.profileError);
+    } finally {
+      setLoading(false);
+    }
+  }, [auditorId, t.profileError]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const onReset = async () => {
+    if (!auditorId || !window.confirm(t.profileResetConfirm)) return;
+    setResetDone(false);
+    try {
+      await resetAuditorProfile(auditorId);
+      setResetDone(true);
+      await load();
+    } catch {
+      setError(t.profileError);
+    }
+  };
+
+  const value = (key: string) =>
+    (profile[key] || "").trim() || t.profileNotSet;
+
+  return (
+    <SettingRow title={t.profileTitle} hint={t.profileHint}>
+      <div className="space-y-1.5 text-xs app-muted">
+        <div className="flex items-baseline gap-2">
+          <span className="shrink-0 app-text">{t.profileTheme}:</span>
+          <span>{value("focus_theme")}</span>
+        </div>
+        <div className="flex items-baseline gap-2">
+          <span className="shrink-0 app-text">{t.profileFormat}:</span>
+          <span>
+            {profile.default_format
+              ? profile.default_format
+              : t.profileFormatDefault}
+          </span>
+        </div>
+        <div className="flex items-baseline gap-2">
+          <span className="shrink-0 app-text">{t.profileSignature}:</span>
+          <span>{value("signature")}</span>
+        </div>
+        {error && <p className="app-danger">{error}</p>}
+        {resetDone && <p className="text-xs app-muted">{t.profileResetDone}</p>}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => void load()}
+          className="border app-border app-surface app-text app-round-sm px-3 py-1.5 text-xs font-medium transition app-accent-hover"
+        >
+          {loading ? t.profileLoading : t.profileRefresh}
+        </button>
+        <button
+          type="button"
+          onClick={() => void onReset()}
+          className="app-danger app-round-sm border px-3 py-1.5 text-xs font-medium transition"
+        >
+          {t.profileReset}
+        </button>
+      </div>
+    </SettingRow>
   );
 }
 
@@ -550,6 +644,8 @@ export function SettingsDialog({
                   className="w-full border app-border app-surface app-text app-round-sm px-3 py-2 text-sm transition app-ring"
                 />
               </SettingRow>
+
+              <AuditorProfilePanel auditorId={auditorId} t={t} />
 
               <div className="flex flex-wrap gap-2 border-t app-border pt-4">
                 <button

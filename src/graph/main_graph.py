@@ -199,21 +199,108 @@ def build_main_graph(
             "dialogue_slots": slots.model_dump(),
         }
 
-    def save_memory(state: MainState) -> dict[str, Any]:
+    def update_memory(state: MainState) -> dict[str, Any]:
+        """Маршрут memory: LLM извлекает факты, код валидирует и пишет.
+
+        Решение «это запрос на запоминание?» принимает router, поэтому
+        смешанные реплики («я проверяю ипотеку, сколько отклонений?»)
+        сюда не попадают и не теряют аналитическую часть вопроса.
+        """
         question = state.get("resolved_query") or state.get("user_query", "")
-        facts = memory_store.infer_memory(question)
-        if not facts:
-            return {"memory_saved": False}
+        auditor_id = str(state.get("auditor_id") or "")
+        if not auditor_id:
+            return {
+                "memory_saved": False,
+                "final_answer": _pick(
+                    state,
+                    "Не удалось обновить профиль: не задан идентификатор аудитора.",
+                    "Cannot update the profile: auditor ID is missing.",
+                ),
+            }
+
+        themes = known_themes(server)
+        update = None
+        extractor = getattr(llm, "extract_memory", None)
+        if extractor is not None:
+            try:
+                update = extractor(
+                    question=question,
+                    profile_text=memory_store.profile_text(
+                        state.get("profile", {})
+                    ),
+                    themes=themes,
+                    context=state.get("dialogue_context", ""),
+                    language=str(state.get("language") or "ru"),
+                )
+            except Exception:
+                update = None
+        if update is not None:
+            facts = {fact.key: fact.value for fact in update.facts}
+            forget = list(update.forget)
+        else:
+            # Аварийный fallback: детерминированные триггеры без LLM.
+            facts = memory_store.infer_memory(question)
+            lower = question.lower()
+            forget = (
+                sorted(memory_store.ALLOWED_KEYS)
+                if any(
+                    marker in lower
+                    for marker in ("забудь", "сбрось", "очисти", "forget", "reset")
+                )
+                else []
+            )
+
+        for key in forget:
+            if key in memory_store.ALLOWED_KEYS:
+                memory_store.delete_fact(server, auditor_id, key)
+        saved: dict[str, str] = {}
         for key, value in facts.items():
-            memory_store.save_fact(server, state.get("auditor_id", ""), key, value)
-        profile = memory_store.load_profile(server, state.get("auditor_id", ""))
-        answer = _pick(
-            state, "Профиль сохранён: ", "Profile saved: "
-        ) + memory_store.profile_text(profile)
+            normalized = memory_store.normalize_fact(key, value, themes)
+            if normalized is None:
+                continue
+            memory_store.save_fact(server, auditor_id, key, normalized)
+            saved[key] = normalized
+
+        profile = memory_store.load_profile(server, auditor_id)
+        stored = memory_store.load_stored(server, auditor_id)
+        if saved:
+            answer = _pick(
+                state, "Профиль сохранён: ", "Profile saved: "
+            ) + memory_store.profile_text(profile)
+        elif forget:
+            if stored:
+                answer = _pick(
+                    state, "Профиль обновлён: ", "Profile updated: "
+                ) + memory_store.profile_text(profile)
+            else:
+                answer = _pick(
+                    state,
+                    "Профиль сброшен: сохранённые предпочтения удалены.",
+                    "Profile reset: saved preferences were removed.",
+                )
+        elif facts:
+            answer = _pick(
+                state,
+                "Не удалось распознать предпочтения. Пример: «Запомни: "
+                "я проверяю ипотеку, акт нужен в кратком формате».",
+                "Could not recognize the preferences. Example: “Remember: "
+                "I audit mortgages, keep the act brief”.",
+            )
+        elif stored:
+            answer = _pick(
+                state, "Ваш профиль: ", "Your profile: "
+            ) + memory_store.profile_text(profile)
+        else:
+            answer = _pick(
+                state,
+                "Профиль пока пуст. Скажите, что запомнить, например: "
+                "«Я проверяю ипотеку, акт нужен в кратком формате».",
+                "The profile is empty. Tell me what to remember, e.g. "
+                "“I audit mortgages, keep the act brief”.",
+            )
         return {
-            "memory_saved": True,
+            "memory_saved": bool(saved),
             "profile": profile,
-            "route": "memory",
             "final_answer": answer,
         }
 
@@ -327,18 +414,30 @@ def build_main_graph(
         return question
 
     def _call_branch(state: MainState, receiver: str, graph) -> dict[str, Any]:
+        profile = state.get("profile", {})
+        content: dict[str, Any] = {
+            "question": _question_with_profile(state, receiver),
+            "original_question": state.get("user_query", ""),
+            "conversation_context": state.get("dialogue_context", ""),
+            "dialogue_slots": state.get("dialogue_slots", {}),
+            "auditor_id": state.get("auditor_id", ""),
+            "language": state.get("language", "ru"),
+            # Профиль передаётся всем агентам как блок предпочтений
+            # в промпте, а не как условия вопроса.
+            "profile_text": memory_store.profile_text(profile),
+        }
+        if receiver == "report_agent":
+            content["report_format"] = str(
+                profile.get("default_format") or "подробный"
+            )
+            signature = str(profile.get("signature") or "").strip()
+            if signature:
+                content["signature"] = signature
         request = make_acl_message(
             performative="request",
             sender="orchestrator",
             receiver=receiver,
-            content={
-                "question": _question_with_profile(state, receiver),
-                "original_question": state.get("user_query", ""),
-                "conversation_context": state.get("dialogue_context", ""),
-                "dialogue_slots": state.get("dialogue_slots", {}),
-                "auditor_id": state.get("auditor_id", ""),
-                "language": state.get("language", "ru"),
-            },
+            content=content,
             conversation_id=state.get("conversation_id", "conv-main"),
         )
         _log_acl(request.model_dump())
@@ -485,7 +584,7 @@ def build_main_graph(
 
     builder = StateGraph(MainState)
     builder.add_node("load_memory", load_memory)
-    builder.add_node("save_memory", save_memory)
+    builder.add_node("update_memory", update_memory)
     builder.add_node("resolve_query", resolve_query)
     builder.add_node("guard_request", guard_request)
     builder.add_node("router", router)
@@ -501,12 +600,7 @@ def build_main_graph(
 
     builder.add_edge(START, "load_memory")
     builder.add_edge("load_memory", "resolve_query")
-    builder.add_edge("resolve_query", "save_memory")
-    builder.add_conditional_edges(
-        "save_memory",
-        lambda s: "present" if s.get("memory_saved") else "guard_request",
-        {"guard_request": "guard_request", "present": "present"},
-    )
+    builder.add_edge("resolve_query", "guard_request")
     builder.add_conditional_edges(
         "guard_request",
         lambda s: "refusal" if s.get("route") == "unsafe" else "router",
@@ -520,6 +614,7 @@ def build_main_graph(
             "retrieval": "retrieval",
             "report": "report",
             "investigation": "investigation",
+            "memory": "update_memory",
             "smalltalk": "smalltalk",
             "out_of_domain": "refusal",
             "unsafe": "refusal",
@@ -530,6 +625,7 @@ def build_main_graph(
         "retrieval",
         "report",
         "investigation",
+        "update_memory",
         "smalltalk",
         "refusal",
     ):

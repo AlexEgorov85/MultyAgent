@@ -15,6 +15,7 @@ class AnalyticsState(TypedDict, total=False):
     conversation_context: str
     dialogue_slots: dict[str, Any]
     auditor_id: str
+    profile_text: str
     language: str
     conversation_id: str
     status: str  # ok | refused | failed
@@ -45,6 +46,7 @@ class RetrievalState(TypedDict, total=False):
     conversation_context: str
     dialogue_slots: dict[str, Any]
     auditor_id: str
+    profile_text: str
     language: str
     conversation_id: str
     status: str
@@ -72,6 +74,9 @@ class ReportState(TypedDict, total=False):
     conversation_context: str
     dialogue_slots: dict[str, Any]
     auditor_id: str
+    profile_text: str
+    report_format: str
+    signature: str
     language: str
     conversation_id: str
     status: str
@@ -100,6 +105,7 @@ class InvestigationState(TypedDict, total=False):
     conversation_context: str
     dialogue_slots: dict[str, Any]
     auditor_id: str
+    profile_text: str
     language: str
     conversation_id: str
     status: str

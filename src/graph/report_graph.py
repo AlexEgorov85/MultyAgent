@@ -120,6 +120,11 @@ def build_report_graph(server, llm: LLMClient):
                 message.content.get("conversation_context", "")
             ),
             "auditor_id": str(message.content.get("auditor_id", "")),
+            "profile_text": str(message.content.get("profile_text", "")),
+            "report_format": str(
+                message.content.get("report_format") or "подробный"
+            ),
+            "signature": str(message.content.get("signature") or "").strip(),
             "language": str(message.content.get("language", "ru")),
             "conversation_id": message.conversation_id,
             "iterations": 0,
@@ -195,6 +200,8 @@ def build_report_graph(server, llm: LLMClient):
                 facts_text=state["facts_text"],
                 allowed_ids=state["allowed_ids"],
                 context=state.get("conversation_context", ""),
+                report_format=state.get("report_format", "подробный"),
+                profile_text=state.get("profile_text", ""),
             )
         except Exception as exc:
             return {
@@ -289,6 +296,8 @@ def build_report_graph(server, llm: LLMClient):
                 facts_text=state["facts_text"],
                 allowed_ids=state["allowed_ids"],
                 context=state.get("conversation_context", ""),
+                report_format=state.get("report_format", "подробный"),
+                profile_text=state.get("profile_text", ""),
             )
         except Exception as exc:
             return {
@@ -345,6 +354,13 @@ def build_report_graph(server, llm: LLMClient):
 
         draft_model = state.get("draft", {})
         citations = draft_model.get("citations", [])
+        draft_text = str(draft_model.get("text", ""))
+        # Подпись из профиля — детерминированно, последней строкой документа.
+        # Модель видит «Подпись: …» в профиле и может добавить её сама —
+        # тогда второй раз не дописываем.
+        signature = str(state.get("signature") or "").strip()
+        if signature and not draft_text.rstrip().endswith(signature):
+            draft_text = draft_text.rstrip() + "\n\n" + signature
         evidence = []
         if state.get("audit_code"):
             evidence.append({"type": "audit", "audit_code": state["audit_code"]})
@@ -354,7 +370,7 @@ def build_report_graph(server, llm: LLMClient):
             state,
             "inform",
             {
-                "draft": draft_model.get("text", ""),
+                "draft": draft_text,
                 "citations": citations,
                 "evidence": evidence,
                 "review": state.get("review", {}),

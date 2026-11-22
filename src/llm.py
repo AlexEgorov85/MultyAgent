@@ -15,6 +15,7 @@ from .schemas import (
     Critique,
     InvestigationAnswer,
     InvestigationPlan,
+    MemoryUpdate,
     ReportDraft,
     ReportReview,
     ResolvedQuery,
@@ -61,12 +62,23 @@ class LLMClient(Protocol):
         self, *, question: str, profile_text: str, context: str = ""
     ) -> "RouteDecision": ...
 
+    def extract_memory(
+        self,
+        *,
+        question: str,
+        profile_text: str,
+        themes: list[str],
+        context: str = "",
+        language: str = "ru",
+    ) -> "MemoryUpdate": ...
+
     def plan_query(
         self,
         *,
         question: str,
         catalog_text: str,
         context: str = "",
+        profile_text: str = "",
     ) -> QueryPlan: ...
 
     def plan_sql(
@@ -76,6 +88,7 @@ class LLMClient(Protocol):
         schema_text: str,
         templates: list[dict[str, Any]],
         context: str = "",
+        profile_text: str = "",
     ) -> SQLPlan: ...
 
     def repair_sql(
@@ -86,10 +99,16 @@ class LLMClient(Protocol):
         error: str,
         schema_text: str,
         context: str = "",
+        profile_text: str = "",
     ) -> SQLPlan: ...
 
     def plan_tools(
-        self, *, question: str, tools_text: str, context: str = ""
+        self,
+        *,
+        question: str,
+        tools_text: str,
+        context: str = "",
+        profile_text: str = "",
     ) -> ToolPlan: ...
 
     def summarize(
@@ -98,6 +117,7 @@ class LLMClient(Protocol):
         question: str,
         columns: list[str],
         rows: list[dict[str, Any]],
+        profile_text: str = "",
     ) -> str: ...
 
     def format_answer(
@@ -109,6 +129,7 @@ class LLMClient(Protocol):
         facts: str = "",
         language: str = "ru",
         context: str = "",
+        profile_text: str = "",
     ) -> str: ...
 
     def answer_from_chunks(
@@ -117,6 +138,7 @@ class LLMClient(Protocol):
         question: str,
         chunks: list[dict[str, Any]],
         context: str = "",
+        profile_text: str = "",
     ) -> "RetrievalAnswer": ...
 
     def critique_answer(
@@ -136,6 +158,7 @@ class LLMClient(Protocol):
         issues: list[str],
         chunks: list[dict[str, Any]],
         context: str = "",
+        profile_text: str = "",
     ) -> "RetrievalAnswer": ...
 
     def draft_report(
@@ -145,6 +168,8 @@ class LLMClient(Protocol):
         facts_text: str,
         allowed_ids: list[str],
         context: str = "",
+        report_format: str = "подробный",
+        profile_text: str = "",
     ) -> "ReportDraft": ...
 
     def review_report(
@@ -163,6 +188,8 @@ class LLMClient(Protocol):
         facts_text: str,
         allowed_ids: list[str],
         context: str = "",
+        report_format: str = "подробный",
+        profile_text: str = "",
     ) -> "ReportDraft": ...
 
     def plan_investigation(
@@ -171,6 +198,7 @@ class LLMClient(Protocol):
         question: str,
         schema_text: str,
         context: str = "",
+        profile_text: str = "",
     ) -> "InvestigationPlan": ...
 
     def refine_investigation(
@@ -180,6 +208,7 @@ class LLMClient(Protocol):
         plan: "InvestigationPlan",
         missing: list[str],
         context: str = "",
+        profile_text: str = "",
     ) -> "InvestigationPlan": ...
 
     def synthesize_investigation(
@@ -191,6 +220,7 @@ class LLMClient(Protocol):
         missing: list[str],
         rounds: int,
         context: str = "",
+        profile_text: str = "",
     ) -> "InvestigationAnswer": ...
 
 
@@ -299,6 +329,22 @@ class OpenAILLM:
             f"{text}\n\n"
         )
 
+    @staticmethod
+    def _profile_block(profile_text: str) -> str:
+        """Профиль аудитора в промпте — предпочтения, а не условия запроса.
+
+        Блок намеренно отделён от текста вопроса: планировщики SQL и
+        поиска не должны превращать «Тема: ипотека» в фильтр данных.
+        """
+        text = (profile_text or "").strip()
+        if not text:
+            return ""
+        return (
+            "Профиль аудитора (предпочтения для формулировки ответа; "
+            "это не условия запроса и не фильтры данных):\n"
+            f"{text}\n\n"
+        )
+
     def resolve_followup(
         self,
         *,
@@ -345,16 +391,40 @@ class OpenAILLM:
             schema=RouteDecision,
         )
 
+    def extract_memory(
+        self,
+        *,
+        question: str,
+        profile_text: str,
+        themes: list[str],
+        context: str = "",
+        language: str = "ru",
+    ) -> MemoryUpdate:
+        return self._parse(
+            system=load_prompt("memory_extract"),
+            user=(
+                f"{self._context_block(context)}"
+                f"Текущий профиль: {profile_text or 'пуст'}\n"
+                f"Допустимые темы: {', '.join(themes) or '(нет)'}\n"
+                f"Реплика: {question}\n\n"
+                "Верни MemoryUpdate: facts (key, value), forget, reason."
+            ),
+            schema=MemoryUpdate,
+            max_tokens=800,
+        )
+
     def plan_query(
         self,
         *,
         question: str,
         catalog_text: str,
         context: str = "",
+        profile_text: str = "",
     ) -> QueryPlan:
         return self._parse(
             system=load_prompt("analytics_plan_query"),
             user=(
+                f"{self._profile_block(profile_text)}"
                 f"{self._context_block(context)}"
                 f"Вопрос: {question}\n\n"
                 f"Каталог метрик и измерений:\n{catalog_text}\n\n"
@@ -371,6 +441,7 @@ class OpenAILLM:
         schema_text: str,
         templates: list[dict[str, Any]],
         context: str = "",
+        profile_text: str = "",
     ) -> SQLPlan:
         template_lines = "\n".join(
             f"- {item['template_key']}: {item['title']} "
@@ -380,6 +451,7 @@ class OpenAILLM:
         return self._parse(
             system=load_prompt("analytics_plan_sql"),
             user=(
+                f"{self._profile_block(profile_text)}"
                 f"{self._context_block(context)}"
                 f"Вопрос: {question}\n\n"
                 f"Схема:\n{schema_text}\n\n"
@@ -398,10 +470,12 @@ class OpenAILLM:
         error: str,
         schema_text: str,
         context: str = "",
+        profile_text: str = "",
     ) -> SQLPlan:
         return self._parse(
             system=load_prompt("analytics_repair_sql"),
             user=(
+                f"{self._profile_block(profile_text)}"
                 f"{self._context_block(context)}"
                 f"Вопрос: {question}\nSQL: {sql}\nОшибка: {error}\n"
                 f"Схема:\n{schema_text}\n"
@@ -411,11 +485,17 @@ class OpenAILLM:
         )
 
     def plan_tools(
-        self, *, question: str, tools_text: str, context: str = ""
+        self,
+        *,
+        question: str,
+        tools_text: str,
+        context: str = "",
+        profile_text: str = "",
     ) -> ToolPlan:
         return self._parse(
             system=load_prompt("tools_plan"),
             user=(
+                f"{self._profile_block(profile_text)}"
                 f"{self._context_block(context)}"
                 f"Вопрос: {question}\nДоступные инструменты:\n{tools_text}\n"
                 "Верни ToolPlan со списком calls (name, arguments)."
@@ -429,6 +509,7 @@ class OpenAILLM:
         question: str,
         columns: list[str],
         rows: list[dict[str, Any]],
+        profile_text: str = "",
     ) -> str:
         preview = rows[:20]
         try:
@@ -449,6 +530,7 @@ class OpenAILLM:
                     {
                         "role": "user",
                         "content": (
+                            f"{self._profile_block(profile_text)}"
                             f"Вопрос: {question}\nКолонки: {columns}\n"
                             f"Строки: {preview}"
                         ),
@@ -481,6 +563,7 @@ class OpenAILLM:
         question: str,
         chunks: list[dict[str, Any]],
         context: str = "",
+        profile_text: str = "",
     ) -> RetrievalAnswer:
         return self._parse(
             system=(
@@ -489,6 +572,7 @@ class OpenAILLM:
                 + load_prompt("retrieval_answer")
             ),
             user=(
+                f"{self._profile_block(profile_text)}"
                 f"{self._context_block(context)}"
                 f"Вопрос: {question}\n\nФрагменты:\n{self._chunks_text(chunks)}\n\n"
                 "Верни RetrievalAnswer: text, citations (список source_id)."
@@ -523,10 +607,12 @@ class OpenAILLM:
         issues: list[str],
         chunks: list[dict[str, Any]],
         context: str = "",
+        profile_text: str = "",
     ) -> RetrievalAnswer:
         return self._parse(
             system=load_prompt("retrieval_rewrite"),
             user=(
+                f"{self._profile_block(profile_text)}"
                 f"{self._context_block(context)}"
                 f"Вопрос: {question}\nЧерновик: {answer.model_dump_json()}\n"
                 f"Замечания: {issues}\n\nФрагменты:\n{self._chunks_text(chunks)}\n\n"
@@ -557,6 +643,7 @@ class OpenAILLM:
         facts: str = "",
         language: str = "ru",
         context: str = "",
+        profile_text: str = "",
     ) -> str:
         """Приводит готовый ответ агента к формату, уместному для типа ответа.
 
@@ -567,6 +654,7 @@ class OpenAILLM:
         if str(language).lower() == "en":
             system += "\n\nAnswer in English."
         user = (
+            f"{self._profile_block(profile_text)}"
             f"{self._context_block(context)}"
             f"Вопрос: {question}\n\n"
             f"Черновик ответа:\n{draft}\n\n"
@@ -586,19 +674,25 @@ class OpenAILLM:
         facts_text: str,
         allowed_ids: list[str],
         context: str = "",
+        report_format: str = "подробный",
+        profile_text: str = "",
     ) -> ReportDraft:
+        # Краткий формат — отдельный промпт и урезанный бюджет токенов:
+        # разница видна в ответе детерминированно, а не «по настроению» модели.
+        brief = str(report_format).strip().lower() == "краткий"
         text = self._plain(
             system=(
                 format_guide("report")
                 + "\n\n"
-                + load_prompt("report_draft")
+                + load_prompt("report_draft_brief" if brief else "report_draft")
             ),
             user=(
+                f"{self._profile_block(profile_text)}"
                 f"{self._context_block(context)}"
                 f"Запрос: {question}\n\nФакты:\n{facts_text}\n\n"
                 f"Допустимые ID: {', '.join(allowed_ids)}"
             ),
-            max_tokens=2500,
+            max_tokens=900 if brief else 2500,
         )
         import re
 
@@ -640,10 +734,19 @@ class OpenAILLM:
         facts_text: str,
         allowed_ids: list[str],
         context: str = "",
+        report_format: str = "подробный",
+        profile_text: str = "",
     ) -> ReportDraft:
+        system = load_prompt("report_revise")
+        if str(report_format).strip().lower() == "краткий":
+            system += (
+                "\n\nСохрани краткий формат: четыре раздела, "
+                "1–2 предложения в каждом, до 1200 символов."
+            )
         text = self._plain(
-            system=load_prompt("report_revise"),
+            system=system,
             user=(
+                f"{self._profile_block(profile_text)}"
                 f"{self._context_block(context)}"
                 f"Черновик: {draft.model_dump_json()}\n"
                 f"Замечания: {review.model_dump_json()}\n\n"
@@ -673,10 +776,12 @@ class OpenAILLM:
         question: str,
         schema_text: str,
         context: str = "",
+        profile_text: str = "",
     ) -> InvestigationPlan:
         return self._parse(
             system=load_prompt("investigation_plan"),
             user=(
+                f"{self._profile_block(profile_text)}"
                 f"{self._context_block(context)}"
                 f"Вопрос: {question}\nСхема:\n{schema_text}\n\n"
                 "Верни InvestigationPlan: analytics_question, retrieval_question, "
@@ -692,10 +797,12 @@ class OpenAILLM:
         plan: InvestigationPlan,
         missing: list[str],
         context: str = "",
+        profile_text: str = "",
     ) -> InvestigationPlan:
         return self._parse(
             system=load_prompt("investigation_refine"),
             user=(
+                f"{self._profile_block(profile_text)}"
                 f"{self._context_block(context)}"
                 f"Вопрос: {question}\nПлан: {plan.model_dump_json()}\n"
                 f"Не хватает: {', '.join(missing)}\n\n"
@@ -713,6 +820,7 @@ class OpenAILLM:
         missing: list[str],
         rounds: int,
         context: str = "",
+        profile_text: str = "",
     ) -> InvestigationAnswer:
         analytics_short = {
             "answer": analytics.get("answer"),
@@ -740,6 +848,7 @@ class OpenAILLM:
                 {
                     "role": "user",
                     "content": (
+                        f"{self._profile_block(profile_text)}"
                         f"{self._context_block(context)}"
                         f"Вопрос: {question}\nРаундов: {rounds}\n"
                         f"Analytics: {analytics_short}\nRetrieval: {retrieval_short}\n"

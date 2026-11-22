@@ -5,11 +5,29 @@ const API_BASE =
 const ADMIN_ASSISTANT_ID =
   process.env.NEXT_PUBLIC_LANGGRAPH_ADMIN_ASSISTANT_ID ?? "dialogue_admin";
 
-type AdminInput = {
-  action: "rename" | "delete";
-  conversation_id: string;
-  title?: string;
-  auditor_id?: string;
+type AdminInput =
+  | {
+      action: "rename" | "delete";
+      conversation_id: string;
+      title?: string;
+      auditor_id?: string;
+    }
+  | {
+      action: "profile_get" | "profile_reset" | "profile_delete";
+      auditor_id: string;
+      key?: string;
+    };
+
+type ProfileData = {
+  focus_theme?: string;
+  default_format?: string;
+  signature?: string;
+};
+
+type AdminResponse = {
+  ok?: boolean;
+  error?: string;
+  profile?: ProfileData;
 };
 
 async function createThread(): Promise<string> {
@@ -30,7 +48,7 @@ async function deleteThread(threadId: string): Promise<void> {
   await fetch(`${API_BASE}/threads/${threadId}`, { method: "DELETE" });
 }
 
-async function runAdmin(input: AdminInput): Promise<void> {
+async function runAdmin(input: AdminInput): Promise<AdminResponse> {
   const threadId = await createThread();
   try {
     const response = await fetch(`${API_BASE}/threads/${threadId}/runs/wait`, {
@@ -44,10 +62,11 @@ async function runAdmin(input: AdminInput): Promise<void> {
     if (!response.ok) {
       throw new Error(`admin run: ${response.status}`);
     }
-    const body = (await response.json()) as { ok?: boolean; error?: string };
+    const body = (await response.json()) as AdminResponse;
     if (body.ok === false) {
       throw new Error(body.error || "admin action failed");
     }
+    return body;
   } finally {
     await deleteThread(threadId).catch(() => undefined);
   }
@@ -83,3 +102,14 @@ export async function deleteBackendThread(
   if (!threadId) return;
   await deleteThread(threadId);
 }
+
+export async function fetchAuditorProfile(auditorId: string): Promise<ProfileData> {
+  const response = await runAdmin({ action: "profile_get", auditor_id: auditorId });
+  return response.profile ?? {};
+}
+
+export async function resetAuditorProfile(auditorId: string): Promise<void> {
+  await runAdmin({ action: "profile_reset", auditor_id: auditorId });
+}
+
+export type { ProfileData };

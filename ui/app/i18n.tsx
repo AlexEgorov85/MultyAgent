@@ -149,6 +149,19 @@ export type Dictionary = {
   resetSettings: string;
   resetSettingsHint: string;
   resetConfirm: string;
+  profileTitle: string;
+  profileHint: string;
+  profileTheme: string;
+  profileFormat: string;
+  profileSignature: string;
+  profileNotSet: string;
+  profileFormatDefault: string;
+  profileRefresh: string;
+  profileLoading: string;
+  profileReset: string;
+  profileResetConfirm: string;
+  profileResetDone: string;
+  profileError: string;
 };
 
 const DICTIONARIES: Record<Lang, Dictionary> = {
@@ -312,6 +325,20 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     resetSettings: "Сбросить настройки",
     resetSettingsHint: "Вернуть тему, цвета, размеры и поведение по умолчанию.",
     resetConfirm: "Сбросить все настройки интерфейса?",
+    profileTitle: "Профиль аудитора",
+    profileHint:
+      "Тема, формат акта и подпись — сохранённые предпочтения системы. Сброс возвращает значения по умолчанию.",
+    profileTheme: "Тема",
+    profileFormat: "Формат",
+    profileSignature: "Подпись",
+    profileNotSet: "не задано",
+    profileFormatDefault: "по умолчанию (подробный)",
+    profileRefresh: "Обновить",
+    profileLoading: "Загрузка…",
+    profileReset: "Сбросить профиль",
+    profileResetConfirm: "Сбросить сохранённую тему, формат и подпись аудитора?",
+    profileResetDone: "Профиль сброшен.",
+    profileError: "Не удалось загрузить профиль.",
   },
   en: {
     appTitle: "Internal Audit Assistant",
@@ -473,6 +500,21 @@ const DICTIONARIES: Record<Lang, Dictionary> = {
     resetSettings: "Reset settings",
     resetSettingsHint: "Restore the default theme, colors, sizes and behavior.",
     resetConfirm: "Reset all interface settings?",
+    profileTitle: "Auditor profile",
+    profileHint:
+      "Theme, act format and signature — saved system preferences. Reset restores defaults.",
+    profileTheme: "Theme",
+    profileFormat: "Format",
+    profileSignature: "Signature",
+    profileNotSet: "not set",
+    profileFormatDefault: "default (detailed)",
+    profileRefresh: "Refresh",
+    profileLoading: "Loading…",
+    profileReset: "Reset profile",
+    profileResetConfirm:
+      "Clear the saved auditor theme, format and signature?",
+    profileResetDone: "Profile reset.",
+    profileError: "Could not load the profile.",
   },
 };
 

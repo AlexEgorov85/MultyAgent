@@ -36,12 +36,29 @@ class FakeReportLLM:
         return self.revisions.pop(0)
 
 
-def acl_request(question: str) -> dict:
+class RecordingReportLLM(FakeReportLLM):
+    """Запоминает параметры вызовов, чтобы проверить проводку профиля."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.draft_kwargs: list[dict] = []
+        self.revise_kwargs: list[dict] = []
+
+    def draft_report(self, **kwargs):
+        self.draft_kwargs.append(kwargs)
+        return super().draft_report(**kwargs)
+
+    def revise_report(self, **kwargs):
+        self.revise_kwargs.append(kwargs)
+        return super().revise_report(**kwargs)
+
+
+def acl_request(question: str, **extra) -> dict:
     return make_acl_message(
         performative="request",
         sender="orchestrator",
         receiver="report_agent",
-        content={"question": question, "auditor_id": "AUD-001"},
+        content={"question": question, "auditor_id": "AUD-001", **extra},
         conversation_id="conv-report-001",
     ).model_dump()
 
@@ -327,3 +344,176 @@ def test_fabricated_id_in_text_is_discarded(server, report_data):
     assert result["iterations"] == 1
     assert "ITM-FAKE-99" not in result["citations"]
     assert "ITM-REP-01" in result["citations"]
+
+
+def test_brief_format_profile_and_signature_are_used(server, report_data):
+    llm = RecordingReportLLM(
+        drafts=[
+            ReportDraft(text=complete_report("ITM-REP-01"), citations=["ITM-REP-01"])
+        ],
+        reviews=[ReportReview(verdict="ok")],
+    )
+    graph = build_report_graph(server, llm)
+    request = make_acl_message(
+        performative="request",
+        sender="orchestrator",
+        receiver="report_agent",
+        content={
+            "question": "Сформируй раздел акта по AUD-2026-DEPOSITS-77",
+            "auditor_id": "AUD-001",
+            "report_format": "краткий",
+            "signature": "Иванов И.И.",
+            "profile_text": "Тема: ипотека; Формат: краткий",
+        },
+        conversation_id="conv-report-brief",
+    ).model_dump()
+
+    result = graph.invoke({"acl_request": request})
+
+    assert result["status"] == "ok", result.get("error")
+    assert llm.draft_kwargs[-1]["report_format"] == "краткий"
+    assert llm.draft_kwargs[-1]["profile_text"] == "Тема: ипотека; Формат: краткий"
+    draft = result["acl_response"]["content"]["draft"]
+    assert draft.rstrip().endswith("Иванов И.И.")
+    assert "Вводная часть" in draft
+
+
+def test_signature_is_not_duplicated_when_model_added_it(server, report_data):
+    llm = FakeReportLLM(
+        drafts=[
+            ReportDraft(
+                text=complete_report("ITM-REP-01") + "\n\nИванов И.И.",
+                citations=["ITM-REP-01"],
+            )
+        ],
+        reviews=[ReportReview(verdict="ok")],
+    )
+    graph = build_report_graph(server, llm)
+    request = make_acl_message(
+        performative="request",
+        sender="orchestrator",
+        receiver="report_agent",
+        content={
+            "question": "Сформируй раздел акта по AUD-2026-DEPOSITS-77",
+            "auditor_id": "AUD-001",
+            "signature": "Иванов И.И.",
+        },
+        conversation_id="conv-report-signature",
+    ).model_dump()
+
+    result = graph.invoke({"acl_request": request})
+
+    assert result["status"] == "ok", result.get("error")
+    content = result["acl_response"]["content"]
+    assert content["draft"].count("Иванов И.И.") == 1
+    assert content["draft"].rstrip().endswith("Иванов И.И.")
+    assert "Иванов И.И." not in content["citations"]
+    assert all(
+        item.get("source_id") != "Иванов И.И."
+        for item in content["evidence"]
+    )
+
+
+def test_default_format_is_detailed_when_profile_absent(server, report_data):
+    llm = RecordingReportLLM(
+        drafts=[
+            ReportDraft(text=complete_report("ITM-REP-01"), citations=["ITM-REP-01"])
+        ],
+        reviews=[ReportReview(verdict="ok")],
+    )
+    graph = build_report_graph(server, llm)
+
+    result = graph.invoke(
+        {"acl_request": acl_request("Сформируй раздел акта по AUD-2026-DEPOSITS-77")}
+    )
+
+    assert result["status"] == "ok", result.get("error")
+    assert llm.draft_kwargs[-1]["report_format"] == "подробный"
+    assert llm.draft_kwargs[-1]["profile_text"] == ""
+    # Поле действительно приходит из ACL, а не только из профиля по умолчанию.
+    assert result["report_format"] == "подробный"
+    assert result["signature"] == ""
+
+
+def test_revise_keeps_profile_format_and_text(server, report_data):
+    llm = RecordingReportLLM(
+        drafts=[ReportDraft(text="Черновик.", citations=["FAKE-ID"])],
+        reviews=[ReportReview(verdict="ok"), ReportReview(verdict="ok")],
+        revisions=[
+            ReportDraft(
+                text=complete_report("ITM-REP-01"),
+                citations=["ITM-REP-01"],
+            )
+        ],
+    )
+    graph = build_report_graph(server, llm)
+    request = acl_request(
+        "Сформируй раздел акта по AUD-2026-DEPOSITS-77",
+        report_format="краткий",
+        profile_text="Формат: краткий",
+        signature="Иванов И.И.",
+    )
+
+    result = graph.invoke({"acl_request": request})
+
+    assert result["status"] == "ok", result.get("error")
+    assert llm.calls.count("revise") == 1
+    assert llm.revise_kwargs[-1]["report_format"] == "краткий"
+    assert llm.revise_kwargs[-1]["profile_text"] == "Формат: краткий"
+    assert result["acl_response"]["content"]["draft"].rstrip().endswith("Иванов И.И.")
+
+
+def test_profile_without_signature_does_not_change_draft(server, report_data):
+    llm = RecordingReportLLM(
+        drafts=[
+            ReportDraft(text=complete_report("ITM-REP-01"), citations=["ITM-REP-01"])
+        ],
+        reviews=[ReportReview(verdict="ok")],
+    )
+    graph = build_report_graph(server, llm)
+    request = acl_request(
+        "Сформируй раздел акта по AUD-2026-DEPOSITS-77",
+        report_format="подробный",
+        profile_text="Формат: подробный",
+    )
+
+    result = graph.invoke({"acl_request": request})
+
+    draft = result["acl_response"]["content"]["draft"]
+    assert draft == complete_report("ITM-REP-01")
+
+
+def test_failure_does_not_append_signature(server, report_data):
+    llm = RecordingReportLLM()
+    graph = build_report_graph(server, llm)
+    request = acl_request(
+        "Сформируй раздел акта по AUD-2026-DEPOSITS-99",
+        signature="Иванов И.И.",
+    )
+
+    result = graph.invoke({"acl_request": request})
+
+    assert result["status"] == "failed"
+    assert result["acl_response"]["performative"] == "failure"
+    assert "draft" not in result["acl_response"]["content"]
+    assert "Иванов И.И." not in str(result["acl_response"]["content"])
+
+
+def test_refusal_does_not_append_signature(server, report_data):
+    llm = RecordingReportLLM()
+    graph = build_report_graph(server, llm)
+    request = make_acl_message(
+        performative="inform",
+        sender="orchestrator",
+        receiver="report_agent",
+        content={
+            "question": "Сформируй раздел акта",
+            "signature": "Иванов И.И.",
+        },
+        conversation_id="conv-report-refuse",
+    ).model_dump()
+
+    result = graph.invoke({"acl_request": request})
+
+    assert result["status"] == "refused"
+    assert "Иванов И.И." not in str(result["acl_response"]["content"])

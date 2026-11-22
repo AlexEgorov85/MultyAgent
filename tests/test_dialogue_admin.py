@@ -223,3 +223,67 @@ def test_load_history_is_hidden_from_another_auditor(server):
 
     # Пустой auditor_id сохраняет прежнее поведение для CLI и legacy-вызовов.
     assert len(dialogue_store.load_history(server, conversation_id)) == 2
+
+
+@pytest.fixture()
+def profile_auditor(server):
+    with db_runtime.connect(server) as conn:
+        conn.execute(
+            "INSERT INTO audit.auditors "
+            "(auditor_id, full_name, email, unit, position) "
+            "VALUES ('ADMIN-PROF', 'Тест Профиль', 'prof@audit.local', 'Аудит', 'Аудитор') "
+            "ON CONFLICT (auditor_id) DO NOTHING"
+        )
+        conn.execute(
+            "DELETE FROM audit.auditor_memory WHERE auditor_id = 'ADMIN-PROF'"
+        )
+    yield "ADMIN-PROF"
+    with db_runtime.connect(server) as conn:
+        conn.execute(
+            "DELETE FROM audit.auditor_memory WHERE auditor_id = 'ADMIN-PROF'"
+        )
+        conn.execute("DELETE FROM audit.auditors WHERE auditor_id = 'ADMIN-PROF'")
+
+
+def test_admin_profile_get_reset_and_delete(server, profile_auditor):
+    from src.memory import store
+
+    store.save_fact(server, profile_auditor, "focus_theme", "ипотека")
+    store.save_fact(server, profile_auditor, "default_format", "краткий")
+    graph = build_admin_graph(server)
+
+    shown = graph.invoke({"action": "profile_get", "auditor_id": profile_auditor})
+    assert shown["ok"] is True
+    assert shown["profile"]["focus_theme"] == "ипотека"
+    assert shown["profile"]["default_format"] == "краткий"
+
+    deleted = graph.invoke(
+        {
+            "action": "profile_delete",
+            "auditor_id": profile_auditor,
+            "key": "default_format",
+        }
+    )
+    assert deleted["ok"] is True
+    assert "default_format" not in deleted["profile"]
+    assert deleted["profile"]["focus_theme"] == "ипотека"
+
+    reset = graph.invoke({"action": "profile_reset", "auditor_id": profile_auditor})
+    assert reset["ok"] is True
+    assert reset["profile"] == {}
+    assert store.load_stored(server, profile_auditor) == {}
+
+
+def test_admin_profile_rejects_bad_input(server, profile_auditor):
+    graph = build_admin_graph(server)
+
+    assert graph.invoke({"action": "profile_get"})["ok"] is False
+    bad_key = graph.invoke(
+        {
+            "action": "profile_delete",
+            "auditor_id": profile_auditor,
+            "key": "favourite_color",
+        }
+    )
+    assert bad_key["ok"] is False
+    assert "Недопустимый ключ" in bad_key["error"]

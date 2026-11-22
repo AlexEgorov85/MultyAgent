@@ -24,12 +24,12 @@ CASES_PATH = ROOT / "data" / "benchmark_cases.jsonl"
 
 def test_benchmark_cases_are_valid():
     cases = load_cases(CASES_PATH)
-    assert len(cases) == 49
-    assert sum(len(case["turns"]) for case in cases) == 65
+    assert len(cases) == 51
+    assert sum(len(case["turns"]) for case in cases) == 67
     assert not validate_cases(cases)
 
     tiers = [case["tier"] for case in cases]
-    assert tiers.count("simple") == 13
+    assert tiers.count("simple") == 15
     assert tiers.count("medium") == 18
     assert tiers.count("complex") == 10
     assert tiers.count("chain") == 8

@@ -69,24 +69,24 @@ flowchart TB
 flowchart TD
     S([START]) --> LM["load_memory"]
     LM --> RQ["resolve_query"]
-    RQ --> SM["save_memory"]
-    SM -->|"сохранён профиль аудитора"| PR["present"]
-    SM -->|"обычный вопрос"| GR["guard_request"]
+    RQ --> GR["guard_request"]
     GR -->|"unsafe"| RF["refusal"]
     GR -->|"ok"| RT["router"]
     RT -->|analytics| AN["analytics"]
     RT -->|retrieval| RE["retrieval"]
     RT -->|report| RP["report"]
     RT -->|investigation| IN["investigation"]
+    RT -->|memory| UM["update_memory"]
     RT -->|smalltalk| ST["smalltalk"]
     RT -->|"out_of_domain / unsafe"| RF
     AN --> GA["guard_answer"]
     RE --> GA
     RP --> GA
     IN --> GA
+    UM --> GA
     ST --> GA
     RF --> GA
-    GA --> PR
+    GA --> PR["present"]
     PR --> FN["finalize"]
     FN --> E([END])
 ```
@@ -101,19 +101,30 @@ flowchart TD
 2. **`resolve_query`** — LLM переформулирует уточнения («а за 2025 год?»,
    «а по картам?») в самостоятельный вопрос с учётом контекста. Результат
    кладётся в `resolved_query`, исходный текст остаётся в `user_query`.
-3. **`save_memory`** — если реплика является профилем («я проверяю ипотеку,
-   акт нужен краткий»), сохраняет его и сразу отвечает, минуя маршрутизацию.
-4. **`guard_request`** — детерминированная проверка обоих текстов вопроса:
+3. **`guard_request`** — детерминированная проверка обоих текстов вопроса:
    запросы на изменение данных, PII и prompt injection получают маршрут
    `unsafe` ещё до Router.
-5. **`router`** — LLM возвращает типизированное `RouteDecision`
-   (`analytics`, `retrieval`, `report`, `investigation`, `smalltalk`,
-   `out_of_domain`). Жёстких доменных эвристик нет. Если LLM недоступна,
-   fallback выбирает только smalltalk/out_of_domain и не угадывает
-   доменный маршрут.
+4. **`router`** — LLM возвращает типизированное `RouteDecision`
+   (`analytics`, `retrieval`, `report`, `investigation`, `memory`,
+   `smalltalk`, `out_of_domain`). Жёстких доменных эвристик нет: решение
+   «это запрос на память?» принимает LLM, поэтому смешанная реплика
+   («Я проверяю ипотеку, сколько проверок?») не попадает в `memory` и не
+   теряет аналитическую часть вопроса. Если LLM недоступна, fallback
+   выбирает только smalltalk/out_of_domain и не угадывает доменный маршрут.
+5. **Ветка агента / `update_memory`** — при маршруте `memory` узел
+   `update_memory` извлекает предпочтения через `llm.extract_memory`
+   (структурированный вывод с whitelist ключей `focus_theme`,
+   `default_format`, `signature`), валидирует (`store.normalize_fact`)
+   и пишет/удаляет. Если извлечение недоступно — детерминированный
+   fallback `store.infer_memory`. Профиль передаётся всем агентам в
+   ACL-content как блок «Профиль аудитора (предпочтения, не условия
+   запроса)»: планеры/суммаризаторы/ретриверы из `profile_text`
+   подмешивают его в текст промпта, а не в условия вопроса.
 6. **Ветка агента** — основной граф упаковывает вопрос в ACL-конверт
    (`request`) и вызывает подграф. В `content` передаются `resolved_query`,
-   `original_question`, `conversation_context`, `auditor_id`, язык.
+   `original_question`, `conversation_context`, `auditor_id`,
+   `profile_text`, `language` (для `report_agent` — также
+   `report_format` и `signature`).
 7. **`guard_answer`** — финальная проверка ответа: приватность,
    обоснованность, отсутствие запрещённого содержимого.
 8. **`present`** — формирует ответ на языке вопроса, прикладывает
@@ -329,7 +340,7 @@ sequenceDiagram
 |---|---|---|
 | Тред LangGraph | `InMemorySaver` (`thread_id`) | состояние графа в рамках процесса |
 | История чата | `audit.chat_threads`, `audit.chat_messages` | контекст переживает перезапуск backend |
-| Профиль аудитора | `audit.auditor_memory` | тема, формат акта, предпочтения между чатами |
+| Профиль аудитора | `audit.auditor_memory` | тема, формат акта, подпись; извлечение LLM с fallback; блок профиля в промптах подагентов; сброс/удаление ключей — в UI |
 | Аварийный fallback | `client_history` из `localStorage` UI | контекст, если потерян и тред, и БД-история |
 
 Ключ истории — стабильный `conversation_id` из UI (`chat.id`), а не
