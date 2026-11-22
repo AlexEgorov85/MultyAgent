@@ -25,3 +25,6 @@ DEFAULT_AS_OF_DATE = date(2026, 11, 21)
 
 MAX_ROWS = int(os.getenv("MAX_ROWS", "200"))
 SQL_TIMEOUT_SEC = int(os.getenv("SQL_TIMEOUT_SEC", "5"))
+
+# Лимит инструментов, которые Analytics-агент выполняет за один шаг плана.
+MAX_AGENT_ITERATIONS = int(os.getenv("MAX_AGENT_ITERATIONS", "5"))

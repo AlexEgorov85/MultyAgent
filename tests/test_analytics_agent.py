@@ -5,8 +5,9 @@ from __future__ import annotations
 import pytest
 
 from src.acl import make_acl_message
-from src import db_runtime
+from src import config, db_runtime
 from src.graph.analytics_graph import build_analytics_graph
+from src.query import QueryFilter, QueryPlan
 from src.schemas import SQLPlan, ToolCall, ToolPlan
 
 
@@ -41,6 +42,22 @@ class FakeLLM:
     def summarize(self, **kwargs):
         self.calls.append("summarize")
         return self.answer
+
+
+class QueryPlanFakeLLM(FakeLLM):
+    """Fake с Query IR: SQL должен собрать компилятор, а не LLM."""
+
+    def __init__(self, plan: QueryPlan, answer: str) -> None:
+        super().__init__(answer=answer)
+        self.query_plan = plan
+
+    def plan_query(self, **kwargs):
+        self.calls.append("plan_query")
+        return self.query_plan
+
+    def plan_sql(self, **kwargs):
+        self.calls.append("plan_sql")
+        raise AssertionError("plan_sql не должен вызываться при валидном QueryPlan")
 
 
 class FormattingFakeLLM(FakeLLM):
@@ -130,6 +147,17 @@ def sample_graph_data(server):
             "         GROUP BY status ORDER BY cnt DESC', '{}', 50, true) "
             "ON CONFLICT (template_id) DO NOTHING"
         )
+        conn.execute(
+            "INSERT INTO audit.script_templates "
+            "(template_id, template_key, title, description, sql_template, "
+            " parameters, max_rows_default, is_active) "
+            "VALUES ('TPL-STATUS', 'status_summary', 'Сводка по статусам', 'Тест', "
+            "        'SELECT status, count(*) AS cnt FROM audit.audits "
+            "         WHERE start_date >= make_date(%(year)s, 1, 1) "
+            "         GROUP BY status ORDER BY cnt DESC', "
+            "        '{\"year\": 2026}', 50, true) "
+            "ON CONFLICT (template_id) DO NOTHING"
+        )
     yield
     with db_runtime.connect(server) as conn:
         conn.execute("DELETE FROM audit.act_items WHERE act_id = 'ACT-2026-MORTGAGE-03'")
@@ -137,7 +165,10 @@ def sample_graph_data(server):
         conn.execute("DELETE FROM audit.audits WHERE audit_id = 'AUD-2026-MORTGAGE-03'")
         conn.execute("DELETE FROM audit.audit_pockets WHERE pocket_id = 'PKT-2026-MORTGAGE'")
         conn.execute("DELETE FROM audit.auditors WHERE auditor_id = 'AN-001'")
-        conn.execute("DELETE FROM audit.script_templates WHERE template_id = 'TPL-AN'")
+        conn.execute(
+            "DELETE FROM audit.script_templates "
+            "WHERE template_id IN ('TPL-AN', 'TPL-STATUS')"
+        )
 
 
 def test_generated_sql_answer(server, sample_graph_data):
@@ -164,6 +195,49 @@ def test_generated_sql_answer(server, sample_graph_data):
     assert result["acl_response"]["performative"] == "inform"
     assert result["acl_response"]["content"]["sql"].upper().count("LIMIT") == 1
     assert result["evidence"][0]["type"] == "sql_result"
+
+
+def test_query_ir_compiles_sql_without_plan_sql(server, sample_graph_data):
+    llm = QueryPlanFakeLLM(
+        plan=QueryPlan(
+            metric="audit_count",
+            dimensions=["status"],
+            filters=[QueryFilter(field="theme", value="ипотека")],
+        ),
+        answer="Завершено: 1 проверка.",
+    )
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke(
+        {"acl_request": acl_request("Сколько проверок по статусам по ипотеке?")}
+    )
+
+    assert result["status"] == "ok"
+    assert "plan_query" in llm.calls
+    assert "plan_sql" not in llm.calls
+    assert result["acl_response"]["content"]["metrics"]["plan_source"] == "query_ir"
+    assert "GROUP BY a.status" in result["acl_response"]["content"]["sql"]
+    assert result["rows"]
+
+
+def test_capability_template_runs_without_llm_plan(server, sample_graph_data):
+    llm = FakeLLM(answer="Завершено: 1 проверка.")
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke(
+        {
+            "acl_request": acl_request(
+                "Покажи сводку по статусам проверок за 2026 год"
+            )
+        }
+    )
+
+    assert result["status"] == "ok"
+    assert result["strategy"] == "script"
+    assert "plan_sql" not in llm.calls
+    assert "plan_query" not in llm.calls
+    assert result["acl_response"]["content"]["metrics"]["plan_source"] == "capability"
+    assert result["rows"] == [{"status": "завершена", "cnt": 1}]
 
 
 def test_invalid_acl_is_refused_without_llm(server, sample_graph_data):
@@ -273,7 +347,7 @@ def test_script_template_strategy(server, sample_graph_data):
     )
     graph = build_analytics_graph(server, llm)
 
-    result = graph.invoke({"acl_request": acl_request("Покажи статусы проверок")})
+    result = graph.invoke({"acl_request": acl_request("Сколько проверок по статусам?")})
 
     assert result["strategy"] == "script"
     assert result["rows"]
@@ -364,6 +438,50 @@ def test_multi_tool_in_one_llm_call(server, sample_graph_data):
     types = {item["type"] for item in result["evidence"]}
     assert "item" in types
     assert "act" in types or "tool" in types
+
+
+def test_multi_tool_plan_is_truncated_to_limit(server, sample_graph_data):
+    """7 инструментов в плане: выполняем только MAX_AGENT_ITERATIONS и помечаем это."""
+    calls = [
+        ToolCall(
+            name="get_act_items",
+            arguments={"audit_code": "AUD-2026-MORTGAGE-03"},
+        )
+    ] + [
+        ToolCall(name="search_acts", arguments={"query": f"залог {index}"})
+        for index in range(6)
+    ]
+    llm = FakeLLM(
+        tool_plan=ToolPlan(calls=calls, reason="модель запросила слишком много")
+    )
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke(
+        {
+            "acl_request": acl_request(
+                "Найди отклонения по AUD-2026-MORTGAGE-03 "
+                "и похожие формулировки в других актах"
+            )
+        }
+    )
+
+    limit = config.MAX_AGENT_ITERATIONS
+    assert result["status"] == "ok"
+    assert result["strategy"] == "multi_tool"
+    assert len(result["tool_calls"]) == limit
+    assert len(calls) == 7
+
+    content = result["acl_response"]["content"]
+    assert content["tool_calls_truncated"] is True
+    assert content["tool_calls_requested"] == 7
+    assert content["metrics"]["tool_calls_truncated"] is True
+    assert content["metrics"]["tool_calls_requested"] == 7
+    assert content["metrics"]["tool_calls"] == limit
+    assert (
+        f"Выполнены первые {limit} из 7 инструментов." in content["answer"]
+    )
+    assert content["answer"].rstrip().endswith("инструментов.")
+    assert llm.calls == ["plan_tools"]
 
 
 def test_multi_tool_is_formatted_by_llm(server, sample_graph_data):
