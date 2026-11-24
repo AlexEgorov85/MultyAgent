@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 Route = Literal[
     "analytics",
@@ -30,10 +30,23 @@ class RouteDecision(BaseModel):
 
 
 class ChartPoint(BaseModel):
-    """Одна точка диаграммы: категория и числовое значение."""
+    """Одна точка диаграммы: категория и числовое значение.
+
+    `row_index` и `measure` — ссылка на строку результата и числовую
+    колонку. По ней код берёт значение сам, поэтому подпись может быть
+    человеческой («Ипотека») без риска потерять точку при сверке.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "required": ["label", "value", "row_index", "measure"],
+        }
+    )
 
     label: str = Field(min_length=1, max_length=120)
     value: float
+    row_index: int | None = None
+    measure: str = ""
 
 
 class ChartSpec(BaseModel):
@@ -42,6 +55,7 @@ class ChartSpec(BaseModel):
     type: Literal["bar", "line", "pie"] = "bar"
     title: str = Field(min_length=1, max_length=200)
     subtitle: str = ""
+    category: str = ""
     category_label: str = ""
     value_label: str = ""
     unit: str = ""
@@ -54,6 +68,7 @@ class ChartSpec(BaseModel):
             "type",
             "title",
             "subtitle",
+            "category",
             "category_label",
             "value_label",
             "unit",
@@ -131,9 +146,21 @@ class ToolPlan(BaseModel):
 
 
 class AnswerDraft(BaseModel):
-    """Ответ агента по результатам инструментов."""
+    """Ответ агента по результатам инструментов.
+
+    `numbers_used` — все числа, которые модель использовала в тексте,
+    включая записанные словами. Код сверяет их со строками результата:
+    недекларированное число или число вне таблицы отклоняет ответ.
+    """
 
     text: str = Field(min_length=1)
+    numbers_used: list[float] = Field(default_factory=list)
+
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs):
+        schema = super().model_json_schema(*args, **kwargs)
+        schema["required"] = ["text", "numbers_used"]
+        return schema
 
 
 class RetrievalAnswer(BaseModel):

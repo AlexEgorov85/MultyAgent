@@ -73,6 +73,10 @@ _TEXTS: dict[str, dict[str, str]] = {
         "ru": "Найдено строк: {count}. Первые: {preview}.",
         "en": "Rows found: {count}. First: {preview}.",
     },
+    "limit_notice": {
+        "ru": "Показано не более {limit} строк: результат ограничен настройкой MAX_ROWS.",
+        "en": "Showing at most {limit} rows: the result is capped by MAX_ROWS.",
+    },
     "result": {
         "ru": "Результат — {body}.",
         "en": "Result — {body}.",

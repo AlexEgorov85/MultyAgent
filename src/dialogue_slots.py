@@ -59,9 +59,10 @@ def merge_slots(
 ) -> DialogueSlots:
     """Сохраняет старые слоты и обновляет их явными упоминаниями.
 
-    Приоритет: явное упоминание в новом тексте → предыдущий слот →
-    слот, который восстановила LLM. Поэтому resolver не может «потерять»
-    уже известный item_type или заменить его догадкой.
+    Приоритет: явный слот из текущей реплики → слот, который восстановил
+    LLM-резолвер → значение из прошлого хода. Резолвер сильнее прошлого
+    хода, потому что он читает смысл: «а за 25-й год?» не содержит
+    `20\\d{2}`, и без этого правила прошлый год молча перебил бы новый.
     """
     base = (
         previous
@@ -70,41 +71,41 @@ def merge_slots(
     )
     merged = base.model_copy(deep=True)
 
-    # Последний текст — результат resolver: он может только заполнить
-    # пропуски, но не перезаписать явный текущий или предыдущий слот.
-    current_texts = list(questions[:-1]) if len(questions) > 1 else list(questions)
-    for text in current_texts:
-        extracted = extract_slots(text)
-        for field_name in DialogueSlots.model_fields:
-            value = getattr(extracted, field_name)
-            if value is not None:
-                setattr(merged, field_name, value)
+    current = extract_slots(questions[0]) if questions else DialogueSlots()
+    resolved = (
+        extract_slots(questions[-1])
+        if len(questions) > 1
+        else DialogueSlots()
+    )
 
-    if len(questions) > 1:
-        resolved = extract_slots(questions[-1])
-        for field_name in DialogueSlots.model_fields:
-            if getattr(merged, field_name) is None:
-                value = getattr(resolved, field_name)
-                if value is not None:
-                    setattr(merged, field_name, value)
+    for field_name in DialogueSlots.model_fields:
+        value = getattr(current, field_name)
+        if value is None:
+            value = getattr(resolved, field_name)
+        if value is not None:
+            setattr(merged, field_name, value)
 
     return merged
 
 
-def augment_query(query: str, slots: DialogueSlots) -> str:
-    """Добавляет потерянные однозначные слоты: год и код проверки.
+def augment_query(query: str, source_text: str) -> str:
+    """Возвращает год и код проверки, которые резолвер потерял.
 
-    Тема/статус/риск не дописываются: если резолвер их потерял, добавлять
-    их по сохранённому значению опасно (пользователь мог сменить тему).
+    Дописываются только однозначные токены из текущей реплики
+    пользователя. Переносить их из прошлых ходов нельзя: «за последние
+    2 года» не содержит года, и подстановка прошлого года исказила бы
+    вопрос. Тема/статус/риск не дописываются никогда: пользователь мог
+    сменить предмет, а это решает LLM.
     """
+    explicit = extract_slots(source_text)
     text = " ".join((query or "").split())
     lower = _normalise(text)
     additions: list[str] = []
 
-    if slots.year is not None and str(slots.year) not in lower:
-        additions.append(f"год {slots.year}")
-    if slots.audit_code and slots.audit_code.lower() not in lower:
-        additions.append(f"проверка {slots.audit_code}")
+    if explicit.year is not None and str(explicit.year) not in lower:
+        additions.append(f"год {explicit.year}")
+    if explicit.audit_code and explicit.audit_code.lower() not in lower:
+        additions.append(f"проверка {explicit.audit_code}")
 
     if not additions:
         return text

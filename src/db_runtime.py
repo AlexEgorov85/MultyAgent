@@ -452,6 +452,38 @@ def upsert_dataset_metadata(server, seed_dir: Path | None = None) -> dict:
     return {"as_of_date": as_of, "seed": seed, "checksum": checksum}
 
 
+def set_index_embedding_model(server, model: str) -> None:
+    """Запоминает модель, которой построен RAG-индекс.
+
+    Значение читает runtime, чтобы hash-индекс не сравнивался с
+    OpenAI-векторами запроса.
+    """
+    with connect(server) as conn:
+        conn.execute(
+            """
+            INSERT INTO audit.dataset_metadata
+                (metadata_id, as_of_date, seed, checksum, embedding_model)
+            VALUES (1, %s, 42, '', %s)
+            ON CONFLICT (metadata_id) DO UPDATE
+            SET embedding_model = EXCLUDED.embedding_model
+            """,
+            (
+                config.DEFAULT_AS_OF_DATE,
+                str(model or "").strip() or None,
+            ),
+        )
+
+
+def get_index_embedding_model(server) -> str:
+    """Возвращает модель эмбеддингов индекса или пустую строку."""
+    with connect(server) as conn:
+        row = conn.execute(
+            "SELECT embedding_model FROM audit.dataset_metadata "
+            "WHERE metadata_id = 1"
+        ).fetchone()
+    return str(row[0] or "").strip() if row is not None else ""
+
+
 def reset_data_dir(pgdata: Path | str | None = None) -> None:
     """Удаляет каталог данных PostgreSQL. Требует явного согласия вызывающего."""
     path = Path(pgdata or config.PGDATA_DIR)

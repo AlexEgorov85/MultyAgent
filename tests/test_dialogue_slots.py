@@ -53,21 +53,39 @@ def test_merge_keeps_known_semantic_slots_from_state():
     assert merged.year == 2025
 
 
-def test_augment_query_adds_only_year_and_audit_code():
-    slots = DialogueSlots(
-        year=2025,
-        theme="ипотека",
-        item_type="проблема",
-        risk_level="критический",
-        audit_code="AUD-2025-MORTGAGE-03",
+def test_resolved_year_overrides_previous_without_regex_match():
+    """«25-й год» не ловится `20\\\\d{2}`, но резолвер понимает смысл."""
+    previous = DialogueSlots(year=2026, theme="ипотека")
+    merged = merge_slots(
+        previous,
+        "А за 25-й год?",
+        "Сколько отклонений по ипотеке за 2025 год?",
     )
-    text = augment_query("Что там по этому вопросу?", slots)
+    assert merged.year == 2025
+
+
+def test_augment_query_adds_only_explicit_year_and_audit_code():
+    text = augment_query(
+        "Что там по этому вопросу?",
+        "Критические проблемы по ипотеке в 2025 году "
+        "по проверке AUD-2025-MORTGAGE-03?",
+    )
     assert "2025" in text
     assert "AUD-2025-MORTGAGE-03" in text
     # Семантические слоты не дописываются: пользователь мог сменить тему.
     assert "ипотека" not in text
     assert "проблема" not in text
     assert "критический" not in text
+
+
+def test_augment_query_does_not_restore_previous_year():
+    """Прошлый год нельзя дописывать, если в текущей реплике его нет."""
+    text = augment_query(
+        "Сколько закрытых проверок по картам за последние 2 года?",
+        "А по картам за последние 2 года?",
+    )
+    assert "Уточнение" not in text
+    assert "2026" not in text
 
 
 def test_slots_text_is_compact():

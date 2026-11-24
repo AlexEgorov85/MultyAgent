@@ -8,7 +8,10 @@
 
 ### Requirement: Единый ACL-конверт
 
-Система SHALL использовать модель `ACLMessage` для любого взаимодействия между Router, Coordinator, Analytics, Retrieval, Report, Inspector и Guardrail.
+Система SHALL использовать модель `ACLMessage` для любого вызова
+подагента: Analytics, Retrieval, Report и Investigation (Coordinator).
+Router, Guardrail и узлы внутри подагентов (включая Inspector) — обычные
+узлы графа; они вызываются напрямую и не требуют ACL-конверта.
 
 #### Scenario: Вызов подагента
 
@@ -16,11 +19,12 @@
 - **THEN** создаётся `ACLMessage` с `performative = request`
 - **AND** сообщение валидируется до вызова
 
-#### Scenario: Прямой вызов запрещён
+#### Scenario: Прямой вызов подагента запрещён
 
-- **WHEN** код пытается вызвать функцию подагента без ACL-конверта
-- **THEN** тест архитектуры фиксирует нарушение
-- **AND** вызов не считается допустимым
+- **WHEN** код пытается вызвать подграф Analytics, Retrieval, Report или
+  Investigation без ACL-конверта
+- **THEN** вызов не считается допустимым
+- **AND** основной граф передаёт вопрос только через `make_acl_message`
 
 ### Requirement: Обязательные поля сообщения
 

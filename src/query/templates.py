@@ -16,6 +16,17 @@ _LATEST_YEAR_VALUES = frozenset(
 )
 
 
+def _is_year_range(value: object) -> bool:
+    """True для диапазона ``last_N``: шаблоны поддерживают только один год."""
+    text = str(value or "").strip().lower()
+    if text in _LATEST_YEAR_VALUES:
+        return False
+    if not text.startswith("last_"):
+        return False
+    number = text.removeprefix("last_").removesuffix("_years")
+    return number.isdigit() and int(number) > 1
+
+
 @dataclass(frozen=True)
 class TemplateContract:
     """Что шаблон умеет считать."""
@@ -137,6 +148,15 @@ def template_plan_problems(template_key: str, plan: QueryPlan) -> list[str]:
             "шаблон не поддерживает фильтры: "
             + ", ".join(sorted(extra_filters))
         )
+
+    # Шаблон принимает один год, поэтому ``year=last_2`` нельзя
+    # молча превращать в последний год: это даст неверное число.
+    if any(
+        query_filter.field == "year"
+        and _is_year_range(query_filter.value)
+        for query_filter in plan.filters
+    ):
+        problems.append("шаблон не поддерживает диапазон лет last_N")
     return problems
 
 

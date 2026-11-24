@@ -27,7 +27,7 @@ from src import db_runtime
 from src.graph.admin_graph import build_admin_graph
 from src.graph.main_graph import build_main_graph
 from src.llm import OpenAILLM
-from src.rag.embeddings import OpenAIEmbeddings
+from src.rag.embeddings import HashEmbeddings, OpenAIEmbeddings
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,13 @@ def _build_worker() -> None:
         prepare_database(server)
         logger.info("Сборка графа: схема подготовлена")
         llm = OpenAILLM()
-        embeddings = OpenAIEmbeddings()
+        # Индекс и запросы должны использовать одну модель эмбеддингов.
+        # Иначе hash-индекс сравнивается с frida-векторами и гибридный
+        # поиск молча превращается в FTS.
+        index_model = db_runtime.get_index_embedding_model(server)
+        embeddings = (
+            HashEmbeddings() if index_model == "hash" else OpenAIEmbeddings()
+        )
         _result["graph"] = build_main_graph(server, llm, embeddings=embeddings)
         logger.info("Сборка графа: основной граф готов")
         _result["admin_graph"] = build_admin_graph(server)

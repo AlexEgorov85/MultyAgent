@@ -69,13 +69,18 @@ Copy-Item .env.example .env
 # 3. данные, БД, индекс, проверки
 .venv\Scripts\python.exe scripts\generate_data.py --deviations
 .venv\Scripts\python.exe scripts\init_db.py --reset-db --yes --seed
-.venv\Scripts\python.exe scripts\build_index.py --hash
+.venv\Scripts\python.exe scripts\build_index.py
 .venv\Scripts\python.exe scripts\qa_checks.py
 .venv\Scripts\python.exe -m pytest -q
 ```
 
+`build_index.py --hash` — офлайн-режим для тестов и демо без вызовов
+эмбеддингов; модель индекса записывается в БД, и backend использует её же
+для запросов. Для полноценного семантического поиска стройте индекс без
+`--hash` (нужен `OPENAI_API_KEY`).
+
 `init_db.py` поднимает встроенный PostgreSQL 16 (`pgserver`), применяет
-миграции `db/migrations/001–007` и создаёт read-only роль `audit_ro`.
+миграции `db/migrations/001–009` и создаёт read-only роль `audit_ro`.
 Особенности Windows (кириллица в пути, кодировка `.env`) —
 [docs/ui_guide.md](docs/ui_guide.md).
 
@@ -139,6 +144,22 @@ npm --prefix ui run build
 (`scripts/verify_clean_clone.py`) и чек-лист перед сдачей —
 [docs/qa.md](docs/qa.md).
 
+### Метрики (исторический прогон)
+
+Прогон 26 кейсов `evaluate.py`: `qwen3.6-35b-a3b-noreason`, seed 42,
+дата среза 2026-11-21. На текущей ревизии не повторялся; это ориентир,
+а не гарантия результата.
+
+| Метрика | Значение |
+|---|---:|
+| `route_accuracy` | 1.000 |
+| `success_rate` | 0.962 |
+| `sql_validity_rate` | 1.000 |
+| `evidence_coverage` | 0.962 |
+| `latency_mean_sec` | 28.324 |
+| `latency_p50_sec` | 10.878 |
+| `latency_p95_sec` | 72.124 |
+
 ## Структура
 
 ```text
@@ -146,10 +167,9 @@ src/graph/        основной граф и подагенты (analytics, re
 src/acl.py        FIPA-ACL-протокол и журнал сообщений
 src/tools/        sql_guard, доступ к БД, инструменты
 src/semantic/     каталог метрик и измерений (Query IR)
-src/query/        QueryPlan и детерминированный SQL-компилятор
-src/capabilities/ typed templates и deterministic matcher
+src/query/        QueryPlan, детерминированный SQL-компилятор и контракты шаблонов
 src/rag/          индекс и гибридный поиск
-db/migrations/    миграции PostgreSQL 001–007
+db/migrations/    миграции PostgreSQL 001–009
 scripts/          генерация данных, БД, индекс, CLI агентов, оценка, QA
 data/knowledge/   методические документы для RAG
 data/*.jsonl      наборы оценки и бенчмарка

@@ -110,7 +110,7 @@ flowchart TD
    «это запрос на память?» принимает LLM, поэтому смешанная реплика
    («Я проверяю ипотеку, сколько проверок?») не попадает в `memory` и не
    теряет аналитическую часть вопроса. Если LLM недоступна, fallback
-   выбирает только smalltalk/out_of_domain и не угадывает доменный маршрут.
+   возвращает `out_of_domain` и не угадывает доменный маршрут.
 5. **Ветка агента / `update_memory`** — при маршруте `memory` узел
    `update_memory` извлекает предпочтения через `llm.extract_memory`
    (структурированный вывод с whitelist ключей `focus_theme`,
@@ -122,12 +122,14 @@ flowchart TD
    ретриверы из `profile_text` подмешивают его в текст промпта, а не в
    условия вопроса.
 6. **Ветка агента** — основной граф упаковывает вопрос в ACL-конверт
-   (`request`) и вызывает подграф. В `content` передаются `resolved_query`,
+   (`request`) и вызывает подграф. В `content` передаются `question`,
    `original_question`, `conversation_context`, `auditor_id`,
    `profile_text`, `language` (для `report_agent` — также
    `report_format` и `signature`).
 7. **`guard_answer`** — финальная проверка ответа: приватность,
-   обоснованность, отсутствие запрещённого содержимого.
+   безопасность SQL, отсутствие запрещённого содержимого. Для
+   фактических маршрутов передаётся evidence: ответ без подтверждения
+   помечается, а не выдаётся за факт.
 8. **`present`** — формирует ответ на языке вопроса, прикладывает
    evidence/цитаты и шаги `trace`.
 9. **`finalize`** — одной транзакцией пишет пару `user + assistant`,
@@ -140,15 +142,15 @@ flowchart TD
 
 | Поле | Назначение |
 |---|---|
-| `performative` | `request`, `inform`, `failure`, `refuse` |
-| `sender` / `receiver` | имена агентов (`main_orchestrator`, `analytics_agent`, …) |
+| `performative` | `request`, `inform`, `failure`, `refuse`, `propose`, `agree` |
+| `sender` / `receiver` | имена агентов (`orchestrator`, `analytics_agent`, …) |
 | `content` | вопрос, `original_question`, `conversation_context`, результат, evidence |
 | `conversation_id` / `reply_with` / `in_reply_to` | корреляция запроса и ответа |
 | `protocol` / `language` | `fipa-acl`, `ru` |
 
 Все конверты журналируются в JSONL (`logs/`), журнал раундов расследования
 хранится в состоянии (`acl_log`). Подграфы начинают работу с узла
-`parse_acl`: некорректный конверт сразу даёт `failure`, а не падение.
+`parse_acl`: некорректный конверт сразу даёт `refuse`, а не падение.
 
 ## Подагенты
 
@@ -211,11 +213,13 @@ flowchart TD
    `statement_timeout` 5 секунд.
 5. **`repair`** — при ошибке LLM получает текст ошибки и исправляет план;
    число попыток ограничено.
-6. **`chart`** — для `analytics_mode=chart` берёт payload предыдущего
-   аналитического ответа (`rows`, `columns`, `question`) и просит LLM
-   выбрать `ChartSpec` (bar/line/pie, подписи, точки). Код проверяет,
-   что точки действительно есть в строках, иначе использует
-   детерминированный fallback. Подробнее — [visualization.md](visualization.md).
+6. **`chart`** — для `analytics_mode=chart` сначала выполняет обычный
+   QueryPlan/SQL по текущему вопросу; если план не построен, берёт payload
+   предыдущего аналитического ответа (`rows`, `columns`, `question`).
+   Затем LLM выбирает `ChartSpec` (bar/line/pie, подписи, точки), а код
+   проверяет, что точки действительно есть в строках. Если валидных точек
+   меньше двух или LLM недоступна, диаграмма не показывается — выдаётся
+   честное сообщение. Подробнее — [visualization.md](visualization.md).
 7. **`summarize`** — ответ с числами и evidence (SQL, ID строк);
    **`pack`** упаковывает результат в ACL `inform`.
 
@@ -352,7 +356,7 @@ sequenceDiagram
 |---|---|---|
 | Тред LangGraph | `InMemorySaver` (`thread_id`) | состояние графа в рамках процесса |
 | История чата | `audit.chat_threads`, `audit.chat_messages` | контекст переживает перезапуск backend |
-| Профиль аудитора | `audit.auditor_memory` | тема, формат акта, подпись; извлечение LLM с fallback; блок профиля в промптах подагентов; сброс/удаление ключей — в UI |
+| Профиль аудитора | `audit.auditor_memory` | тема, формат акта, подпись; извлечение только LLM (без keyword-fallback); блок профиля в промптах подагентов; сброс/удаление ключей — в UI |
 | Аварийный fallback | `client_history` из `localStorage` UI | контекст, если потерян и тред, и БД-история |
 
 Ключ истории — стабильный `conversation_id` из UI (`chat.id`), а не
@@ -381,7 +385,7 @@ backend `thread_id`: пересоздание треда после переза
 ## Данные
 
 PostgreSQL 16 (встроенный `pgserver`), схема `audit`, миграции
-`db/migrations/001–007`:
+`db/migrations/001–009`:
 
 ```text
 audit_pockets → audits → acts → act_items → scripts

@@ -22,6 +22,14 @@ def _is_year_field(field: str) -> bool:
     )
 
 
+def _row_index(value: Any, rows: Sequence[Mapping[str, Any]]) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    if 0 <= value < len(rows):
+        return value
+    return None
+
+
 def _numeric_columns(
     rows: Sequence[Mapping[str, Any]],
     columns: Sequence[str],
@@ -79,12 +87,18 @@ def ground_chart_points(
     """Оставляет только точки, которые действительно есть в строках.
 
     LLM выбирает визуализацию, но числа и категории не должны быть
-    выдуманными. Если валидных точек меньше двух — chart не принимается.
+    выдуманными. Основная проверка — ссылка на строку и колонку
+    (`row_index`, `measure`): код сам берёт значение из данных, поэтому
+    человеческая подпись не мешает принять корректную точку. Точки без
+    такой ссылки сверяются по паре «категория — значение».
+    Если валидных точек меньше двух — chart не принимается.
     """
     data = spec.get("data")
     if not isinstance(data, list):
         return None
     allowed = _row_chart_pairs(rows, columns)
+    numeric = set(_numeric_columns(rows, columns))
+    category = spec.get("category")
     grounded: list[dict[str, Any]] = []
     for point in data:
         if not isinstance(point, dict):
@@ -93,9 +107,32 @@ def ground_chart_points(
         value = point.get("value")
         if not label or not _is_number(value):
             continue
-        key = (label, round(float(value), 4))
-        if key in allowed:
-            grounded.append(
-                {"label": str(point.get("label")), "value": float(value)}
-            )
+        rounded = round(float(value), 4)
+        accepted = False
+        source_row: Mapping[str, Any] | None = None
+        index = _row_index(point.get("row_index"), rows)
+        measure = point.get("measure")
+        if index is not None and isinstance(measure, str) and measure in numeric:
+            row = rows[index]
+            source = row.get(measure)
+            if _is_number(source) and round(float(source), 4) == rounded:
+                accepted = True
+                source_row = row
+        if not accepted:
+            accepted = (label, rounded) in allowed
+        if accepted:
+            grounded_point: dict[str, Any] = {
+                "label": str(point.get("label")),
+                "value": float(value),
+            }
+            if (
+                source_row is not None
+                and isinstance(category, str)
+                and category in source_row
+                and source_row.get(category) is not None
+            ):
+                # Сырое значение категории нужно для точной сортировки
+                # временной оси; в UI оно не отдаётся.
+                grounded_point["_order_value"] = source_row[category]
+            grounded.append(grounded_point)
     return grounded if len(grounded) >= 2 else None

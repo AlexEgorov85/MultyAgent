@@ -50,6 +50,7 @@ def test_run_readonly_sql(server, sample_data):
     assert result["columns"] == ["audit_id", "status"]
     assert result["rows"] == [{"audit_id": "AUD-TEST-SQL", "status": "завершена"}]
     assert result["row_count"] == 1
+    assert result["truncated"] is False
     assert "LIMIT" in result["sql"].upper()
 
 
@@ -59,11 +60,28 @@ def test_run_readonly_sql_rejects_write(server, sample_data):
 
 
 def test_run_readonly_sql_honours_max_rows(server, sample_data):
-    result = db_tools.run_readonly_sql(
-        server, "SELECT audit_id FROM audit.audits", max_rows=1
-    )
-    assert result["row_count"] <= 1
-    assert "LIMIT 1" in result["sql"].upper()
+    with db_runtime.connect(server) as conn:
+        conn.execute(
+            "INSERT INTO audit.audits "
+            "(audit_id, pocket_id, audit_code, title, audit_type, start_date, "
+            " end_date, status, lead_auditor_id, team_size) "
+            "VALUES ('AUD-TEST-SQL-2', 'PKT-TEST-SQL', 'AUD-TEST-SQL-2', "
+            "        'Вторая проверка', 'плановая', '2026-03-01', "
+            "        '2026-03-20', 'завершена', 'SQL-001', 2) "
+            "ON CONFLICT (audit_id) DO NOTHING"
+        )
+    try:
+        result = db_tools.run_readonly_sql(
+            server, "SELECT audit_id FROM audit.audits", max_rows=1
+        )
+        assert result["row_count"] == 1
+        assert result["truncated"] is True
+        assert "LIMIT 1" in result["sql"].upper()
+    finally:
+        with db_runtime.connect(server) as conn:
+            conn.execute(
+                "DELETE FROM audit.audits WHERE audit_id = 'AUD-TEST-SQL-2'"
+            )
 
 
 def test_statement_timeout_is_set(server, sample_data):

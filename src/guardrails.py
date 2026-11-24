@@ -68,17 +68,21 @@ def _blocked(
     *,
     route: str | None = None,
     log_reason: str | None = None,
+    conversation_id: str = "",
 ) -> GuardrailResult:
     """Возвращает блокирующий результат и пишет лог без текста запроса/ответа."""
     logger.warning(
-        "guardrail blocked: %s (route=%s)",
+        "guardrail blocked: %s (route=%s, conversation_id=%s)",
         log_reason or reason,
         route or "unknown",
+        conversation_id or "unknown",
     )
     return GuardrailResult(safe=False, final_answer=final_answer, reason=reason)
 
 
-def check_request(question: str) -> GuardrailResult:
+def check_request(
+    question: str, *, conversation_id: str = ""
+) -> GuardrailResult:
     """Блокирует изменение данных, PII и попытки раскрыть промпт."""
     text = question.lower()
 
@@ -87,18 +91,21 @@ def check_request(question: str) -> GuardrailResult:
             "",
             "Запрос пытается изменить данные. Доступны только read-only выборки.",
             route="request",
+            conversation_id=conversation_id,
         )
     if _matches(PII_PATTERNS, text):
         return _blocked(
             "",
             "Запрос затрагивает персональные данные, которые недоступны ассистенту.",
             route="request",
+            conversation_id=conversation_id,
         )
     if _matches(PROMPT_PATTERNS, text):
         return _blocked(
             "",
             "Запрос пытается раскрыть внутренние инструкции системы.",
             route="request",
+            conversation_id=conversation_id,
         )
     return GuardrailResult(safe=True, final_answer="", reason="")
 
@@ -111,6 +118,7 @@ def check_final_answer(
     evidence: list | None = None,
     is_factual: bool = False,
     route: str | None = None,
+    conversation_id: str = "",
 ) -> GuardrailResult:
     """Проверяет SQL и текст перед показом пользователю.
 
@@ -122,6 +130,7 @@ def check_final_answer(
             Пустой список/``None`` при ``is_factual=True`` даёт warning, но не блокирует.
         is_factual: ответ содержит фактические утверждения, требующие evidence.
         route: маршрут запроса — только для контекста в логе.
+        conversation_id: идентификатор диалога для журнала инцидента.
     """
     route_context = route or ("domain" if is_domain else "out_of_domain")
 
@@ -134,6 +143,7 @@ def check_final_answer(
                 str(exc),
                 route=route_context,
                 log_reason="SQL не прошёл проверку безопасности",
+                conversation_id=conversation_id,
             )
 
     if _matches(PROMPT_PATTERNS, answer.lower()):
@@ -141,6 +151,7 @@ def check_final_answer(
             "Не могу раскрывать внутренние инструкции системы.",
             "Ответ содержит внутренние инструкции",
             route=route_context,
+            conversation_id=conversation_id,
         )
 
     if _matches(PII_PATTERNS, answer.lower()):
@@ -148,6 +159,7 @@ def check_final_answer(
             "Не могу показать ответ: он содержит персональные данные.",
             "Ответ содержит персональные данные",
             route=route_context,
+            conversation_id=conversation_id,
         )
 
     if not is_domain:
@@ -155,6 +167,7 @@ def check_final_answer(
             "Я помогаю только по вопросам внутреннего аудита.",
             "Ответ вне домена",
             route=route_context,
+            conversation_id=conversation_id,
         )
 
     warnings: list[str] = []

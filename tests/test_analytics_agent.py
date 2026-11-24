@@ -82,6 +82,27 @@ class ChartFakeLLM(FakeLLM):
         return self.chart
 
 
+class QueryChartFakeLLM(FakeLLM):
+    """Fake для chart по текущему QueryPlan: план, SQL и ChartSpec."""
+
+    def __init__(self, plan: QueryPlan, chart: ChartSpec) -> None:
+        super().__init__()
+        self.query_plan = plan
+        self.chart = chart
+
+    def plan_query(self, **kwargs):
+        self.calls.append("plan_query")
+        return self.query_plan
+
+    def review_query_plan(self, **kwargs):
+        self.calls.append("review_query_plan")
+        return PlanGaps()
+
+    def plan_chart(self, **kwargs):
+        self.calls.append("plan_chart")
+        return self.chart
+
+
 class FormattingFakeLLM(FakeLLM):
     """Fake с отдельным шагом оформления готового ответа."""
 
@@ -617,6 +638,47 @@ def test_chart_hallucinated_data_is_rejected(server, sample_graph_data):
         dialogue_store.delete_thread(
             server, conversation_id, auditor_id="AUD-001"
         )
+
+
+def test_chart_mode_builds_chart_from_current_query(server, sample_graph_data):
+    request = make_acl_message(
+        performative="request",
+        sender="orchestrator",
+        receiver="analytics_agent",
+        content={
+            "question": "Построй диаграмму по типам пунктов проверки",
+            "auditor_id": "AUD-001",
+            "analytics_mode": "chart",
+        },
+        conversation_id="conv-chart-current",
+    )
+    llm = QueryChartFakeLLM(
+        QueryPlan(
+            metric="item_count",
+            dimensions=["item_type"],
+            filters=[QueryFilter(field="year", value=2026)],
+        ),
+        ChartSpec(
+            type="bar",
+            title="Типы пунктов",
+            data=[
+                ChartPoint(label="отклонение", value=1),
+                ChartPoint(label="проблема", value=1),
+            ],
+        ),
+    )
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke({"acl_request": request.model_dump()})
+
+    assert result["status"] == "ok"
+    assert "plan_query" in llm.calls
+    assert "plan_chart" in llm.calls
+    chart = result["acl_response"]["content"]["chart"]
+    assert chart["type"] == "bar"
+    assert result["acl_response"]["content"]["source_question"] == (
+        "Построй диаграмму по типам пунктов проверки"
+    )
 
 
 def test_chart_mode_without_previous_data_is_honest(server, sample_graph_data):

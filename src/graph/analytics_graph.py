@@ -75,16 +75,11 @@ def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _summary_numbers_supported(
-    text: str,
+def _summary_allowed_numbers(
     rows: list[dict[str, Any]],
     columns: list[str],
-) -> bool:
-    """Проверяет, что LLM не придумала числа вне таблицы.
-
-    Годы (2025, 2026) разрешены как названия разрезов. Суммы и разницы,
-    которых нет в строках, считаются выдуманными.
-    """
+) -> set[float]:
+    """Числа, которые модель вправе назвать: строки, итоги, число строк."""
     allowed: set[float] = {float(len(rows))}
     for column in columns:
         values: list[float] = []
@@ -97,6 +92,37 @@ def _summary_numbers_supported(
         if values:
             # Итог по колонке — допустимое производное число.
             allowed.add(round(sum(values), 2))
+    return allowed
+
+
+def _summary_numbers_supported(
+    text: str,
+    rows: list[dict[str, Any]],
+    columns: list[str],
+    claims: list[float] | None = None,
+) -> bool:
+    """Проверяет, что LLM не придумала числа вне таблицы.
+
+    Годы (2025, 2026) разрешены как названия разрезов. Если модель вернула
+    структурированный список использованных чисел (`claims`), каждое число
+    в тексте должно быть в нём объявлено: так проверка не проходит вхолостую,
+    когда модель записала число словами.
+    """
+    allowed = _summary_allowed_numbers(rows, columns)
+    declared: set[float] | None = None
+    if claims is not None:
+        declared = set()
+        for claim in claims:
+            if not _is_number(claim):
+                return False
+            value = round(float(claim), 2)
+            # Годы — не результат запроса, их можно называть свободно.
+            if 2000 <= value <= 2099:
+                declared.add(value)
+                continue
+            if value not in allowed:
+                return False
+            declared.add(value)
 
     for token in re.findall(r"\d+(?:[.,]\d+)?", text or ""):
         try:
@@ -105,7 +131,10 @@ def _summary_numbers_supported(
             continue
         if 2000 <= value <= 2099:
             continue
-        if round(value, 2) not in allowed:
+        rounded = round(value, 2)
+        if rounded not in allowed:
+            return False
+        if declared is not None and rounded not in declared:
             return False
     return True
 
@@ -374,6 +403,8 @@ def build_analytics_graph(server, llm: LLMClient):
             "sql": result["sql"],
             "columns": result["columns"],
             "rows": result["rows"],
+            "truncated": bool(result.get("truncated")),
+            "max_rows": int(result.get("max_rows") or config.MAX_ROWS),
             "evidence": [
                 {
                     "type": "script_template",
@@ -410,6 +441,8 @@ def build_analytics_graph(server, llm: LLMClient):
             "sql": result["sql"],
             "columns": result["columns"],
             "rows": result["rows"],
+            "truncated": bool(result.get("truncated")),
+            "max_rows": int(result.get("max_rows") or config.MAX_ROWS),
             "retry": False,
             "evidence": [
                 {
@@ -780,13 +813,21 @@ def build_analytics_graph(server, llm: LLMClient):
                     candidate_payload, rows, columns
                 )
                 if grounded is not None:
-                    candidate_payload["data"] = grounded
                     if candidate_payload.get("type") == "line":
-                        # Для временной оси порядок должен быть хронологическим,
-                        # а не по убыванию значения из SQL.
+                        # Временную ось упорядочиваем по сырому значению
+                        # категории («2025-03»), а не по человеческой
+                        # подписи («Март 2025»).
                         grounded.sort(
-                            key=lambda point: str(point.get("label", ""))
+                            key=lambda point: str(
+                                point.get("_order_value")
+                                if point.get("_order_value") is not None
+                                else point.get("label", "")
+                            )
                         )
+                    candidate_payload["data"] = [
+                        {"label": point["label"], "value": point["value"]}
+                        for point in grounded
+                    ]
                     spec = candidate_payload
             except Exception as exc:
                 logger.warning("LLM chart spec rejected: %s", exc)
@@ -816,11 +857,21 @@ def build_analytics_graph(server, llm: LLMClient):
                 "evidence": evidence,
             }
 
+        chart_answer = t(
+            language, "chart_ready" if from_previous else "chart_ready_current"
+        )
+        if state.get("truncated"):
+            chart_answer = (
+                f"{chart_answer}\n\n"
+                + t(
+                    language,
+                    "limit_notice",
+                    limit=int(state.get("max_rows") or config.MAX_ROWS),
+                )
+            )
         return {
             "status": "ok",
-            "answer": t(
-                language, "chart_ready" if from_previous else "chart_ready_current"
-            ),
+            "answer": chart_answer,
             "answer_source": "agent",
             "strategy": "chart",
             "rows": rows,
@@ -855,21 +906,46 @@ def build_analytics_graph(server, llm: LLMClient):
             summarizer = getattr(llm, "summarize", None)
             if summarizer is not None:
                 try:
-                    text = summarizer(
+                    result = summarizer(
                         question=state.get("question", ""),
                         columns=columns,
                         rows=rows,
                         profile_text=state.get("profile_text", ""),
                     )
                 except Exception:
-                    text = ""
+                    result = ""
+                claims: list[float] | None = None
+                if hasattr(result, "text"):
+                    text = str(getattr(result, "text", "") or "").strip()
+                    raw_claims = getattr(result, "numbers_used", None) or []
+                    claims = []
+                    for value in raw_claims:
+                        try:
+                            claims.append(float(value))
+                        except (TypeError, ValueError):
+                            continue
+                else:
+                    text = str(result or "").strip()
                 text = str(text or "").strip()
-                if text and _summary_numbers_supported(text, rows, columns):
+                if text and _summary_numbers_supported(
+                    text, rows, columns, claims
+                ):
                     if (
                         template_header
                         and template_header.lower() not in text.lower()
                     ):
                         text = f"{template_header}. {text}"
+                    if state.get("truncated"):
+                        text = (
+                            f"{text}\n\n"
+                            + t(
+                                state.get("language"),
+                                "limit_notice",
+                                limit=int(
+                                    state.get("max_rows") or config.MAX_ROWS
+                                ),
+                            )
+                        )
                     return {"answer": text, "answer_source": "llm"}
                 if text:
                     logger.debug(
@@ -879,6 +955,15 @@ def build_analytics_graph(server, llm: LLMClient):
         answer = _format_rows(rows, columns, state.get("language"))
         if template_header:
             answer = f"{template_header}. {answer}"
+        if state.get("truncated"):
+            answer = (
+                f"{answer}\n\n"
+                + t(
+                    state.get("language"),
+                    "limit_notice",
+                    limit=int(state.get("max_rows") or config.MAX_ROWS),
+                )
+            )
         return {"answer": answer, "answer_source": "template"}
 
     def pack_response(state: AnalyticsState) -> dict[str, Any]:
@@ -929,6 +1014,11 @@ def build_analytics_graph(server, llm: LLMClient):
             content["columns"] = state["columns"]
         if state.get("rows"):
             content["rows"] = state["rows"]
+        if state.get("truncated"):
+            content["rows_truncated"] = True
+            content["max_rows"] = int(
+                state.get("max_rows") or config.MAX_ROWS
+            )
         if state.get("chart"):
             content["chart"] = state["chart"]
         if state.get("chart_source_question"):

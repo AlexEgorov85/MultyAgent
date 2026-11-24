@@ -7,7 +7,8 @@
    `COPY`, `CALL`, `DO`, `SELECT INTO`, `FOR UPDATE`.
 3. **Allowlist** — схемы `audit`, таблицы и views проекта.
 4. **Опасные функции** — `pg_read_file`, `pg_sleep`, `dblink`, `lo_import` и др.
-5. **LIMIT** — добавляется автоматически, превышение урезается.
+5. **LIMIT** — добавляется автоматически, превышение урезается; если
+   сработал `MAX_ROWS`, Analytics добавляет в ответ пометку об ограничении.
 6. **Роль `audit_ro`** — только `SELECT`, `default_transaction_read_only`.
 7. **Таймаут** — `statement_timeout` (5 секунд).
 8. **Финальный guardrail** — повторная проверка SQL перед показом.

@@ -191,7 +191,7 @@ def build_main_graph(
                     reason = ""
 
         slots = merge_slots(state.get("dialogue_slots"), question, text)
-        text = augment_query(text, slots)
+        text = augment_query(text, question)
         return {
             "resolved_query": text,
             "resolved_reason": reason,
@@ -297,9 +297,14 @@ def build_main_graph(
     def guard_request(state: MainState) -> dict[str, Any]:
         user_query = state.get("user_query", "")
         resolved_query = state.get("resolved_query", "")
-        result = check_request(user_query)
+        conversation_id = str(state.get("conversation_id") or "")
+        result = check_request(
+            user_query, conversation_id=conversation_id
+        )
         if result.safe and resolved_query and resolved_query != user_query:
-            result = check_request(resolved_query)
+            result = check_request(
+                resolved_query, conversation_id=conversation_id
+            )
         if not result.safe:
             return {
                 "guardrail": result.model_dump(),
@@ -420,9 +425,30 @@ def build_main_graph(
             )
         return {"final_answer": answer, "evidence": []}
 
+    def _smalltalk_kind(state: MainState) -> str:
+        """Подтип smalltalk из reason, с запасным разбором вопроса.
+
+        Основной контракт — ``smalltalk:<kind>`` из router.md. Если модель
+        вернула свободный текст, не показываем приветствие на «что умеешь?»
+        и благодарность: это ошибка формата, а не повод потерять смысл.
+        """
+        reason = str(state.get("route_reason") or "").strip().lower()
+        if reason.startswith("smalltalk:") and ":" in reason:
+            return reason.split(":", 1)[-1] or "greeting"
+        question = str(
+            state.get("resolved_query") or state.get("user_query") or ""
+        ).lower()
+        if any(word in question for word in ("спасибо", "благодар")):
+            return "thanks"
+        if any(
+            word in question
+            for word in ("что ты умеешь", "что ты можешь", "возможност")
+        ):
+            return "capabilities"
+        return "greeting"
+
     def smalltalk(state: MainState) -> dict[str, Any]:
-        reason = str(state.get("route_reason") or "")
-        kind = reason.split(":", 1)[-1] if ":" in reason else "greeting"
+        kind = _smalltalk_kind(state)
         capabilities = _pick(
             state,
             "Я — ассистент внутреннего аудитора. Умею:\n\n"
@@ -480,14 +506,28 @@ def build_main_graph(
 
     def guard_answer(state: MainState) -> dict[str, Any]:
         route = state.get("route")
+        factual_routes = {"analytics", "retrieval", "report", "investigation"}
         result = check_final_answer(
             state.get("final_answer", ""),
             extract_sql(state.get("acl_response")),
             is_domain=route != "out_of_domain",
+            evidence=state.get("evidence", []),
+            is_factual=str(route or "") in factual_routes,
+            route=str(route or ""),
+            conversation_id=str(state.get("conversation_id") or ""),
         )
         update: dict[str, Any] = {"answer_guardrail": result.model_dump()}
         if not result.safe:
             update["final_answer"] = result.final_answer
+        elif result.warnings:
+            # Не выдаём утверждение за подтверждённый факт: помечаем ответ.
+            note = _pick(
+                state,
+                "Пометка: ответ не подтверждён evidence из базы или источников.",
+                "Note: the answer is not supported by database or source evidence.",
+            )
+            answer = str(state.get("final_answer") or "").rstrip()
+            update["final_answer"] = f"{answer}\n\n{note}".strip()
         return update
 
     def finalize(state: MainState) -> dict[str, Any]:

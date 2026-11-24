@@ -47,9 +47,13 @@
 ```powershell
 .venv\Scripts\python.exe scripts\generate_data.py --deviations
 .venv\Scripts\python.exe scripts\init_db.py --reset-db --yes --seed
-.venv\Scripts\python.exe scripts\build_index.py --hash
+.venv\Scripts\python.exe scripts\build_index.py
 .venv\Scripts\python.exe scripts\qa_checks.py
 ```
+
+`--hash` — офлайн-вариант для тестов: модель индекса сохраняется в БД,
+и backend использует те же hash-эмбеддинги для запросов. Для реального
+семантического поиска нужен `OPENAI_API_KEY` и индекс без `--hash`.
 
 - temperature 0 у LLM, фиксированный seed 42, фиксированная дата среза
 `2026-11-21` (`audit.dataset_metadata`).
@@ -63,7 +67,7 @@ knowledge_chunks (pgvector + FTS)   auditor_memory
 chat_threads → chat_messages        dataset_metadata
 ```
 
-Миграции: `db/migrations/001–007`, реестр `public.schema_migrations`.
+Миграции: `db/migrations/001–009`, реестр `public.schema_migrations`.
 `init_db.py` поднимает встроенный PostgreSQL 16 через `pgserver`,
 применяет миграции и создаёт read-only роль `audit_ro`.
 

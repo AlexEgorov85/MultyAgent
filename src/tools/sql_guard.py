@@ -86,8 +86,13 @@ def _limit_value(tree: exp.Select) -> int | None:
         return None
 
 
-def validate_readonly_sql(sql: str, max_rows: int | None = None) -> str:
-    """Проверяет SQL и возвращает безопасный вариант с LIMIT.
+def validate_readonly_sql_with_limit(
+    sql: str, max_rows: int | None = None
+) -> tuple[str, bool]:
+    """Проверяет SQL и возвращает (безопасный SQL, был ли добавлен LIMIT).
+
+    Второй элемент нужен, чтобы отличить «строк ровно MAX_ROWS» от
+    «результат обрезан»: после добавления LIMIT в SQL это уже не видно.
 
     Raises:
         UnsafeSQLError: если запрос не является одиночным read-only SELECT
@@ -140,7 +145,13 @@ def validate_readonly_sql(sql: str, max_rows: int | None = None) -> str:
 
     cap = int(max_rows if max_rows is not None else config.MAX_ROWS)
     current = _limit_value(tree)
-    if current is None or current > cap:
+    limit_added = current is None or current > cap
+    if limit_added:
         tree = tree.limit(cap)
 
-    return tree.sql(dialect="postgres")
+    return tree.sql(dialect="postgres"), limit_added
+
+
+def validate_readonly_sql(sql: str, max_rows: int | None = None) -> str:
+    """Проверяет SQL и возвращает безопасный вариант с LIMIT."""
+    return validate_readonly_sql_with_limit(sql, max_rows)[0]

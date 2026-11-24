@@ -209,6 +209,7 @@ def test_two_agents_in_one_round(server, investigation_data):
     assert result["rounds"] == 1
     content = result["acl_response"]["content"]
     assert content["metrics"]["acl_rounds"] == 1
+    assert content["metrics"]["investigation_completeness"] == 1.0
     assert content["causal_claim"] is True
     types = {item["type"] for item in content["evidence"]}
     assert "sql_result" in types

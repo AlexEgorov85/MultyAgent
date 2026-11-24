@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
@@ -14,6 +15,9 @@ from ..schemas import RetrievalAnswer
 from ..state import RetrievalState
 
 EMPTY_ANSWER = "Подходящих формулировок в актах и методичках не найдено."
+# ID, которые агент может упомянуть в тексте ответа. Проверяем не только
+# массив citations, но и сам текст: модель иногда пишет «см. ITM-...».
+SOURCE_ID_RE = re.compile(r"\b(?:ITM|ACT)-[A-Z0-9-]+\b", re.IGNORECASE)
 
 
 def _reply(
@@ -130,12 +134,21 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
         answer = state.get("answer", {})
         citations = [item for item in answer.get("citations", []) if item in allowed]
         invalid = [item for item in answer.get("citations", []) if item not in allowed]
+        # Проверяем и ID, упомянутые в тексте, а не только citations.
+        text = str(answer.get("text", "") or "")
+        text_ids = [item.upper() for item in SOURCE_ID_RE.findall(text)]
+        known = {str(item).upper() for item in allowed}
+        invalid_text_ids = [
+            item for item in dict.fromkeys(text_ids) if item not in known
+        ]
+        if invalid_text_ids:
+            invalid.extend(invalid_text_ids)
         issues = (
             [
                 t(
                     state.get("language"),
                     "invalid_sources",
-                    ids=", ".join(invalid),
+                    ids=", ".join(dict.fromkeys(invalid)),
                 )
             ]
             if invalid

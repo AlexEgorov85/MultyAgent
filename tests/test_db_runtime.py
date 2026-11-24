@@ -159,6 +159,11 @@ def test_seed_is_idempotent(server, tmp_path):
         ).fetchone()
     assert stored == ("2026-11-21", 42, checksum)
 
+    db_runtime.set_index_embedding_model(server, "hash")
+    assert db_runtime.get_index_embedding_model(server) == "hash"
+    db_runtime.set_index_embedding_model(server, "")
+    assert db_runtime.get_index_embedding_model(server) == ""
+
 
 def test_seed_checksum_mismatch_is_rejected_and_can_be_forced(
     server, tmp_path

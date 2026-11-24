@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from .. import config, db_runtime, telemetry
-from .sql_guard import validate_readonly_sql
+from .sql_guard import validate_readonly_sql, validate_readonly_sql_with_limit
 
 SCHEMA_TEXT = """
 audit.audit_pockets(pocket_id, pocket_year, theme_code, title, owner_unit,
@@ -214,7 +214,7 @@ def _execute(
     params: Mapping[str, Any] | None,
     max_rows: int,
 ) -> dict[str, Any]:
-    safe_sql = validate_readonly_sql(sql, max_rows)
+    safe_sql, limit_added = validate_readonly_sql_with_limit(sql, max_rows)
     timeout_ms = int(config.SQL_TIMEOUT_SEC * 1000)
     metrics = telemetry.current()
     if metrics is not None:
@@ -229,12 +229,17 @@ def _execute(
         columns = [item.name for item in (cursor.description or [])]
         rows = cursor.fetchmany(max_rows) if columns else []
 
+    # LIMIT добавлен guard'ом и строк ровно столько же, сколько разрешено:
+    # возможно, за границей есть ещё строки. Помечаем консервативно.
+    truncated = limit_added and len(rows) >= max_rows
+    rows = rows[:max_rows]
     return {
         "sql": safe_sql,
         "columns": columns,
         "rows": [dict(zip(columns, row)) for row in rows],
         "row_count": len(rows),
         "max_rows": max_rows,
+        "truncated": truncated,
     }
 
 

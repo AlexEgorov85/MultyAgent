@@ -141,7 +141,7 @@ class LLMClient(Protocol):
         columns: list[str],
         rows: list[dict[str, Any]],
         profile_text: str = "",
-    ) -> str: ...
+    ) -> "AnswerDraft": ...
 
     def format_answer(
         self,
@@ -588,41 +588,34 @@ class OpenAILLM:
         columns: list[str],
         rows: list[dict[str, Any]],
         profile_text: str = "",
-    ) -> str:
+    ) -> AnswerDraft:
         preview = rows[:20]
         try:
-            response = self._request(
-                schema_name="analytics_summarize",
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            format_guide(
-                                "count" if len(rows) == 1 else "table_summary"
-                            )
-                            + "\n\n"
-                            + load_prompt("analytics_summarize")
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            f"{self._profile_block(profile_text)}"
-                            f"Вопрос: {question}\nКолонки: {columns}\n"
-                            f"Строки: {preview}"
-                        ),
-                    },
-                ],
-                temperature=0,
+            return self._parse(
+                system=(
+                    format_guide(
+                        "count" if len(rows) == 1 else "table_summary"
+                    )
+                    + "\n\n"
+                    + load_prompt("analytics_summarize")
+                ),
+                user=(
+                    f"{self._profile_block(profile_text)}"
+                    f"Вопрос: {question}\nКолонки: {columns}\n"
+                    f"Строки: {preview}\n\n"
+                    "Верни AnswerDraft: text и numbers_used — полный список "
+                    "чисел, которые встречаются в text, в том числе "
+                    "записанных словами."
+                ),
+                schema=AnswerDraft,
                 max_tokens=1500,
             )
-            text = (response.choices[0].message.content or "").strip()
-            if text:
-                return text
         except Exception:
             pass
-        return f"Найдено строк: {len(rows)}."
+        return AnswerDraft(
+            text=f"Найдено строк: {len(rows)}.",
+            numbers_used=[float(len(rows))],
+        )
 
     @staticmethod
     def _chunks_text(chunks: list[dict[str, Any]]) -> str:

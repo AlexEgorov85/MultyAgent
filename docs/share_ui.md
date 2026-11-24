@@ -62,7 +62,7 @@ LANGGRAPH_API_URL=http://127.0.0.1:2024
    ```powershell
    .venv\Scripts\python.exe scripts\generate_data.py --deviations
    .venv\Scripts\python.exe scripts\init_db.py --reset-db --yes --seed
-   .venv\Scripts\python.exe scripts\build_index.py --hash
+   .venv\Scripts\python.exe scripts\build_index.py
    ```
 
 3. Проверить локально, что чат отвечает: `langgraph dev` + `npm run dev`,

@@ -198,6 +198,33 @@ def test_invalid_citation_triggers_rewrite(server, rag_data):
     assert llm.calls.count("rewrite") == 1
 
 
+def test_invalid_text_id_triggers_rewrite(server, rag_data):
+    llm = FakeRagLLM(
+        answers=[
+            RetrievalAnswer(
+                text="Подтверждение: см. ITM-FAKE-01.",
+                citations=["ACT-2026-CARDS-99"],
+            )
+        ],
+        critiques=[Critique(verdict="ok"), Critique(verdict="ok")],
+        rewrites=[
+            RetrievalAnswer(
+                text="Подтверждение без вымышленных ID.",
+                citations=["ACT-2026-CARDS-99"],
+            )
+        ],
+    )
+    graph = build_retrieval_graph(server, llm, embeddings=HashEmbeddings())
+
+    result = graph.invoke(
+        {"acl_request": acl_request("Что сказано про мошеннические операции?")}
+    )
+
+    assert result["iterations"] == 1
+    assert llm.calls.count("rewrite") == 1
+    assert "ITM-FAKE-01" not in result["acl_response"]["content"]["answer"]
+
+
 def test_empty_result_does_not_call_llm(server, rag_data):
     llm = FakeRagLLM()
     graph = build_retrieval_graph(server, llm, embeddings=HashEmbeddings())

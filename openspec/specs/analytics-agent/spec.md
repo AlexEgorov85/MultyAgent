@@ -117,8 +117,9 @@ LLM-резолвер по смыслу и контексту.
 
 ### Requirement: Режим Analytics выбирает LLM
 
-Система SHALL выбирать режим Analytics (`sql`, `drilldown`, `multi_tool`)
-по смыслу вопроса на уровне router и SHALL валидировать значение по enum.
+Система SHALL выбирать режим Analytics (`sql`, `drilldown`, `multi_tool`,
+`chart`) по смыслу вопроса на уровне router и SHALL валидировать значение
+по enum.
 
 #### Scenario: Пункты конкретной проверки
 

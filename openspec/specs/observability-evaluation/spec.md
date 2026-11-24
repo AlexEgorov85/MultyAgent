@@ -32,9 +32,10 @@
 - **THEN** рассчитываются `route_accuracy`, `sql_validity_rate`, `numeric_accuracy`, `evidence_coverage` и `success_rate`
 - **AND** для investigation дополнительно сохраняются ACL-раунды и типы evidence
 
-> `sql_execution_success_rate`, `citation_precision`, `investigation_completeness`
-> и LLM-judge с рубрикой 1–10 вынесены в план развития после сдачи
-> (`docs/improvement_plan.md`); в текущей реализации они не считаются.
+> `sql_execution_success_rate`, `citation_precision` и LLM-judge с рубрикой
+> 1–10 вынесены в план развития после сдачи (`docs/improvement_plan.md`).
+> `investigation_completeness` считается в `metrics` ACL-ответа Coordinator,
+> но пока не агрегируется в сводку `evaluate.py`/`benchmark.py`.
 
 ### Requirement: Процессные метрики и снимок состояния
 

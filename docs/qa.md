@@ -11,12 +11,13 @@
 | Спецификации | `openspec validate --specs --strict` | 13 passed, 0 failed |
 | UI | `npm --prefix ui run lint` и `npm --prefix ui run build` | exit code 0 |
 | Чистый клон | `python scripts/verify_clean_clone.py --no-env --with-ui` | `RESULT: OK` |
+| Чистый клон с семантикой | `python scripts/verify_clean_clone.py --index openai` | `RESULT: OK` (нужен ключ) |
 | Секреты | `git status`, `git ls-files` | нет `.env`, ключей, БД, видео |
 | Скринкаст | ссылка из README в инкогнито | доступна без запроса |
 
 Живой прогон `evaluate.py`/`benchmark.py` не входит в обязательные
 офлайн-проверки: он требует ключ и расходует лимит провайдера
-(400 chat-запросов за 3 часа, 20 запросов/мин). Если он выполнен,
+(400 chat-запросов за 3 часа, около 3 запросов/мин). Если он выполнен,
 обновите сводки в [metrics.md](metrics.md) и [benchmark.md](benchmark.md),
 укажите дату и `run_id`; отчёты в `reports/` сохраните вне git.
 

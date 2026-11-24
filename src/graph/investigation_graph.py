@@ -75,6 +75,12 @@ def _evidence_types(evidence: list[dict[str, Any]]) -> set[str]:
     return types
 
 
+def _required_type(value: Any) -> str:
+    """Приводит требуемый тип evidence к каноническому виду."""
+    text = str(value or "").strip().lower()
+    return EVIDENCE_MAP.get(text, text)
+
+
 def build_investigation_graph(
     server,
     llm: LLMClient,
@@ -108,7 +114,9 @@ def build_investigation_graph(
             content={
                 "question": question,
                 "conversation_context": conversation_context,
-                "auditor_id": auditor_id or "AUD-001",
+                # Не подставляем чужой профиль: пустой id означает «нет
+                # аудитора», а не «аудитор AUD-001».
+                "auditor_id": auditor_id,
                 "language": language,
                 "profile_text": profile_text,
             },
@@ -216,8 +224,9 @@ def build_investigation_graph(
         evidence.extend(retrieval.get("evidence", []))
 
         required = plan_model.required_evidence or ["sql_result", "item"]
+        found_types = _evidence_types(evidence)
         missing = [
-            item for item in required if item not in _evidence_types(evidence)
+            item for item in required if _required_type(item) not in found_types
         ]
 
         return {
@@ -294,8 +303,9 @@ def build_investigation_graph(
                 evidence.extend(retrieval.get("evidence", []))
 
         required = refined.required_evidence or plan_model.required_evidence
+        found_types = _evidence_types(evidence)
         missing = [
-            item for item in required if item not in _evidence_types(evidence)
+            item for item in required if _required_type(item) not in found_types
         ]
         return {
             "rounds": 2,
@@ -359,6 +369,13 @@ def build_investigation_graph(
                 },
             )
         answer = state.get("answer", {})
+        plan = state.get("plan") or {}
+        required = list(
+            plan.get("required_evidence") or ["sql_result", "item"]
+        )
+        missing = list(state.get("missing") or [])
+        total = max(1, len(required))
+        present = max(0, total - len([item for item in required if item in missing]))
         return _reply(
             state,
             "inform",
@@ -367,11 +384,12 @@ def build_investigation_graph(
                 "causal_claim": answer.get("causal_claim", False),
                 "evidence": state.get("evidence", []),
                 "rounds": int(state.get("rounds", 0)),
-                "missing": state.get("missing", []),
+                "missing": missing,
                 "metrics": {
                     "acl_rounds": int(state.get("rounds", 0)),
                     "acl_log_count": len(state.get("acl_log", [])),
                     "acl_log_path": str(resolve_acl_log_path()),
+                    "investigation_completeness": round(present / total, 3),
                 },
             },
         )

@@ -27,6 +27,7 @@ def isolated_build(monkeypatch):
     monkeypatch.setattr(runtime, "_started", True)
     monkeypatch.setattr(runtime, "_start_db_server", lambda: object())
     monkeypatch.setattr(runtime, "prepare_database", lambda server: None)
+    monkeypatch.setattr(db_runtime, "get_index_embedding_model", lambda server: "")
     monkeypatch.setattr(runtime, "OpenAILLM", lambda: object())
     monkeypatch.setattr(runtime, "OpenAIEmbeddings", lambda: object())
     monkeypatch.setattr(runtime, "build_main_graph", lambda *a, **k: "main-graph")
@@ -103,3 +104,24 @@ def test_build_worker_builds_graphs_after_successful_prepare(isolated_build):
     assert "exc" not in runtime._error
     assert runtime._ready.is_set()
     assert runtime._result == {"graph": "main-graph", "admin_graph": "admin-graph"}
+
+
+def test_build_worker_uses_hash_embeddings_for_hash_index(
+    isolated_build, monkeypatch
+):
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(
+        db_runtime, "get_index_embedding_model", lambda server: "hash"
+    )
+    monkeypatch.setattr(runtime, "HashEmbeddings", lambda: "hash-embeddings")
+
+    def capture(*args, **kwargs):
+        calls["embeddings"] = kwargs.get("embeddings")
+        return "main-graph"
+
+    monkeypatch.setattr(runtime, "build_main_graph", capture)
+
+    runtime._build_worker()
+
+    assert "exc" not in runtime._error
+    assert calls["embeddings"] == "hash-embeddings"
