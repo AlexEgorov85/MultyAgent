@@ -181,5 +181,19 @@ def test_tool_plan_accepts_string_calls_and_missing_arguments():
     )
 
     assert [call.name for call in plan.calls] == ["get_act_items", "search_acts"]
-    assert plan.calls[0].arguments == {}
-    assert plan.calls[1].arguments == {}
+    assert plan.calls[0].arguments.as_call_arguments() == {}
+    assert plan.calls[1].arguments.as_call_arguments() == {}
+
+
+def test_tool_call_parses_arguments_from_name():
+    from src.graph.analytics_graph import _split_tool_call
+
+    name, arguments = _split_tool_call(
+        "get_act_items(audit_code=AUD-2025-DEPOSITS-06, item_type=проблема)"
+    )
+
+    assert name == "get_act_items"
+    assert arguments == {
+        "audit_code": "AUD-2025-DEPOSITS-06",
+        "item_type": "проблема",
+    }

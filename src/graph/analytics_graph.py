@@ -32,6 +32,29 @@ ANALYTICS_MODES = ("sql", "drilldown", "multi_tool", "chart")
 logger = logging.getLogger(__name__)
 
 
+def _split_tool_call(name: str) -> tuple[str, dict[str, str]]:
+    """Разбирает форму `tool(arg=value, ...)`, если модель положила туда аргументы.
+
+    Модель иногда пишет аргументы в `name`, а `arguments` оставляет пустым.
+    Формат простой (пары ключ=значение через запятую), поэтому разбираем его
+    без регулярных выражений и не теряем `item_type` и другие фильтры.
+    """
+    text = str(name or "").strip()
+    if not text.endswith(")") or "(" not in text:
+        return text, {}
+    head, _, tail = text.partition("(")
+    parsed: dict[str, str] = {}
+    for part in tail[:-1].split(","):
+        if "=" not in part:
+            continue
+        key, _, value = part.partition("=")
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        if key and value:
+            parsed[key] = value
+    return head.strip(), parsed
+
+
 def _template_parameters(
     templates: list[dict[str, Any]],
     template_key: str,
@@ -571,16 +594,34 @@ def build_analytics_graph(server, llm: LLMClient):
             if codes
             else last_audit_code(state.get("conversation_context", ""))
         )
+        hints = None
+        reviewer = getattr(llm, "review_tool_arguments", None)
+        if reviewer is not None:
+            try:
+                hints = reviewer(question=state["question"])
+            except Exception:
+                hints = None
         lines: list[str] = [f"Проверка {audit_code}:" if audit_code else "Результаты:"]
         for call in plan.calls[:limit]:
-            name = call.name.split("(", 1)[0].strip()
-            arguments = dict(call.arguments)
+            name, inline_arguments = _split_tool_call(call.name)
+            arguments = {**inline_arguments, **call.arguments.as_call_arguments()}
             if name in ("get_audit", "get_act", "get_act_items"):
                 if not arguments.get("audit_code"):
-                    arguments["audit_code"] = audit_code
+                    arguments["audit_code"] = (
+                        hints.audit_code if hints and hints.audit_code else audit_code
+                    )
                 arguments.pop("audit_id", None)
+            if (
+                name == "get_act_items"
+                and not arguments.get("item_type")
+                and hints
+                and hints.item_type
+            ):
+                arguments["item_type"] = hints.item_type
             if name == "search_acts" and not arguments.get("query"):
-                arguments["query"] = state["question"]
+                arguments["query"] = (
+                    hints.query if hints and hints.query else state["question"]
+                )
             try:
                 result = execute_tool(server, name, arguments)
             except Exception as exc:
@@ -913,7 +954,7 @@ def build_analytics_graph(server, llm: LLMClient):
         template_description = str(
             (state.get("plan") or {}).get("template_description") or ""
         ).strip()
-        template_header = template_description or template_title
+        template_header = (template_description or template_title).strip().rstrip(".")
 
         # Формулировку ответа всегда отдаём LLM — и для одной строки, и для
         # разреза. Детерминированный шаблон остаётся fallback'ом, чтобы при

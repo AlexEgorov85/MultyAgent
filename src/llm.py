@@ -24,6 +24,7 @@ from .schemas import (
     RetrievalAnswer,
     RouteDecision,
     SQLPlan,
+    ToolArgumentHints,
     ToolPlan,
 )
 
@@ -134,6 +135,8 @@ class LLMClient(Protocol):
         context: str = "",
         profile_text: str = "",
     ) -> ToolPlan: ...
+
+    def review_tool_arguments(self, *, question: str) -> "ToolArgumentHints": ...
 
     def summarize(
         self,
@@ -589,6 +592,17 @@ class OpenAILLM:
                 "Верни ToolPlan со списком calls (name, arguments)."
             ),
             schema=ToolPlan,
+        )
+
+    def review_tool_arguments(
+        self, *, question: str
+    ) -> ToolArgumentHints:
+        """Извлекает audit_code, item_type и query отдельным коротким вызовом."""
+        return self._parse(
+            system=load_prompt("tools_arguments"),
+            user=f"Вопрос: {question}\nВерни audit_code, item_type, query.",
+            schema=ToolArgumentHints,
+            max_tokens=500,
         )
 
     def summarize(

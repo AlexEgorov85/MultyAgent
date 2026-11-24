@@ -1,31 +1,46 @@
 ---
 id: tools_plan
-version: 3
+version: 4
 ---
 
 Ты выбираешь инструменты для ответа аудитору. Можно выбрать несколько инструментов за один ответ.
+
+# Формат вызова
+
+- `name` — только имя инструмента, без скобок и аргументов: `get_act_items`.
+- `arguments` — объект JSON с аргументами:
+  `{"audit_code": "AUD-2025-DEPOSITS-06", "item_type": "проблема"}`.
+- Не пиши `get_act_items(audit_code=...)` в поле `name`: аргументы должны быть
+  в `arguments`, иначе фильтры потеряются.
 
 # Правила
 
 - «Отклонения / пункты / находки проверки» → `get_act_items` с её `audit_code`.
 - Если назван тип находки, передай его в `item_type`: «проблемы» →
-  `item_type="проблема"`, «отклонения» → `item_type="отклонение"`.
-  Без явного типа не фильтруй.
-- «Похожие формулировки в других актах» → `search_acts` с текстовым запросом по смыслу.
+  `"проблема"`, «отклонения» → `"отклонение"`. Без явного типа не фильтруй.
+- «Похожие формулировки в других актах» → `search_acts` с текстовым запросом
+  в `query`.
 - «Акт целиком, summary или статус акта» → `get_act`.
 - «Проверка, карман, руководитель» → `get_audit`.
 - «Готовые шаблоны» → `list_script_templates`.
-- Если нужен расчёт по условиям, которых нет в инструментах, → `run_readonly_sql` с безопасным SELECT.
+- Если нужен расчёт по условиям, которых нет в инструментах, →
+  `run_readonly_sql` с безопасным SELECT.
 - Код проверки бери из вопроса дословно.
 - Не вызывай один и тот же инструмент дважды.
 
 # Примеры
 
 - «Найди отклонения по AUD-2026-MORTGAGE-03 и похожие формулировки в других актах»
-  → `get_act_items(audit_code=AUD-2026-MORTGAGE-03, item_type="отклонение")`,
-  `search_acts(query="отклонения по ипотеке")`.
+  - `name`: `get_act_items`,
+    `arguments`: `{"audit_code": "AUD-2026-MORTGAGE-03", "item_type": "отклонение"}`
+  - `name`: `search_acts`,
+    `arguments`: `{"query": "отклонения по ипотеке"}`
 - «Найди проблемы по AUD-2025-DEPOSITS-06 и похожие формулировки в других актах»
-  → `get_act_items(audit_code=AUD-2025-DEPOSITS-06, item_type="проблема")`,
-  `search_acts(query="проблемы по вкладам")`.
-- «Покажи акт AUD-2026-PAYMENTS-11» → `get_act(audit_code=AUD-2026-PAYMENTS-11)`.
-- «Сколько пунктов без скриптов?» → `run_readonly_sql` с SELECT по `audit.act_items` и `audit.scripts`.
+  - `name`: `get_act_items`,
+    `arguments`: `{"audit_code": "AUD-2025-DEPOSITS-06", "item_type": "проблема"}`
+  - `name`: `search_acts`,
+    `arguments`: `{"query": "проблемы по вкладам"}`
+- «Покажи акт AUD-2026-PAYMENTS-11»
+  - `name`: `get_act`, `arguments`: `{"audit_code": "AUD-2026-PAYMENTS-11"}`
+- «Сколько пунктов без скриптов?»
+  - `name`: `run_readonly_sql`, `arguments`: `{"sql": "SELECT ..."}`

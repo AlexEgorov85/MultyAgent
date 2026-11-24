@@ -131,11 +131,71 @@ class SQLPlan(BaseModel):
         return schema
 
 
+class ToolArguments(BaseModel):
+    """Аргументы инструментов в плоской схеме.
+
+    Свободный `dict` в strict JSON модель заполняла пустым объектом, из-за
+    чего терялись `item_type`, `query` и другие фильтры. Плоская схема с
+    известными полями заполняется предсказуемо.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "required": [
+                "audit_code",
+                "query",
+                "item_type",
+                "risk_level",
+                "status",
+                "pocket_id",
+                "sql",
+                "limit",
+                "max_rows",
+            ]
+        }
+    )
+
+    audit_code: str = ""
+    query: str = ""
+    item_type: str = ""
+    risk_level: str = ""
+    status: str = ""
+    pocket_id: str = ""
+    sql: str = ""
+    limit: int = 0
+    max_rows: int = 0
+
+    def as_call_arguments(self) -> dict[str, Any]:
+        """Только заполненные аргументы: пустые строки и нули не передаём."""
+        result: dict[str, Any] = {}
+        for name, value in self.model_dump().items():
+            if isinstance(value, str) and not value.strip():
+                continue
+            if name in ("limit", "max_rows") and not value:
+                continue
+            result[name] = value
+        return result
+
+
+class ToolArgumentHints(BaseModel):
+    """Фильтры инструментов, извлечённые из вопроса отдельным LLM-вызовом."""
+
+    audit_code: str = ""
+    item_type: str = ""
+    query: str = ""
+
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs):
+        schema = super().model_json_schema(*args, **kwargs)
+        schema["required"] = ["audit_code", "item_type", "query"]
+        return schema
+
+
 class ToolCall(BaseModel):
     """Один вызов инструмента, выбранный LLM."""
 
     name: str = Field(min_length=1)
-    arguments: dict[str, Any] = Field(default_factory=dict)
+    arguments: ToolArguments = Field(default_factory=ToolArguments)
 
     @field_validator("arguments", mode="before")
     @classmethod
