@@ -28,6 +28,27 @@ def _fts(server, query: str, limit: int) -> list[dict[str, Any]]:
             "ORDER BY score DESC LIMIT %s",
             (query, query, limit),
         ).fetchall()
+        if not rows:
+            # plainto_tsquery требует все слова сразу: длинный вопрос
+            # («какие сроки устранения установлены...») не находит ничего,
+            # хотя каждый термин в базе есть. Повторяем поиск по OR.
+            lexemes_row = conn.execute(
+                "SELECT array_to_string("
+                "tsvector_to_array(to_tsvector('russian', %s)), ' | ')",
+                (query,),
+            ).fetchone()
+            lexemes = str(lexemes_row[0] or "") if lexemes_row else ""
+            if lexemes:
+                rows = conn.execute(
+                    "SELECT chunk_id, source_type, source_id, title, content, "
+                    "ts_rank(to_tsvector('russian', title || ' ' || content), "
+                    "        to_tsquery('russian', %s)) AS score "
+                    "FROM audit.knowledge_chunks "
+                    "WHERE to_tsvector('russian', title || ' ' || content) "
+                    "      @@ to_tsquery('russian', %s) "
+                    "ORDER BY score DESC LIMIT %s",
+                    (lexemes, lexemes, limit),
+                ).fetchall()
     return [
         {
             "chunk_id": row[0],

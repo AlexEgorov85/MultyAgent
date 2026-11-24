@@ -33,7 +33,7 @@ from src.benchmark import (  # noqa: E402
 from src.graph.main_graph import build_main_graph  # noqa: E402
 from src.llm import OpenAILLM  # noqa: E402
 from src.prompts import prompt_versions  # noqa: E402
-from src.rag.embeddings import OpenAIEmbeddings  # noqa: E402
+from src.rag.embeddings import HashEmbeddings, OpenAIEmbeddings  # noqa: E402
 
 CASES_PATH = ROOT / "data" / "benchmark_cases.jsonl"
 REPORTS_DIR = ROOT / "reports"
@@ -222,7 +222,6 @@ def main() -> int:
 
     try:
         llm = OpenAILLM()
-        embeddings = OpenAIEmbeddings()
     except Exception as exc:  # noqa: BLE001
         print(
             f"[error] LLM недоступна: {exc}. Задайте OPENAI_API_KEY в .env.",
@@ -231,6 +230,13 @@ def main() -> int:
         return 2
 
     server = db_runtime.start_server()
+    try:
+        index_model = db_runtime.get_index_embedding_model(server)
+    except Exception:  # noqa: BLE001 - БД могла быть ещё не инициализирована
+        index_model = ""
+    embeddings = (
+        HashEmbeddings() if index_model == "hash" else OpenAIEmbeddings()
+    )
     rows: list[dict[str, Any]] = []
     run_id = f"{int(time.time())}-{uuid.uuid4().hex[:6]}"
     try:
@@ -266,7 +272,7 @@ def main() -> int:
         environment = {
             "run_id": run_id,
             "model": getattr(llm, "model", ""),
-            "embedding_model": getattr(embeddings, "model", ""),
+            "embedding_model": getattr(embeddings, "model", "") or index_model,
             "seed": 42,
             "as_of": config.DEFAULT_AS_OF_DATE.isoformat(),
             "prompt_versions": prompt_versions(),

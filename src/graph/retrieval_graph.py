@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
@@ -13,11 +12,12 @@ from ..llm import LLMClient
 from ..rag.vector_store import search
 from ..schemas import RetrievalAnswer
 from ..state import RetrievalState
+from ..textscan import reference_ids
 
 EMPTY_ANSWER = "Подходящих формулировок в актах и методичках не найдено."
 # ID, которые агент может упомянуть в тексте ответа. Проверяем не только
 # массив citations, но и сам текст: модель иногда пишет «см. ITM-...».
-SOURCE_ID_RE = re.compile(r"\b(?:ITM|ACT)-[A-Z0-9-]+\b", re.IGNORECASE)
+SOURCE_ID_PREFIXES = ("ITM", "ACT")
 
 
 def _reply(
@@ -136,7 +136,7 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
         invalid = [item for item in answer.get("citations", []) if item not in allowed]
         # Проверяем и ID, упомянутые в тексте, а не только citations.
         text = str(answer.get("text", "") or "")
-        text_ids = [item.upper() for item in SOURCE_ID_RE.findall(text)]
+        text_ids = reference_ids(text, SOURCE_ID_PREFIXES)
         known = {str(item).upper() for item in allowed}
         invalid_text_ids = [
             item for item in dict.fromkeys(text_ids) if item not in known
@@ -186,15 +186,21 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
         issues = list(critique.issues) + list(state.get("citation_issues", []))
         if not answer.citations:
             issues.append("В ответе нет ссылок на источники")
+        # Вердикт «rewrite» без конкретных замечаний не даёт, что править:
+        # такой ответ принимаем, иначе граф дважды переписывает корректный
+        # текст и выходит за лимит вызовов LLM.
+        suggestions = [
+            str(item).strip() for item in critique.suggestions if str(item).strip()
+        ]
         ok = (
-            critique.verdict == "ok"
-            and critique.grounded
+            critique.grounded
             and critique.citations_ok
             and not issues
+            and not suggestions
         )
         return {
             "critique": critique.model_dump(),
-            "critic_issues": issues,
+            "critic_issues": issues + suggestions,
             "status": "ok" if ok else "needs_rewrite",
         }
 
