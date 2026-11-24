@@ -87,10 +87,12 @@ LIMIT 200
 
 Измерения — только из каталога метрики. Основные:
 
-`year`, `theme`, `pocket`, `status`, `audit_type`, `risk_level`,
+`year`, `month`, `theme`, `pocket`, `status`, `audit_type`, `risk_level`,
 `item_type`, `title`, `responsible_unit`, `is_repeat`, `audit_code`,
 `act_status`, `lead_auditor_id`, `approved_by`, `language`, `run_status`,
 `severity`, `entity_type`, `metric_name`, `specialization`.
+
+`month` для проверок — месяц `COALESCE(end_date, start_date)`.
 
 `pocket` — карман аудита (год + тема). Это отдельное измерение, а не
 `status`: «по каждому карману» нельзя выразить разрезом по статусам.
@@ -101,10 +103,12 @@ LIMIT 200
 {"field": "specialization", "value": "ипотека", "op": "contains"}
 ```
 
-Период `year="last"` компилируется в максимальный год данных:
+Период `year="last"` компилируется в максимальный год данных, а
+`year="last_2"` — в последние два года:
 
 ```sql
-p.pocket_year = (SELECT max(p_last.pocket_year) FROM audit.audit_pockets p_last)
+p.pocket_year >= (SELECT max(p_last.pocket_year) - 1
+                  FROM audit.audit_pockets p_last)
 ```
 
 «Закрытая проверка» — `status="завершена"`, «закрытый пункт» —

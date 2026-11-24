@@ -102,6 +102,30 @@ def test_invalid_dimension_and_value_are_ignored():
     assert completed.filters == []
 
 
+def test_last_n_years_period_adds_range_filter():
+    plan = QueryPlan(metric="audit_count")
+    gaps = PlanGaps(last_years=2, period="last_years")
+
+    completed = apply_plan_gaps(plan, gaps)
+
+    assert ("year", "last_2") in _filter_pairs(completed)
+
+
+def test_chart_can_use_month_dimension():
+    plan = QueryPlan(metric="audit_count")
+    gaps = PlanGaps(
+        missing_dimensions=["month"],
+        missing_filters=[PlanFilter(field="status", value="завершена")],
+        last_years=2,
+    )
+
+    completed = apply_plan_gaps(plan, gaps)
+
+    assert "month" in completed.dimensions
+    assert ("status", "завершена") in _filter_pairs(completed)
+    assert ("year", "last_2") in _filter_pairs(completed)
+
+
 def test_existing_filters_are_not_duplicated():
     plan = QueryPlan(
         metric="audit_count",

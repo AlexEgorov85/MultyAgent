@@ -70,6 +70,10 @@ DEVIATION_FROM = (
 
 AUDIT_DIMENSIONS = {
     "year": "p.pocket_year",
+    "month": (
+        "to_char(date_trunc('month', "
+        "COALESCE(a.end_date, a.start_date)), 'YYYY-MM')"
+    ),
     "theme": "p.theme_code",
     "pocket": "p.title",
     "status": "a.status",
@@ -409,6 +413,9 @@ def catalog_text() -> str:
         "- «Какая тема дала больше всего критических отклонений в 2026?» →",
         "  metric=deviation_count, dimensions=[theme],",
         "  filters=[year=2026, severity=критический]",
+        "- «Закрытые проверки по месяцам за последние 2 года» →",
+        "  metric=audit_count, dimensions=[month],",
+        "  filters=[status=завершена, year=last_2]",
         "- «Топ-5 видов отклонений» →",
         "  metric=deviation_count, dimensions=[title], limit=5",
         "- «Сколько аудиторов специализируются на ипотеке?» →",

@@ -550,7 +550,7 @@ def test_chart_mode_uses_previous_analytics_payload(server, sample_graph_data):
 
         assert result["status"] == "ok"
         assert result["strategy"] == "chart"
-        assert llm.calls == ["plan_chart"]
+        assert "plan_chart" in llm.calls
         chart = result["acl_response"]["content"]["chart"]
         assert chart["type"] == "pie"
         assert chart["title"] == "Закрытые проверки по карманам"
@@ -610,7 +610,7 @@ def test_chart_hallucinated_data_is_rejected(server, sample_graph_data):
         result = graph.invoke({"acl_request": request.model_dump()})
 
         assert result["status"] == "ok"
-        assert llm.calls == ["plan_chart"]
+        assert "plan_chart" in llm.calls
         assert "chart" not in result["acl_response"]["content"]
         assert "не вернула корректные данные" in result["answer"]
     finally:

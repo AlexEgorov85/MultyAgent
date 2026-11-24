@@ -592,6 +592,7 @@ def build_analytics_graph(server, llm: LLMClient):
 
     COLUMN_LABELS = {
         "year": "год",
+        "month": "месяц",
         "period_year": "год",
         "pocket_year": "год",
         "theme_code": "тема",
@@ -688,43 +689,67 @@ def build_analytics_graph(server, llm: LLMClient):
         return t(language, "present_table_title", count=len(rows))
 
     def chart(state: AnalyticsState) -> dict[str, Any]:
-        """Диаграмма по строкам предыдущего аналитического ответа."""
+        """Диаграмма по текущему запросу или по предыдущему результату."""
         language = state.get("language")
-        try:
-            previous = dialogue_store.load_last_analytics(
-                server,
-                state.get("conversation_id", ""),
-                auditor_id=state.get("auditor_id", ""),
-            )
-        except Exception as exc:
-            logger.warning("Не удалось загрузить данные для диаграммы: %s", exc)
-            previous = None
+        rows = list(state.get("rows") or [])
+        columns = list(state.get("columns") or [])
+        sql = str(state.get("sql") or "")
+        source_question = str(state.get("question") or "")
+        from_previous = False
 
-        if not previous:
-            return {
-                "answer": t(language, "chart_no_previous"),
-                "answer_source": "agent",
-                "strategy": "chart",
-                "rows": [],
-                "columns": [],
-                "evidence": [],
-            }
-
-        rows = list(previous.get("rows") or [])
-        columns = list(previous.get("columns") or [])
-        sql = str(previous.get("sql") or "")
-        if not rows and sql:
+        if not rows:
+            # Если текущий SQL уже выполнялся и вернул 0 строк — это честный
+            # «нет данных», а не повод подставлять старую диаграмму.
+            if sql or columns:
+                return {
+                    "status": "ok", "answer": t(language, "chart_no_data"),
+                    "answer_source": "agent",
+                    "strategy": "chart",
+                    "rows": [],
+                    "columns": columns,
+                    "sql": sql,
+                    "evidence": [],
+                }
+            # Иначе это follow-up «построй диаграмму по этим данным».
             try:
-                result = db_tools.run_readonly_sql(server, sql)
+                previous = dialogue_store.load_last_analytics(
+                    server,
+                    state.get("conversation_id", ""),
+                    auditor_id=state.get("auditor_id", ""),
+                )
             except Exception as exc:
-                return _fail(state, f"Данные для диаграммы недоступны: {exc}")
-            rows = result["rows"]
-            columns = result["columns"]
-            sql = result["sql"]
+                logger.warning(
+                    "Не удалось загрузить данные для диаграммы: %s", exc
+                )
+                previous = None
+            if not previous:
+                return {
+                    "status": "ok", "answer": t(language, "chart_no_previous"),
+                    "answer_source": "agent",
+                    "strategy": "chart",
+                    "rows": [],
+                    "columns": [],
+                    "evidence": [],
+                }
+            rows = list(previous.get("rows") or [])
+            columns = list(previous.get("columns") or [])
+            sql = str(previous.get("sql") or "")
+            source_question = str(previous.get("question") or "")
+            from_previous = True
+            if not rows and sql:
+                try:
+                    result = db_tools.run_readonly_sql(server, sql)
+                except Exception as exc:
+                    return _fail(
+                        state, f"Данные для диаграммы недоступны: {exc}"
+                    )
+                rows = result["rows"]
+                columns = result["columns"]
+                sql = result["sql"]
 
         if not rows:
             return {
-                "answer": t(language, "chart_no_data"),
+                "status": "ok", "answer": t(language, "chart_no_data"),
                 "answer_source": "agent",
                 "strategy": "chart",
                 "rows": [],
@@ -733,14 +758,13 @@ def build_analytics_graph(server, llm: LLMClient):
                 "evidence": [],
             }
 
-        previous_question = str(previous.get("question") or "")
         spec: dict[str, Any] | None = None
         chart_planner = getattr(llm, "plan_chart", None)
         if chart_planner is not None:
             try:
                 candidate = chart_planner(
-                    question=state.get("question", ""),
-                    previous_question=previous_question,
+                    question=state.get("question", "") or source_question,
+                    previous_question=source_question if from_previous else "",
                     columns=columns,
                     rows=rows,
                     language=str(language or "ru"),
@@ -757,40 +781,54 @@ def build_analytics_graph(server, llm: LLMClient):
                 )
                 if grounded is not None:
                     candidate_payload["data"] = grounded
+                    if candidate_payload.get("type") == "line":
+                        # Для временной оси порядок должен быть хронологическим,
+                        # а не по убыванию значения из SQL.
+                        grounded.sort(
+                            key=lambda point: str(point.get("label", ""))
+                        )
                     spec = candidate_payload
             except Exception as exc:
                 logger.warning("LLM chart spec rejected: %s", exc)
 
+        evidence = [
+            {
+                "type": "previous_result" if from_previous else "sql_result",
+                "row_count": len(rows),
+            }
+        ]
+        if spec is not None:
+            evidence.append(
+                {
+                    "type": "chart",
+                    "chart_type": spec["type"],
+                    "points": len(spec["data"]),
+                }
+            )
         if spec is None:
             return {
-                "answer": t(language, "chart_failed"),
+                "status": "ok", "answer": t(language, "chart_failed"),
                 "answer_source": "agent",
                 "strategy": "chart",
                 "rows": rows,
                 "columns": columns,
                 "sql": sql,
-                "evidence": [
-                    {"type": "previous_result", "row_count": len(rows)}
-                ],
+                "evidence": evidence,
             }
 
         return {
-            "answer": t(language, "chart_ready"),
+            "status": "ok",
+            "answer": t(
+                language, "chart_ready" if from_previous else "chart_ready_current"
+            ),
             "answer_source": "agent",
             "strategy": "chart",
             "rows": rows,
             "columns": columns,
             "chart": spec,
-            "chart_source_question": str(previous.get("question") or ""),
+            "chart_source_question": source_question,
             "sql": sql,
-            "evidence": [
-                {"type": "previous_result", "row_count": len(rows)},
-                {
-                    "type": "chart",
-                    "chart_type": spec["type"],
-                    "points": len(spec["data"]),
-                },
-            ],
+            "evidence": evidence,
         }
 
     def summarize(state: AnalyticsState) -> dict[str, Any]:
@@ -918,35 +956,65 @@ def build_analytics_graph(server, llm: LLMClient):
             "sql": "plan",
             "drilldown": "drilldown",
             "multi_tool": "multi_tool",
-            "chart": "chart",
+            "chart": "plan",
             "pack": "pack",
         },
     )
     builder.add_conditional_edges(
         "plan",
         lambda s: (
-            "summarize"
-            if s.get("status") == "failed"
-            else ("run_script" if s.get("strategy") == "script" else "validate")
+            "chart"
+            if s.get("status") == "failed" and s.get("mode") == "chart"
+            else (
+                "summarize"
+                if s.get("status") == "failed"
+                else (
+                    "run_script"
+                    if s.get("strategy") == "script"
+                    else "validate"
+                )
+            )
         ),
-        {"run_script": "run_script", "validate": "validate", "summarize": "summarize"},
+        {
+            "run_script": "run_script",
+            "validate": "validate",
+            "summarize": "summarize",
+            "chart": "chart",
+        },
     )
     builder.add_conditional_edges(
         "validate",
         lambda s: (
             "repair"
             if s.get("retry")
-            else ("execute" if s.get("status") == "ok" else "summarize")
+            else (
+                "execute"
+                if s.get("status") == "ok"
+                else ("chart" if s.get("mode") == "chart" else "summarize")
+            )
         ),
-        {"execute": "execute", "repair": "repair", "summarize": "summarize"},
+        {
+            "execute": "execute",
+            "repair": "repair",
+            "summarize": "summarize",
+            "chart": "chart",
+        },
     )
     builder.add_conditional_edges(
         "execute",
-        lambda s: "repair" if s.get("retry") else "summarize",
-        {"repair": "repair", "summarize": "summarize"},
+        lambda s: (
+            "repair"
+            if s.get("retry")
+            else ("chart" if s.get("mode") == "chart" else "summarize")
+        ),
+        {"repair": "repair", "summarize": "summarize", "chart": "chart"},
     )
     builder.add_edge("repair", "validate")
-    builder.add_edge("run_script", "summarize")
+    builder.add_conditional_edges(
+        "run_script",
+        lambda s: "chart" if s.get("mode") == "chart" else "summarize",
+        {"summarize": "summarize", "chart": "chart"},
+    )
     builder.add_edge("drilldown", "summarize")
     builder.add_edge("multi_tool", "summarize")
     builder.add_edge("chart", "summarize")

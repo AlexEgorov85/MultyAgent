@@ -17,11 +17,26 @@ _LATEST_YEAR_VALUES = frozenset(
 )
 
 
+def _last_years(text: str) -> int | None:
+    value = str(text or "").strip().lower()
+    if not value.startswith("last_"):
+        return None
+    digits = value.removeprefix("last_").removesuffix("_years")
+    try:
+        number = int(digits)
+    except ValueError:
+        return None
+    return number if number > 0 else None
+
+
 def _canonical_value(spec: MetricSpec, field_name: str, value: Any) -> Any:
     if field_name == "year":
         text = str(value).strip().lower()
         if text in _LATEST_YEAR_VALUES:
             return "last"
+        years = _last_years(text)
+        if years is not None:
+            return f"last_{years}"
         try:
             return int(value)
         except (TypeError, ValueError) as exc:
@@ -73,6 +88,15 @@ def _condition(spec: MetricSpec, query_filter: QueryFilter) -> str:
             "SELECT max(p_last.pocket_year) FROM audit.audit_pockets p_last"
             ")"
         )
+    if field_name == "year":
+        years = _last_years(str(value))
+        if years is not None:
+            return (
+                f"{expression} >= ("
+                "SELECT max(p_last.pocket_year) - "
+                f"{years - 1} FROM audit.audit_pockets p_last"
+                ")"
+            )
     if query_filter.op == "contains":
         if field_name != "specialization":
             raise QueryCompileError(

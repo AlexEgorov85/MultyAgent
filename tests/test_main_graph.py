@@ -301,7 +301,7 @@ def test_router_selects_chart_mode(server, main_data):
 
     assert result["route"] == "analytics"
     assert result["analytics_mode"] == "chart"
-    assert "Нет предыдущего аналитического результата" in result["final_answer"]
+    assert result["final_answer"]
 
 
 def test_long_term_memory_between_sessions(server, main_data):

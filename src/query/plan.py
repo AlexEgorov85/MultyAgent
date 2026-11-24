@@ -46,6 +46,7 @@ class PlanGaps(BaseModel):
     missing_filters: list[PlanFilter] = Field(default_factory=list)
     period: str = "none"
     year: int | None = None
+    last_years: int | None = None
     issues: list[str] = Field(default_factory=list)
 
     @classmethod
@@ -56,6 +57,7 @@ class PlanGaps(BaseModel):
             "missing_filters",
             "period",
             "year",
+            "last_years",
             "issues",
         ]
         return schema

@@ -135,6 +135,10 @@ _TEXTS: dict[str, dict[str, str]] = {
         "ru": "Диаграмма построена по данным предыдущего ответа.",
         "en": "The chart was built from the previous answer data.",
     },
+    "chart_ready_current": {
+        "ru": "Диаграмма построена по результату запроса.",
+        "en": "The chart was built from the query result.",
+    },
     "chart_no_previous": {
         "ru": "Нет предыдущего аналитического результата для визуализации. "
         "Сначала задайте вопрос с числами, например: «Сколько проверок по "

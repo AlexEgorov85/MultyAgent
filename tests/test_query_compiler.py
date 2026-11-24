@@ -88,6 +88,27 @@ def test_auditor_specialization_contains_filter():
     assert "au.specializations @> ARRAY['ипотека']" in sql
 
 
+def test_month_dimension_uses_audit_dates():
+    sql = compile_query_plan(
+        QueryPlan(metric="audit_count", dimensions=["month"])
+    )
+    assert "to_char(date_trunc('month', COALESCE(a.end_date, a.start_date)), 'YYYY-MM')" in sql
+    assert "GROUP BY" in sql
+
+
+def test_last_two_years_filter_uses_max_year_minus_one():
+    sql = compile_query_plan(
+        QueryPlan(
+            metric="audit_count",
+            filters=[QueryFilter(field="year", value="last_2")],
+        )
+    )
+    assert (
+        "p.pocket_year >= (SELECT max(p_last.pocket_year) - 1 "
+        "FROM audit.audit_pockets p_last)"
+    ) in sql
+
+
 def test_pocket_dimension_groups_by_pocket_title():
     sql = compile_query_plan(
         QueryPlan(

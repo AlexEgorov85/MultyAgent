@@ -103,13 +103,33 @@ def apply_plan_gaps(plan: QueryPlan, gaps: PlanGaps) -> QueryPlan:
         op = "contains" if name == "specialization" else "eq"
         filters.append(QueryFilter(field=name, value=values[0], op=op))
 
-    if gaps.period == "last_year" and "year" not in dimensions:
+    period_years: int | None = None
+    if gaps.last_years and gaps.last_years > 0:
+        period_years = int(gaps.last_years)
+    elif gaps.period == "last_year":
+        period_years = 1
+    elif gaps.period.startswith("last_") and gaps.period.endswith("_years"):
+        try:
+            candidate = int(
+                gaps.period.removeprefix("last_").removesuffix("_years")
+            )
+        except ValueError:
+            candidate = 0
+        if candidate > 0:
+            period_years = candidate
+
+    if period_years is not None and "year" not in dimensions:
         filters = [
             query_filter
             for query_filter in filters
             if query_filter.field != "year"
         ]
-        filters.append(QueryFilter(field="year", value="last"))
+        filters.append(
+            QueryFilter(
+                field="year",
+                value="last" if period_years == 1 else f"last_{period_years}",
+            )
+        )
     elif gaps.period == "year" and gaps.year is not None:
         if "year" not in dimensions:
             filters = [
