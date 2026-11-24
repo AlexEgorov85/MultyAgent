@@ -61,6 +61,16 @@ flowchart TB
   SQL-результаты) или цитаты из документов; Report и Retrieval
   дополнительно проверяются критиком/инспектором.
 
+### Архитектурные паттерны
+
+| Паттерн | Где | Как проявляется |
+|---|---|---|
+| **Router** | `main_graph.router` | LLM возвращает типизированный `RouteDecision`, ветка выбирается по маршруту |
+| **Reflector** | `retrieval_graph.critic`, `report_graph.review` | критик/Inspector возвращает замечания, `rewrite`/`revise` правит ответ (до 2 итераций) |
+| **Guardrails** | `guard_request`, `guard_answer`, `sql_guard` | детерминированные отказы до и после LLM, read-only SQL по allowlist |
+| **Tool caller** | `analytics_graph.multi_tool` | LLM выбирает несколько tools одним `ToolPlan`, код исполняет их и передаёт результаты обратно в LLM |
+| **Orchestrator / Coordinator** | `investigation_graph` | Coordinator декомпозирует вопрос и делегирует Analytics и Retrieval по ACL |
+
 ## Основной граф
 
 Код: `src/graph/main_graph.py`.
@@ -184,10 +194,13 @@ flowchart TD
     VA -->|ok| EX["execute"]
     VA -->|retry| RE["repair"]
     VA -->|failed| SU
-    EX -->|ok| SU
+    EX -->|ok| VF["verify"]
     EX -->|retry| RE
     RE --> VA
-    RS --> SU
+    VF -->|пропущено условие| PL
+    VF -->|ok| SU
+    VF -->|chart| CH
+    RS --> VF
     DD --> SU
     MT --> SU
     SU --> PK
@@ -220,7 +233,13 @@ flowchart TD
    `statement_timeout` 5 секунд.
 5. **`repair`** — при ошибке LLM получает текст ошибки и исправляет план;
    число попыток ограничено.
-6. **`chart`** — для `analytics_mode=chart` сначала выполняет обычный
+6. **`verify`** — LLM сверяет вопрос с выполненным SQL и результатом:
+   выписывает условия вопроса и проверяет, где каждое отражено. Если
+   конкретное условие не отражено — один раз перестраивает план с
+   исправленным вопросом; если трактовка неоднозначна — задаёт уточняющий
+   вопрос; иначе ответ помечается как проверенный или честно
+   предупреждается о возможной неполноте.
+7. **`chart`** — для `analytics_mode=chart` сначала выполняет обычный
    QueryPlan/SQL по текущему вопросу; если план не построен, берёт payload
    предыдущего аналитического ответа (`rows`, `columns`, `question`).
    Затем LLM выбирает `ChartSpec` (bar/line/pie, подписи, точки) и указывает
@@ -228,7 +247,7 @@ flowchart TD
    сам. Если валидных точек меньше двух или LLM недоступна, диаграмма не
    показывается — выдаётся честное сообщение. Подробнее —
    [visualization.md](visualization.md).
-7. **`summarize`** — LLM возвращает `AnswerDraft(text, numbers_used)`.
+8. **`summarize`** — LLM возвращает `AnswerDraft(text, numbers_used)`.
    Каждое объявленное число проверяется по строкам и суммам колонок, а
    цифра в тексте, которой нет в `numbers_used`, отклоняет ответ: проверка
    не проходит вхолостую, если модель ошиблась или забыла число. При

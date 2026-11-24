@@ -481,6 +481,82 @@ def build_analytics_graph(server, llm: LLMClient):
             ],
         }
 
+    def verify_result(state: AnalyticsState) -> dict[str, Any]:
+        """Проверяет, что SQL и результат отвечают на вопрос; один повтор плана."""
+        if state.get("status") in ("refused", "failed"):
+            return {}
+        sql = str(state.get("sql") or "").strip()
+        rows = state.get("rows") or []
+        if not sql or not rows:
+            return {}
+        attempts = int(state.get("verify_attempts", 0))
+        if attempts > 1:
+            return {"verify_retry": False}
+        verifier = getattr(llm, "verify_result", None)
+        if verifier is None:
+            return {"verify_retry": False}
+        try:
+            check = verifier(
+                question=state.get("question", ""),
+                sql=sql,
+                columns=list(state.get("columns") or []),
+                rows=rows,
+                language=str(state.get("language") or "ru"),
+            )
+        except Exception as exc:
+            logger.warning("result verify failed: %s", exc)
+            return {
+                "verify_retry": False,
+                "metrics": {
+                    **(state.get("metrics") or {}),
+                    "result_check": "unavailable",
+                },
+            }
+        metrics = dict(state.get("metrics") or {})
+        issues = [
+            str(item).strip()
+            for item in check.missing_conditions
+            if str(item).strip()
+        ]
+        if check.wrong_metric:
+            issues.append("метрика не соответствует вопросу")
+        metrics["verify_attempts"] = attempts + 1
+        if check.complete or not issues:
+            # Без конкретного пропущенного условия или неверной метрики
+            # повтор плана только добавил бы шум.
+            metrics["result_check"] = "ok"
+            return {"verify_retry": False, "metrics": metrics}
+        update: dict[str, Any] = {
+            "verify_attempts": attempts + 1,
+            "verify_retry": False,
+            "verify_issues": issues,
+            "metrics": metrics,
+        }
+        if attempts == 0 and check.corrected_question.strip():
+            metrics["result_check"] = "retry"
+            update["question"] = check.corrected_question.strip()
+            update["verify_retry"] = True
+            return update
+        if check.clarification.strip():
+            metrics["result_check"] = "clarify"
+            update.update(
+                {
+                    "answer": check.clarification.strip(),
+                    "answer_source": "agent",
+                    "strategy": "clarify",
+                    "status": "ok",
+                }
+            )
+            return update
+        metrics["result_check"] = "warning"
+        detail = "; ".join(issues) or "условие вопроса могло быть учтено не полностью"
+        update["verify_warning"] = _pick(
+            state,
+            f"Проверка полноты: {detail}.",
+            f"Completeness check: {detail}.",
+        )
+        return update
+
     def repair_sql(state: AnalyticsState) -> dict[str, Any]:
         """Просит LLM исправить SQL по тексту ошибки (не более 2 раз)."""
         try:
@@ -613,8 +689,8 @@ def build_analytics_graph(server, llm: LLMClient):
                 arguments.pop("audit_id", None)
             if (
                 name == "get_act_items"
+                and hints is not None
                 and not arguments.get("item_type")
-                and hints
                 and hints.item_type
             ):
                 arguments["item_type"] = hints.item_type
@@ -1057,8 +1133,11 @@ def build_analytics_graph(server, llm: LLMClient):
         }
         # Флаги усечения плана инструментов, выставленные в multi_tool.
         metrics.update(state.get("metrics") or {})
+        answer = str(state.get("answer") or "")
+        if state.get("verify_warning"):
+            answer = f"{answer}\n\n{state['verify_warning']}".strip()
         content: dict[str, Any] = {
-            "answer": state.get("answer", ""),
+            "answer": answer,
             "answer_source": state.get("answer_source", "template"),
             "strategy": state.get("strategy", "sql"),
             "evidence": state.get("evidence", []),
@@ -1092,6 +1171,7 @@ def build_analytics_graph(server, llm: LLMClient):
     builder.add_node("run_script", run_script)
     builder.add_node("validate", validate_sql)
     builder.add_node("execute", execute_sql)
+    builder.add_node("verify", verify_result)
     builder.add_node("repair", repair_sql)
     builder.add_node("drilldown", drilldown)
     builder.add_node("multi_tool", multi_tool)
@@ -1153,19 +1233,24 @@ def build_analytics_graph(server, llm: LLMClient):
     )
     builder.add_conditional_edges(
         "execute",
+        lambda s: "repair" if s.get("retry") else "verify",
+        {"repair": "repair", "verify": "verify"},
+    )
+    builder.add_conditional_edges(
+        "verify",
         lambda s: (
-            "repair"
-            if s.get("retry")
-            else ("chart" if s.get("mode") == "chart" else "summarize")
+            "plan"
+            if s.get("verify_retry")
+            else (
+                "summarize"
+                if s.get("answer")
+                else ("chart" if s.get("mode") == "chart" else "summarize")
+            )
         ),
-        {"repair": "repair", "summarize": "summarize", "chart": "chart"},
+        {"plan": "plan", "summarize": "summarize", "chart": "chart"},
     )
     builder.add_edge("repair", "validate")
-    builder.add_conditional_edges(
-        "run_script",
-        lambda s: "chart" if s.get("mode") == "chart" else "summarize",
-        {"summarize": "summarize", "chart": "chart"},
-    )
+    builder.add_edge("run_script", "verify")
     builder.add_edge("drilldown", "summarize")
     builder.add_edge("multi_tool", "summarize")
     builder.add_edge("chart", "summarize")

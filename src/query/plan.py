@@ -70,6 +70,7 @@ class PlanFilter(BaseModel):
 class PlanGaps(BaseModel):
     """Чего не хватает в QueryPlan по сравнению с вопросом."""
 
+    metric: str = ""
     missing_dimensions: list[str] = Field(default_factory=list)
     missing_filters: list[PlanFilter] = Field(default_factory=list)
     period: str = "none"
@@ -81,6 +82,7 @@ class PlanGaps(BaseModel):
     def model_json_schema(cls, *args, **kwargs):
         schema = super().model_json_schema(*args, **kwargs)
         schema["required"] = [
+            "metric",
             "missing_dimensions",
             "missing_filters",
             "period",

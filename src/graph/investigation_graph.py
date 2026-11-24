@@ -34,6 +34,14 @@ EVIDENCE_MAP = {
     "акт": "act",
 }
 
+# Какие найденные доказательства закрывают требуемый тип.
+# Акт подтверждает пункт с меньшим весом, но не наоборот.
+EVIDENCE_SATISFIES: dict[str, set[str]] = {
+    "item": {"item", "act"},
+    "act": {"act"},
+    "sql_result": {"sql_result"},
+}
+
 
 def _log_acl(message: dict[str, Any]) -> None:
     """Дописывает ACL-сообщение в журнал, не ломая расследование."""
@@ -79,6 +87,20 @@ def _required_type(value: Any) -> str:
     """Приводит требуемый тип evidence к каноническому виду."""
     text = str(value or "").strip().lower()
     return EVIDENCE_MAP.get(text, text)
+
+
+def _missing_evidence(
+    required: list[Any],
+    found: set[str],
+) -> list[Any]:
+    """Возвращает требования, которые не закрыты найденными доказательствами."""
+    missing: list[Any] = []
+    for item in required:
+        canon = _required_type(item)
+        accepted = EVIDENCE_SATISFIES.get(canon, {canon})
+        if not (accepted & found):
+            missing.append(item)
+    return missing
 
 
 def build_investigation_graph(
@@ -130,6 +152,7 @@ def build_investigation_graph(
         return request, response
 
     def parse_acl(state: InvestigationState) -> dict[str, Any]:
+        """Проверяет ACL-запрос и извлекает вопрос и контекст."""
         try:
             message = validate_acl(state.get("acl_request", {}))
         except ACLValidationError as exc:
@@ -169,6 +192,7 @@ def build_investigation_graph(
         }
 
     def plan(state: InvestigationState) -> dict[str, Any]:
+        """Декомпозирует вопрос на analytics_question и retrieval_question."""
         try:
             plan_model = llm.plan_investigation(
                 question=state["question"],
@@ -184,6 +208,7 @@ def build_investigation_graph(
         return {"plan": plan_model.model_dump()}
 
     def round1(state: InvestigationState) -> dict[str, Any]:
+        """Первый ACL-раунд: опрашивает Analytics и Retrieval."""
         plan_model = InvestigationPlan.model_validate(state["plan"])
         log = list(state.get("acl_log", []))
         evidence = list(state.get("evidence", []))
@@ -225,9 +250,7 @@ def build_investigation_graph(
 
         required = plan_model.required_evidence or ["sql_result", "item"]
         found_types = _evidence_types(evidence)
-        missing = [
-            item for item in required if _required_type(item) not in found_types
-        ]
+        missing = _missing_evidence(required, found_types)
 
         return {
             "rounds": 1,
@@ -240,6 +263,7 @@ def build_investigation_graph(
         }
 
     def round2(state: InvestigationState) -> dict[str, Any]:
+        """Второй ACL-раунд: добирает недостающие evidence."""
         plan_model = InvestigationPlan.model_validate(state["plan"])
         missing = state.get("missing", [])
         try:
@@ -304,9 +328,7 @@ def build_investigation_graph(
 
         required = refined.required_evidence or plan_model.required_evidence
         found_types = _evidence_types(evidence)
-        missing = [
-            item for item in required if _required_type(item) not in found_types
-        ]
+        missing = _missing_evidence(required, found_types)
         return {
             "rounds": 2,
             "plan": refined.model_dump(),
@@ -319,6 +341,7 @@ def build_investigation_graph(
         }
 
     def synthesize(state: InvestigationState) -> dict[str, Any]:
+        """Синтезирует итог, отделяя факт от гипотезы."""
         try:
             answer = llm.synthesize_investigation(
                 question=state["question"],
@@ -349,6 +372,7 @@ def build_investigation_graph(
         return {"answer": {"text": text, "causal_claim": causal}, "status": "ok"}
 
     def pack_response(state: InvestigationState) -> dict[str, Any]:
+        """Упаковывает итог расследования в ACL-ответ."""
         status = state.get("status")
         if status == "refused":
             return _reply(

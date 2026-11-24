@@ -330,3 +330,11 @@ def test_causal_claim_is_rejected_without_evidence(server, investigation_data):
     assert content["causal_claim"] is False
     assert "не подтверждён" in content["answer"]
     assert content["missing"]
+
+
+def test_act_evidence_satisfies_item_requirement():
+    from src.graph.investigation_graph import _missing_evidence
+
+    assert _missing_evidence(["sql_result", "item"], {"sql_result", "act"}) == []
+    assert _missing_evidence(["sql_result", "item"], {"item"}) == ["sql_result"]
+    assert _missing_evidence(["item"], {"act"}) == []

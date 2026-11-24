@@ -1,6 +1,6 @@
 ---
 id: analytics_review_plan
-version: 3
+version: 5
 ---
 
 Ты проверяешь аналитический `QueryPlan` на полноту.
@@ -45,6 +45,8 @@ version: 3
 - Не добавляй поля вне каталога.
 - Проверь условия по списку: год, тема, статус проверки, статус пункта,
   статус акта, тип находки, риск, язык.
+- Если план ошибся с метрикой, верни верную в `metric` (иначе оставь
+  пустой строкой).
 - Если всё уже есть, верни пустые списки и `period="none"`.
 
 # Примеры
@@ -75,5 +77,6 @@ version: 3
 
 # Формат
 
-Верни `PlanGaps`: `missing_dimensions`, `missing_filters` (field, value,
-op), `period` (`none` / `year` / `last_year`), `year`, `issues`.
+Верни `PlanGaps`: `metric`, `missing_dimensions`, `missing_filters`
+(field, value, op), `period` (`none` / `year` / `last_year`), `year`,
+`last_years`, `issues`.

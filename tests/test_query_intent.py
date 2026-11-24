@@ -174,6 +174,26 @@ def test_template_contract_rejects_wrong_metric_and_dimensions():
     assert any("фильтры" in problem for problem in problems)
 
 
+def test_metric_correction_drops_incompatible_filters():
+    plan = QueryPlan(
+        metric="item_count",
+        filters=[QueryFilter(field="item_type", value="проблема")],
+    )
+
+    corrected = apply_plan_gaps(plan, PlanGaps(metric="audit_count"))
+
+    assert corrected.metric == "audit_count"
+    assert all(item.field != "item_type" for item in corrected.filters)
+
+
+def test_unknown_metric_gap_is_ignored():
+    plan = QueryPlan(metric="item_count")
+
+    corrected = apply_plan_gaps(plan, PlanGaps(metric="не_существует"))
+
+    assert corrected.metric == "item_count"
+
+
 def test_query_plan_tolerates_llm_shape_noise():
     plan = QueryPlan.model_validate(
         {

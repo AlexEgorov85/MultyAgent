@@ -177,6 +177,30 @@ class ToolArguments(BaseModel):
         return result
 
 
+class ResultCheck(BaseModel):
+    """Проверка: отвечает ли выполненный SQL на заданный вопрос."""
+
+    complete: bool
+    missing_conditions: list[str] = Field(default_factory=list)
+    wrong_metric: bool = False
+    corrected_question: str = ""
+    clarification: str = ""
+    reason: str = ""
+
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs):
+        schema = super().model_json_schema(*args, **kwargs)
+        schema["required"] = [
+            "complete",
+            "missing_conditions",
+            "wrong_metric",
+            "corrected_question",
+            "clarification",
+            "reason",
+        ]
+        return schema
+
+
 class ToolArgumentHints(BaseModel):
     """Фильтры инструментов, извлечённые из вопроса отдельным LLM-вызовом."""
 

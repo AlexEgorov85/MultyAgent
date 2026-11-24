@@ -59,9 +59,25 @@ def apply_plan_gaps(plan: QueryPlan, gaps: PlanGaps) -> QueryPlan:
     Значения проверяются по каталогу метрики. Если LLM предложила поле
     или значение вне каталога, оно отбрасывается, а не попадает в SQL.
     """
-    spec = get_metric(plan.metric)
+    metric = plan.metric
+    if gaps.metric and gaps.metric != plan.metric:
+        try:
+            get_metric(gaps.metric)
+        except KeyError:
+            pass
+        else:
+            metric = gaps.metric
+
+    spec = get_metric(metric)
     dimensions = list(plan.dimensions)
     filters = list(plan.filters)
+    if metric != plan.metric:
+        # У новой метрики другой набор полей: несовместимые условия
+        # отбрасываем, иначе компилятор соберёт бессмысленный SQL.
+        dimensions = [item for item in dimensions if item in spec.dimensions]
+        filters = [
+            item for item in filters if item.field in spec.dimensions
+        ]
 
     for dimension in gaps.missing_dimensions:
         name = str(dimension or "").strip()
@@ -140,5 +156,5 @@ def apply_plan_gaps(plan: QueryPlan, gaps: PlanGaps) -> QueryPlan:
             filters.append(QueryFilter(field="year", value=int(gaps.year)))
 
     return plan.model_copy(
-        update={"dimensions": dimensions, "filters": filters}
+        update={"metric": metric, "dimensions": dimensions, "filters": filters}
     )

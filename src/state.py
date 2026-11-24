@@ -35,6 +35,10 @@ class AnalyticsState(TypedDict, total=False):
     evidence: list[dict[str, Any]]
     tool_calls: list[dict[str, Any]]
     retries: int
+    verify_attempts: int
+    verify_retry: bool
+    verify_issues: list[str]
+    verify_warning: str
     answer: str
     answer_source: str  # llm | agent | template
     acl_response: dict[str, Any]

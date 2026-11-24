@@ -8,7 +8,7 @@ from src.acl import make_acl_message
 from src import config, db_runtime, dialogue_store
 from src.graph.analytics_graph import build_analytics_graph
 from src.query import PlanFilter, PlanGaps, QueryFilter, QueryPlan
-from src.schemas import ChartPoint, ChartSpec, SQLPlan, ToolCall, ToolPlan
+from src.schemas import ChartPoint, ChartSpec, ResultCheck, SQLPlan, ToolCall, ToolPlan
 
 
 class FakeLLM:
@@ -264,6 +264,80 @@ def test_query_ir_compiles_sql_without_plan_sql(server, sample_graph_data):
     assert result["acl_response"]["content"]["metrics"]["plan_source"] == "query_ir"
     assert "GROUP BY a.status" in result["acl_response"]["content"]["sql"]
     assert result["rows"]
+
+
+class RetryVerifyLLM(QueryPlanFakeLLM):
+    """Отдаёт два плана и два результата проверки: retry, затем ok."""
+
+    def __init__(self, plans: list[QueryPlan], checks: list[ResultCheck], answer: str):
+        super().__init__(plan=plans[0], answer=answer)
+        self.plans = list(plans)
+        self.checks = list(checks)
+
+    def plan_query(self, **kwargs):
+        self.calls.append("plan_query")
+        return self.plans.pop(0)
+
+    def verify_result(self, **kwargs):
+        self.calls.append("verify_result")
+        return self.checks.pop(0)
+
+
+def test_result_verifier_retries_plan_once(server, sample_graph_data):
+    llm = RetryVerifyLLM(
+        plans=[
+            QueryPlan(metric="audit_count"),
+            QueryPlan(
+                metric="audit_count",
+                filters=[QueryFilter(field="theme", value="ипотека")],
+            ),
+        ],
+        checks=[
+            ResultCheck(
+                complete=False,
+                missing_conditions=["тема ипотека"],
+                corrected_question="Сколько проверок по ипотеке?",
+            ),
+            ResultCheck(complete=True),
+        ],
+        answer="Проверок: 1.",
+    )
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke(
+        {"acl_request": acl_request("Сколько проверок по ипотеке?")}
+    )
+
+    assert result["status"] == "ok"
+    assert llm.calls.count("plan_query") == 2
+    assert llm.calls.count("verify_result") == 2
+    assert "theme_code = 'ипотека'" in result["acl_response"]["content"]["sql"]
+
+
+def test_result_verifier_asks_clarification_instead_of_guessing(
+    server, sample_graph_data
+):
+    llm = RetryVerifyLLM(
+        plans=[QueryPlan(metric="audit_count")],
+        checks=[
+            ResultCheck(
+                complete=False,
+                missing_conditions=["неясно, что считать закрытой проверкой"],
+                clarification="Уточните: нужны проверки со статусом «завершена»?",
+            )
+        ],
+        answer="Проверок: 1.",
+    )
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke(
+        {"acl_request": acl_request("Сколько закрытых проверок?")}
+    )
+
+    content = result["acl_response"]["content"]
+    assert content["strategy"] == "clarify"
+    assert "Уточните" in content["answer"]
+    assert content["metrics"]["result_check"] == "clarify"
 
 
 def test_invalid_analytics_mode_falls_back_to_sql(server, sample_graph_data):

@@ -21,6 +21,7 @@ from .schemas import (
     ReportDraft,
     ReportReview,
     ResolvedQuery,
+    ResultCheck,
     RetrievalAnswer,
     RouteDecision,
     SQLPlan,
@@ -137,6 +138,16 @@ class LLMClient(Protocol):
     ) -> ToolPlan: ...
 
     def review_tool_arguments(self, *, question: str) -> "ToolArgumentHints": ...
+
+    def verify_result(
+        self,
+        *,
+        question: str,
+        sql: str,
+        columns: list[str],
+        rows: list[dict[str, Any]],
+        language: str = "ru",
+    ) -> "ResultCheck": ...
 
     def summarize(
         self,
@@ -303,7 +314,15 @@ class OpenAILLM:
                 raise
         raise last_error  # pragma: no cover
 
-    def _parse(self, *, system: str, user: str, schema: type, max_tokens: int = 4096) -> Any:
+    def _parse(
+        self,
+        *,
+        system: str,
+        user: str,
+        schema: type,
+        max_tokens: int = 4096,
+        temperature: float = 0,
+    ) -> Any:
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -323,7 +342,7 @@ class OpenAILLM:
                     },
                 },
                 max_tokens=max_tokens,
-                temperature=0,
+                temperature=temperature,
             )
             content = response.choices[0].message.content or ""
             return schema.model_validate_json(content)
@@ -335,7 +354,7 @@ class OpenAILLM:
                     messages=messages,
                     response_format={"type": "json_object"},
                     max_tokens=max_tokens,
-                    temperature=0,
+                    temperature=temperature,
                 )
                 content = response.choices[0].message.content or ""
                 return schema.model_validate_json(_extract_json(content))
@@ -491,11 +510,11 @@ class OpenAILLM:
                 f"Вопрос: {question}\n\n"
                 f"Каталог:\n{catalog_text}\n\n"
                 f"Текущий план: {plan.model_dump_json()}\n\n"
-                "Верни PlanGaps: missing_dimensions, missing_filters, "
+                "Верни PlanGaps: metric, missing_dimensions, missing_filters, "
                 "period, year, issues."
             ),
             schema=PlanGaps,
-            max_tokens=1000,
+            max_tokens=1200,
         )
 
     def plan_chart(
@@ -603,6 +622,30 @@ class OpenAILLM:
             user=f"Вопрос: {question}\nВерни audit_code, item_type, query.",
             schema=ToolArgumentHints,
             max_tokens=500,
+        )
+
+    def verify_result(
+        self,
+        *,
+        question: str,
+        sql: str,
+        columns: list[str],
+        rows: list[dict[str, Any]],
+        language: str = "ru",
+    ) -> ResultCheck:
+        """Проверяет, что SQL и результат отвечают на вопрос."""
+        preview = rows[:5]
+        return self._parse(
+            system=load_prompt("analytics_verify_result"),
+            user=(
+                f"Язык ответа: {language}\n"
+                f"Вопрос: {question}\n"
+                f"SQL: {sql}\n"
+                f"Колонки: {columns}\n"
+                f"Строки (до 5): {preview}"
+            ),
+            schema=ResultCheck,
+            max_tokens=700,
         )
 
     def summarize(
