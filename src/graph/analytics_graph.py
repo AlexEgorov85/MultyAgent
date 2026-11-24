@@ -19,7 +19,7 @@ from ..llm import LLMClient
 from ..query.compiler import QueryCompileError, compile_query_plan
 from ..query.intent import apply_plan_gaps
 from ..query.templates import template_parameters, template_plan_problems
-from ..schemas import SQLPlan, ToolPlan
+from ..schemas import SQLPlan
 from ..semantic.catalog import catalog_text
 from ..state import AnalyticsState
 from ..textscan import audit_codes, number_tokens
@@ -200,6 +200,7 @@ def build_analytics_graph(server, llm: LLMClient):
     """Собирает и компилирует граф Analytics-агента."""
 
     def parse_acl(state: AnalyticsState) -> dict[str, Any]:
+        """Проверяет ACL-запрос и извлекает вопрос, режим и контекст."""
         try:
             message = validate_acl(state.get("acl_request", {}))
         except ACLValidationError as exc:
@@ -250,11 +251,13 @@ def build_analytics_graph(server, llm: LLMClient):
         }
 
     def plan_sql(state: AnalyticsState) -> dict[str, Any]:
+        """Строит план запроса: Query IR/шаблон или свободный SQL."""
         templates = db_tools.list_script_templates(server)
         question = state["question"]
         latest_year = db_tools.latest_pocket_year(server)
 
         def template_by_key(key: str) -> dict[str, Any]:
+            """Возвращает описание шаблона по ключу или пустой словарь."""
             return next(
                 (
                     item
@@ -270,6 +273,7 @@ def build_analytics_graph(server, llm: LLMClient):
             query_plan,
             plan_source: str,
         ) -> dict[str, Any] | None:
+            """Проверяет контракт шаблона и собирает plan для strategy=script."""
             template = template_by_key(key)
             parameters, error = _template_parameters(
                 templates, key, selected_parameters
@@ -390,6 +394,7 @@ def build_analytics_graph(server, llm: LLMClient):
         return {"plan": plan_payload, "strategy": "generated"}
 
     def run_script(state: AnalyticsState) -> dict[str, Any]:
+        """Выполняет выбранный шаблон и возвращает строки и evidence."""
         plan = state["plan"]
         try:
             result = db_tools.run_script_template(
@@ -413,6 +418,7 @@ def build_analytics_graph(server, llm: LLMClient):
         }
 
     def validate_sql(state: AnalyticsState) -> dict[str, Any]:
+        """Пропускает SQL через read-only guard; при ошибке — отказ."""
         try:
             safe = validate_readonly_sql(state["plan"]["sql"])
         except UnsafeSQLError as exc:
@@ -421,6 +427,7 @@ def build_analytics_graph(server, llm: LLMClient):
         return {"sql": safe, "retry": False}
 
     def execute_sql(state: AnalyticsState) -> dict[str, Any]:
+        """Выполняет безопасный SQL и сохраняет результат с evidence."""
         try:
             result = db_tools.run_readonly_sql(server, state["sql"])
         except UnsafeSQLError as exc:
@@ -452,6 +459,7 @@ def build_analytics_graph(server, llm: LLMClient):
         }
 
     def repair_sql(state: AnalyticsState) -> dict[str, Any]:
+        """Просит LLM исправить SQL по тексту ошибки (не более 2 раз)."""
         try:
             plan = llm.repair_sql(
                 question=state["question"],
@@ -472,6 +480,7 @@ def build_analytics_graph(server, llm: LLMClient):
         return {"plan": plan.model_dump(), "strategy": "generated", "retry": False}
 
     def drilldown(state: AnalyticsState) -> dict[str, Any]:
+        """Показывает пункты проверки по коду AUD-… из вопроса или контекста."""
         codes = audit_codes(state["question"])
         audit_code = (
             codes[0]
@@ -530,17 +539,24 @@ def build_analytics_graph(server, llm: LLMClient):
         }
 
     def multi_tool(state: AnalyticsState) -> dict[str, Any]:
-        try:
-            plan: ToolPlan = llm.plan_tools(
-                question=state["question"],
-                tools_text=TOOL_SPECS,
-                context=state.get("conversation_context", ""),
-                profile_text=state.get("profile_text", ""),
-            )
-        except Exception as exc:
+        """Планирует несколько tools одним вызовом LLM и выполняет их."""
+        plan = None
+        last_error: Exception | None = None
+        for _ in range(2):
+            try:
+                plan = llm.plan_tools(
+                    question=state["question"],
+                    tools_text=TOOL_SPECS,
+                    context=state.get("conversation_context", ""),
+                    profile_text=state.get("profile_text", ""),
+                )
+                break
+            except Exception as exc:
+                last_error = exc
+        if plan is None:
             return _fail(
                 state,
-                t(state.get("language"), "tools_failed", error=exc),
+                t(state.get("language"), "tools_failed", error=last_error),
             )
 
         calls: list[dict[str, Any]] = []
@@ -670,6 +686,7 @@ def build_analytics_graph(server, llm: LLMClient):
         english = str(language).lower() == "en"
 
         def label(column: str) -> str:
+            """Человекочитаемая подпись колонки для табличного fallback."""
             return (
                 column.replace("_", " ").capitalize()
                 if english
@@ -881,6 +898,7 @@ def build_analytics_graph(server, llm: LLMClient):
         }
 
     def summarize(state: AnalyticsState) -> dict[str, Any]:
+        """Формулирует ответ по строкам; fallback — детерминированная таблица."""
         if state.get("status") in ("refused", "failed"):
             return {}
 
@@ -950,21 +968,25 @@ def build_analytics_graph(server, llm: LLMClient):
                         "summarize rejected by number check: %s", text[:300]
                     )
 
-        answer = _format_rows(rows, columns, state.get("language"))
-        if template_header:
-            answer = f"{template_header}. {answer}"
+        if len(rows) > 1:
+            # Многострочную таблицу рисует presentation. Текст-заглушка
+            # «Найдено строк: N» дублировала бы её заголовок.
+            answer = f"{template_header}." if template_header else ""
+        else:
+            answer = _format_rows(rows, columns, state.get("language"))
+            if template_header:
+                answer = f"{template_header}. {answer}"
         if state.get("truncated"):
-            answer = (
-                f"{answer}\n\n"
-                + t(
-                    state.get("language"),
-                    "limit_notice",
-                    limit=int(state.get("max_rows") or config.MAX_ROWS),
-                )
+            notice = t(
+                state.get("language"),
+                "limit_notice",
+                limit=int(state.get("max_rows") or config.MAX_ROWS),
             )
+            answer = f"{answer}\n\n{notice}" if answer else notice
         return {"answer": answer, "answer_source": "template"}
 
     def pack_response(state: AnalyticsState) -> dict[str, Any]:
+        """Упаковывает результат в ACL-ответ inform/refuse/failure."""
         status = state.get("status", "ok")
         if status == "refused":
             return _reply(

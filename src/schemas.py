@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Route = Literal[
     "analytics",
@@ -137,12 +137,28 @@ class ToolCall(BaseModel):
     name: str = Field(min_length=1)
     arguments: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("arguments", mode="before")
+    @classmethod
+    def _empty_arguments(cls, value: Any) -> Any:
+        return {} if value is None else value
+
 
 class ToolPlan(BaseModel):
     """Набор инструментов, запрошенных одним вызовом LLM."""
 
     calls: list[ToolCall] = Field(min_length=1)
     reason: str = ""
+
+    @field_validator("calls", mode="before")
+    @classmethod
+    def _string_calls(cls, value: Any) -> Any:
+        """Модель иногда присылает имена строкой вместо объекта."""
+        if isinstance(value, list):
+            return [
+                {"name": item} if isinstance(item, str) else item
+                for item in value
+            ]
+        return value
 
 
 class AnswerDraft(BaseModel):

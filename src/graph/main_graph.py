@@ -110,6 +110,7 @@ def build_main_graph(
     )
 
     def load_memory(state: MainState, config: RunnableConfig) -> dict[str, Any]:
+        """Загружает профиль, историю диалога и slots для текущего хода."""
         messages = state.get("messages", [])
         question = _last_user_text(messages)
         language = str(state.get("language") or "ru")
@@ -295,6 +296,7 @@ def build_main_graph(
         }
 
     def guard_request(state: MainState) -> dict[str, Any]:
+        """Проверяет запрос до Router: изменение данных, PII, инъекции."""
         user_query = state.get("user_query", "")
         resolved_query = state.get("resolved_query", "")
         conversation_id = str(state.get("conversation_id") or "")
@@ -314,6 +316,7 @@ def build_main_graph(
         return {"guardrail": result.model_dump()}
 
     def router(state: MainState) -> dict[str, Any]:
+        """Выбирает маршрут LLM-роутером; при сбое — честный fallback."""
         question = state.get("resolved_query") or state.get("user_query", "")
         # Маршрут выбирает LLM по смыслу вопроса. Доменных эвристик
         # («если есть AUD-код и слово похож», «если есть повторн и наход»)
@@ -346,6 +349,7 @@ def build_main_graph(
         return {
             "route": "out_of_domain",
             "route_reason": "маршрутизация недоступна",
+            "route_error": True,
         }
 
     def _call_branch(state: MainState, receiver: str, graph) -> dict[str, Any]:
@@ -391,18 +395,23 @@ def build_main_graph(
         }
 
     def analytics_branch(state: MainState) -> dict[str, Any]:
+        """Вызывает Analytics-подагента по ACL."""
         return _call_branch(state, "analytics_agent", analytics)
 
     def retrieval_branch(state: MainState) -> dict[str, Any]:
+        """Вызывает Retrieval-подагента по ACL."""
         return _call_branch(state, "retrieval_agent", retrieval)
 
     def report_branch(state: MainState) -> dict[str, Any]:
+        """Вызывает Report-подагента по ACL."""
         return _call_branch(state, "report_agent", report)
 
     def investigation_branch(state: MainState) -> dict[str, Any]:
+        """Вызывает Investigation Coordinator по ACL."""
         return _call_branch(state, "investigation_coordinator", investigation)
 
     def refusal(state: MainState) -> dict[str, Any]:
+        """Формирует отказ для unsafe/out_of_domain запросов."""
         route = state.get("route")
         guard = state.get("guardrail", {})
         if guard and not guard.get("safe"):
@@ -416,6 +425,12 @@ def build_main_graph(
                 state,
                 "Не могу выполнить запрос: изменение данных запрещено.",
                 "I cannot run this request: data modification is not allowed.",
+            )
+        elif state.get("route_error"):
+            answer = _pick(
+                state,
+                "Сервис модели временно недоступен. Повторите запрос позже.",
+                "The model service is temporarily unavailable. Please retry later.",
             )
         else:
             answer = _pick(
@@ -448,6 +463,7 @@ def build_main_graph(
         return "greeting"
 
     def smalltalk(state: MainState) -> dict[str, Any]:
+        """Отвечает на приветствие, благодарность или вопрос о возможностях."""
         kind = _smalltalk_kind(state)
         capabilities = _pick(
             state,
@@ -505,12 +521,14 @@ def build_main_graph(
         return {"final_answer": answer, "evidence": []}
 
     def guard_answer(state: MainState) -> dict[str, Any]:
+        """Финальная проверка ответа и пометка ответов без evidence."""
         route = state.get("route")
         factual_routes = {"analytics", "retrieval", "report", "investigation"}
         result = check_final_answer(
             state.get("final_answer", ""),
             extract_sql(state.get("acl_response")),
-            is_domain=route != "out_of_domain",
+            # Сообщение о недоступности модели — не ответ вне домена.
+            is_domain=route != "out_of_domain" or bool(state.get("route_error")),
             evidence=state.get("evidence", []),
             is_factual=str(route or "") in factual_routes,
             route=str(route or ""),
@@ -531,6 +549,7 @@ def build_main_graph(
         return update
 
     def finalize(state: MainState) -> dict[str, Any]:
+        """Сохраняет сообщения, trace и метрики в историю диалога."""
         answer = state.get("final_answer", "")
         metrics = dict(state.get("metrics", {}))
         started = metrics.pop("started_at", None)

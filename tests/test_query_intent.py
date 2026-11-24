@@ -172,3 +172,24 @@ def test_template_contract_rejects_wrong_metric_and_dimensions():
     assert any("метрику" in problem for problem in problems)
     assert any("разрезы" in problem for problem in problems)
     assert any("фильтры" in problem for problem in problems)
+
+
+def test_query_plan_tolerates_llm_shape_noise():
+    plan = QueryPlan.model_validate(
+        {
+            "metric": "item_count",
+            "dimensions": None,
+            "filters": None,
+            "order_by": [{"field": "year", "direction": "asc"}],
+            "limit": None,
+            "template_key": None,
+            "reason": None,
+        }
+    )
+
+    assert plan.dimensions == []
+    assert plan.filters == []
+    assert plan.order_by == "none"
+    assert plan.limit == 200
+    assert plan.template_key == ""
+    assert plan.reason == ""

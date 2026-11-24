@@ -377,6 +377,7 @@ class OpenAILLM:
         profile_text: str,
         language: str,
     ) -> ResolvedQuery:
+        """Переформулирует уточнение в самостоятельный вопрос с учётом контекста."""
         english = str(language).lower() == "en"
         system = load_prompt(
             "resolve_followup_en" if english else "resolve_followup_ru"
@@ -405,6 +406,7 @@ class OpenAILLM:
     def route(
         self, *, question: str, profile_text: str, context: str = ""
     ) -> RouteDecision:
+        """Выбирает маршрут запроса и режим Analytics."""
         return self._parse(
             system=load_prompt("router"),
             user=(
@@ -424,6 +426,7 @@ class OpenAILLM:
         context: str = "",
         language: str = "ru",
     ) -> MemoryUpdate:
+        """Извлекает предпочтения аудитора для долговременной памяти."""
         return self._parse(
             system=load_prompt("memory_extract"),
             user=(
@@ -446,6 +449,7 @@ class OpenAILLM:
         profile_text: str = "",
         templates: list[dict[str, Any]] | None = None,
     ) -> QueryPlan:
+        """Строит QueryPlan по семантическому каталогу."""
         template_lines = "\n".join(
             f"- {item['template_key']}: {item['title']} — "
             f"{item.get('description') or ''}"
@@ -475,6 +479,7 @@ class OpenAILLM:
         context: str = "",
         profile_text: str = "",
     ) -> PlanGaps:
+        """Проверяет план запроса и возвращает недостающие элементы."""
         return self._parse(
             system=load_prompt("analytics_review_plan"),
             user=(
@@ -501,6 +506,7 @@ class OpenAILLM:
         context: str = "",
         profile_text: str = "",
     ) -> ChartSpec:
+        """Выбирает тип диаграммы и точки по готовым строкам."""
         preview = rows[:40]
         return self._parse(
             system=load_prompt("analytics_chart"),
@@ -527,6 +533,7 @@ class OpenAILLM:
         context: str = "",
         profile_text: str = "",
     ) -> SQLPlan:
+        """Строит свободный SQL-план, если QueryPlan не поддержан."""
         return self._parse(
             system=load_prompt("analytics_plan_sql"),
             user=(
@@ -551,6 +558,7 @@ class OpenAILLM:
         context: str = "",
         profile_text: str = "",
     ) -> SQLPlan:
+        """Исправляет SQL по тексту ошибки выполнения."""
         return self._parse(
             system=load_prompt("analytics_repair_sql"),
             user=(
@@ -571,6 +579,7 @@ class OpenAILLM:
         context: str = "",
         profile_text: str = "",
     ) -> ToolPlan:
+        """Выбирает один или несколько tools для multi-tool режима."""
         return self._parse(
             system=load_prompt("tools_plan"),
             user=(
@@ -590,32 +599,26 @@ class OpenAILLM:
         rows: list[dict[str, Any]],
         profile_text: str = "",
     ) -> AnswerDraft:
+        """Формулирует краткий ответ по строкам результата."""
         preview = rows[:20]
-        try:
-            return self._parse(
-                system=(
-                    format_guide(
-                        "count" if len(rows) == 1 else "table_summary"
-                    )
-                    + "\n\n"
-                    + load_prompt("analytics_summarize")
-                ),
-                user=(
-                    f"{self._profile_block(profile_text)}"
-                    f"Вопрос: {question}\nКолонки: {columns}\n"
-                    f"Строки: {preview}\n\n"
-                    "Верни AnswerDraft: text и numbers_used — полный список "
-                    "чисел, которые встречаются в text, в том числе "
-                    "записанных словами."
-                ),
-                schema=AnswerDraft,
-                max_tokens=1500,
-            )
-        except Exception:
-            pass
-        return AnswerDraft(
-            text=f"Найдено строк: {len(rows)}.",
-            numbers_used=[float(len(rows))],
+        return self._parse(
+            system=(
+                format_guide(
+                    "count" if len(rows) == 1 else "table_summary"
+                )
+                + "\n\n"
+                + load_prompt("analytics_summarize")
+            ),
+            user=(
+                f"{self._profile_block(profile_text)}"
+                f"Вопрос: {question}\nКолонки: {columns}\n"
+                f"Строки: {preview}\n\n"
+                "Верни AnswerDraft: text и numbers_used — полный список "
+                "чисел, которые встречаются в text, в том числе "
+                "записанных словами."
+            ),
+            schema=AnswerDraft,
+            max_tokens=1500,
         )
 
     @staticmethod
@@ -637,6 +640,7 @@ class OpenAILLM:
         context: str = "",
         profile_text: str = "",
     ) -> RetrievalAnswer:
+        """Отвечает по найденным чанкам с цитатами."""
         return self._parse(
             system=(
                 format_guide("retrieval")
@@ -660,6 +664,7 @@ class OpenAILLM:
         chunks: list[dict[str, Any]],
         context: str = "",
     ) -> Critique:
+        """Проверяет обоснованность ответа и цитаты."""
         return self._parse(
             system=load_prompt("retrieval_critique"),
             user=(
@@ -681,6 +686,7 @@ class OpenAILLM:
         context: str = "",
         profile_text: str = "",
     ) -> RetrievalAnswer:
+        """Переписывает ответ по замечаниям критика."""
         return self._parse(
             system=load_prompt("retrieval_rewrite"),
             user=(
@@ -749,6 +755,7 @@ class OpenAILLM:
         report_format: str = "подробный",
         profile_text: str = "",
     ) -> ReportDraft:
+        """Пишет проект раздела акта по фактам из БД."""
         # Краткий формат — отдельный промпт и урезанный бюджет токенов:
         # разница видна в ответе детерминированно, а не «по настроению» модели.
         brief = str(report_format).strip().lower() == "краткий"
@@ -780,6 +787,7 @@ class OpenAILLM:
         facts_text: str,
         allowed_ids: list[str],
     ) -> ReportReview:
+        """Inspector проверяет черновик акта."""
         return self._parse(
             system=load_prompt("report_review"),
             user=(
@@ -802,6 +810,7 @@ class OpenAILLM:
         report_format: str = "подробный",
         profile_text: str = "",
     ) -> ReportDraft:
+        """Исправляет черновик по замечаниям Inspector."""
         system = load_prompt("report_revise")
         if str(report_format).strip().lower() == "краткий":
             system += (
@@ -836,6 +845,7 @@ class OpenAILLM:
         context: str = "",
         profile_text: str = "",
     ) -> InvestigationPlan:
+        """Декомпозирует вопрос расследования на подвопросы."""
         return self._parse(
             system=load_prompt("investigation_plan"),
             user=(
@@ -857,6 +867,7 @@ class OpenAILLM:
         context: str = "",
         profile_text: str = "",
     ) -> InvestigationPlan:
+        """Уточняет подвопросы по недостающим evidence."""
         return self._parse(
             system=load_prompt("investigation_refine"),
             user=(
@@ -880,6 +891,7 @@ class OpenAILLM:
         context: str = "",
         profile_text: str = "",
     ) -> InvestigationAnswer:
+        """Синтезирует итог расследования из ответов агентов."""
         analytics_short = {
             "answer": analytics.get("answer"),
             "rows": (analytics.get("rows") or [])[:10],

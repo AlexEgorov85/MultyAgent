@@ -143,6 +143,7 @@ class MainState(TypedDict, total=False):
     route: str
     route_reason: str
     route_confidence: float
+    route_error: bool
     analytics_mode: str
     profile: dict[str, str]
     memory_saved: bool

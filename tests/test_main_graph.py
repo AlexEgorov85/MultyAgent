@@ -810,3 +810,17 @@ def test_acl_exchange_is_logged_and_write_error_is_safe(
     assert failed["final_answer"] == "Проверок: 1."
     assert failed["route"] == "analytics"
     assert len(acl_log_path.read_text(encoding="utf-8").splitlines()) == 2
+
+
+class NoRouteLLM(MainLLM):
+    def route(self, **kwargs):
+        raise RuntimeError("LLM недоступна")
+
+
+def test_router_failure_reports_service_unavailable(server, main_data):
+    graph = build_main_graph(server, NoRouteLLM())
+
+    result = _invoke(graph, "thread-no-route", "Сколько проверок завершено?")
+
+    assert result["route"] == "out_of_domain"
+    assert "временно недоступен" in result["final_answer"]

@@ -171,3 +171,15 @@ def test_script_templates_use_readonly_role(server, monkeypatch):
     assert roles, "tools did not open a connection"
     assert set(roles) == {db_runtime.READ_ONLY_ROLE}
     assert db_runtime.ADMIN_ROLE not in roles
+
+
+def test_tool_plan_accepts_string_calls_and_missing_arguments():
+    from src.schemas import ToolPlan
+
+    plan = ToolPlan.model_validate(
+        {"calls": ["get_act_items", {"name": "search_acts", "arguments": None}]}
+    )
+
+    assert [call.name for call in plan.calls] == ["get_act_items", "search_acts"]
+    assert plan.calls[0].arguments == {}
+    assert plan.calls[1].arguments == {}

@@ -45,6 +45,7 @@ class ACLMessage(BaseModel):
     @field_validator("sender", "receiver", "conversation_id", "reply_with")
     @classmethod
     def not_blank(cls, value: str) -> str:
+        """Проверяет, что обязательное поле не пустое."""
         if not value.strip():
             raise ValueError("Поле не может быть пустым")
         return value
@@ -126,7 +127,10 @@ def append_acl_log(
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("w" if reset else "a", encoding="utf-8") as fh:
         fh.write(
-            json.dumps(validated.model_dump(), ensure_ascii=False) + "\n"
+            json.dumps(
+                validated.model_dump(), ensure_ascii=False, default=str
+            )
+            + "\n"
         )
     return validated
 
@@ -142,19 +146,23 @@ class ACLRecorder:
             self.path.write_text("", encoding="utf-8")
 
     def record(self, message: ACLMessage | dict[str, Any]) -> ACLMessage:
+        """Сохраняет сообщение в памяти и, если задан путь, в JSONL."""
         validated = validate_acl(message)
         self.messages.append(validated)
         if self.path:
             with self.path.open("a", encoding="utf-8") as fh:
                 fh.write(
                     json.dumps(
-                        validated.model_dump(), ensure_ascii=False
+                        validated.model_dump(),
+                        ensure_ascii=False,
+                        default=str,
                     )
                     + "\n"
                 )
         return validated
 
     def by_conversation(self, conversation_id: str) -> list[ACLMessage]:
+        """Возвращает сообщения одной беседы."""
         return [
             message
             for message in self.messages
@@ -162,4 +170,5 @@ class ACLRecorder:
         ]
 
     def to_dicts(self) -> list[dict[str, Any]]:
+        """Возвращает журнал сообщений как список словарей."""
         return [message.model_dump() for message in self.messages]

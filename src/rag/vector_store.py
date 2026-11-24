@@ -39,13 +39,17 @@ def _fts(server, query: str, limit: int) -> list[dict[str, Any]]:
             ).fetchone()
             lexemes = str(lexemes_row[0] or "") if lexemes_row else ""
             if lexemes:
+                # Лексемы уже нормализованы словарём. Приводим их к tsquery
+                # напрямую (`::tsquery`), иначе повторное применение
+                # to_tsquery('russian', …) стеммит их второй раз
+                # («отклонен» → «отклон») и совпадений не остаётся.
                 rows = conn.execute(
                     "SELECT chunk_id, source_type, source_id, title, content, "
                     "ts_rank(to_tsvector('russian', title || ' ' || content), "
-                    "        to_tsquery('russian', %s)) AS score "
+                    "        %s::tsquery) AS score "
                     "FROM audit.knowledge_chunks "
                     "WHERE to_tsvector('russian', title || ' ' || content) "
-                    "      @@ to_tsquery('russian', %s) "
+                    "      @@ %s::tsquery "
                     "ORDER BY score DESC LIMIT %s",
                     (lexemes, lexemes, limit),
                 ).fetchall()
