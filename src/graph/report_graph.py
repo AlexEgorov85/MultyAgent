@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
@@ -13,31 +12,8 @@ from ..i18n import t
 from ..llm import LLMClient
 from ..schemas import ReportDraft, ReportReview
 from ..state import ReportState
+from ..textscan import audit_codes, reference_ids, strip_bracketed_numbers
 from ..tools import db as db_tools
-
-AUDIT_CODE_RE = re.compile(r"AUD-\d{4}-[A-Z]+-\d{2}", re.IGNORECASE)
-
-def _citation_pattern(allowed_ids: list[str]) -> re.Pattern[str]:
-    """Собирает regex по префиксам допустимых ID, чтобы ловить и опечатки."""
-    prefixes = sorted(
-        {
-            item.split("-", 1)[0].upper()
-            for item in allowed_ids
-            if "-" in item and item.split("-", 1)[0]
-        }
-    )
-    if prefixes:
-        bodies = "|".join(re.escape(prefix) for prefix in prefixes)
-        return re.compile(
-            rf"(?<![A-Za-z0-9_-])(?:{bodies})-[A-Z0-9]+(?:-[A-Z0-9]+)*"
-            r"(?![A-Z0-9_-])",
-            re.IGNORECASE,
-        )
-    return re.compile(
-        r"(?<![A-Za-z0-9_-])[A-Z]{2,4}-\d{4}-[A-Z0-9]+(?:-[A-Z0-9]+)*"
-        r"(?![A-Z0-9_-])",
-        re.IGNORECASE,
-    )
 
 
 def _reply(
@@ -105,10 +81,10 @@ def build_report_graph(server, llm: LLMClient):
         }
 
     def collect_facts(state: ReportState) -> dict[str, Any]:
-        match = AUDIT_CODE_RE.search(state["question"])
+        codes = audit_codes(state["question"])
         audit_code = (
-            match.group(0).upper()
-            if match
+            codes[0]
+            if codes
             else last_audit_code(state.get("conversation_context", ""))
         )
         if not audit_code:
@@ -189,7 +165,7 @@ def build_report_graph(server, llm: LLMClient):
         canonical = {item.upper(): item for item in allowed_ids}
         draft_model = state.get("draft", {})
         text = str(draft_model.get("text", "")).replace("<br>", "\n").replace("<br/>", "\n")
-        text = re.sub(r"\[\d+\]", "", text)
+        text = strip_bracketed_numbers(text)
 
         declared_raw = [str(item) for item in draft_model.get("citations", [])]
         declared = [
@@ -197,10 +173,12 @@ def build_report_graph(server, llm: LLMClient):
         ]
         invalid = [item for item in declared_raw if item.upper() not in canonical]
 
-        found_raw = [
-            match.upper()
-            for match in _citation_pattern(allowed_ids).findall(text)
-        ]
+        prefixes = {
+            item.split("-", 1)[0].upper()
+            for item in allowed_ids
+            if "-" in item and item.split("-", 1)[0]
+        }
+        found_raw = reference_ids(text, prefixes)
         found = [
             canonical[item] for item in dict.fromkeys(found_raw) if item in canonical
         ]

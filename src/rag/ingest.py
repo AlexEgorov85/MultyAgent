@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any, Iterable
 
 from .. import db_runtime
+from ..textscan import paragraphs, sentences
 
 MAX_CHARS = 1200
 ITEM_FIELDS = (
@@ -21,10 +21,9 @@ ITEM_FIELDS = (
 
 
 def _split_long(text: str, max_chars: int) -> list[str]:
-    sentences = re.split(r"(?<=[.!?])\s+", text)
     parts: list[str] = []
     current = ""
-    for sentence in sentences:
+    for sentence in sentences(text):
         if len(current) + len(sentence) + 1 <= max_chars:
             current = f"{current} {sentence}".strip()
         else:
@@ -41,10 +40,10 @@ def _split_long(text: str, max_chars: int) -> list[str]:
 
 def chunk_text(text: str, max_chars: int = MAX_CHARS) -> list[str]:
     """Делит документ на смысловые чанки по абзацам и предложениям."""
-    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+    paragraphs_list = paragraphs(text)
     chunks: list[str] = []
     current = ""
-    for paragraph in paragraphs:
+    for paragraph in paragraphs_list:
         pieces = (
             [paragraph]
             if len(paragraph) <= max_chars

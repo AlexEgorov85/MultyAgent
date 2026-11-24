@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from typing import Protocol
 
 from .. import telemetry
-
-TOKEN_RE = re.compile(r"[0-9a-zA-Zа-яА-ЯёЁ]+")
+from ..textscan import words
 
 
 class EmbeddingClient(Protocol):
@@ -52,7 +50,7 @@ class HashEmbeddings:
         vectors: list[list[float]] = []
         for text in texts:
             vector = [0.0] * self.dim
-            for token in TOKEN_RE.findall(text.lower()):
+            for token in words(text.lower()):
                 index = int(hashlib.md5(token.encode("utf-8")).hexdigest(), 16) % self.dim
                 vector[index] += 1.0
             norm = sum(value * value for value in vector) ** 0.5 or 1.0

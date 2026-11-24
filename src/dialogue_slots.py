@@ -9,13 +9,11 @@ regex-угадывание ненадёжным. Их восстанавлива
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-_AUDIT_CODE_RE = re.compile(r"AUD-\d{4}-[A-Z]+-\d{2}", re.IGNORECASE)
-_YEAR_RE = re.compile(r"\b(20\d{2})\b")
+from .textscan import audit_codes, years
 
 
 class DialogueSlots(BaseModel):
@@ -42,13 +40,13 @@ def extract_slots(text: str) -> DialogueSlots:
     value = _normalise(text)
     slots = DialogueSlots()
 
-    code = _AUDIT_CODE_RE.search(text or "")
-    if code:
-        slots.audit_code = code.group(0).upper()
+    codes = audit_codes(text)
+    if codes:
+        slots.audit_code = codes[0]
 
-    years = _YEAR_RE.findall(value)
-    if years:
-        slots.year = int(years[-1])
+    found_years = years(value)
+    if found_years:
+        slots.year = found_years[-1]
 
     return slots
 

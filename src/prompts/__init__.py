@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -23,8 +22,6 @@ from pathlib import Path
 from .. import telemetry
 
 PROMPTS_DIR = Path(__file__).resolve().parent
-
-_FRONT_MATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 
 class PromptFormatError(ValueError):
@@ -43,13 +40,22 @@ class Prompt:
 
 
 def _parse_front_matter(raw: str, path: Path) -> tuple[dict[str, str], str]:
-    match = _FRONT_MATTER_RE.match(raw)
-    if not match:
+    lines = raw.splitlines()
+    if not lines or lines[0].strip() != "---":
+        raise PromptFormatError(
+            f"Prompt {path.name} has no front matter with id and version"
+        )
+    closing = None
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            closing = index
+            break
+    if closing is None:
         raise PromptFormatError(
             f"Prompt {path.name} has no front matter with id and version"
         )
     meta: dict[str, str] = {}
-    for line in match.group(1).splitlines():
+    for line in lines[1:closing]:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -59,7 +65,7 @@ def _parse_front_matter(raw: str, path: Path) -> tuple[dict[str, str], str]:
             )
         key, value = line.split(":", 1)
         meta[key.strip()] = value.strip()
-    body = raw[match.end() :].strip()
+    body = "\n".join(lines[closing + 1 :]).strip()
     return meta, body
 
 

@@ -10,6 +10,7 @@ from typing import Any, Protocol
 from .prompts import format_guide, load_prompt
 from .query.plan import PlanGaps, QueryPlan
 from . import telemetry
+from .textscan import contains_id
 from .schemas import (
     AnswerDraft,
     ChartSpec,
@@ -765,17 +766,10 @@ class OpenAILLM:
             ),
             max_tokens=900 if brief else 2500,
         )
-        import re
-
         text = text or facts_text[:5000]
         citations: list[str] = []
         for allowed_id in allowed_ids:
-            pattern = (
-                r"(?<![A-Za-z0-9_-])"
-                + re.escape(allowed_id)
-                + r"(?![A-Za-z0-9_-])"
-            )
-            if re.search(pattern, text, re.IGNORECASE):
+            if contains_id(text, allowed_id):
                 citations.append(allowed_id)
         return ReportDraft(text=text, citations=citations)
 
@@ -826,18 +820,11 @@ class OpenAILLM:
             ),
             max_tokens=2500,
         )
-        import re
-
         text = text or draft.text
         citations = list(draft.citations)
         if not citations:
             for allowed_id in allowed_ids:
-                pattern = (
-                    r"(?<![A-Za-z0-9_-])"
-                    + re.escape(allowed_id)
-                    + r"(?![A-Za-z0-9_-])"
-                )
-                if re.search(pattern, text, re.IGNORECASE):
+                if contains_id(text, allowed_id):
                     citations.append(allowed_id)
         return ReportDraft(text=text, citations=citations)
 

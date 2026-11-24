@@ -21,7 +21,6 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
-import re
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -220,8 +219,24 @@ def answer_has_number(answer: Any, value: int | float) -> bool:
     # Разрешаем точку/запятую после числа («273.»), но не десятичную
     # дробь или номер пункта («5.1», «1,5»). Годы не совпадают из-за
     # цифры перед числом.
-    pattern = rf"(?<![\d.,]){re.escape(number)}(?!\d)(?![.,]\d)"
-    return bool(re.search(pattern, text))
+    start = 0
+    while True:
+        index = text.find(number, start)
+        if index == -1:
+            return False
+        before = text[index - 1] if index > 0 else ""
+        after_index = index + len(number)
+        after = text[after_index] if after_index < len(text) else ""
+        after_next = (
+            text[after_index + 1] if after_index + 1 < len(text) else ""
+        )
+        before_blocked = bool(before) and before in "0123456789.,"
+        after_blocked = after.isdigit() or (
+            bool(after) and after in ".," and after_next.isdigit()
+        )
+        if not before_blocked and not after_blocked:
+            return True
+        start = index + 1
 
 
 def content_of(result: dict[str, Any]) -> dict[str, Any]:

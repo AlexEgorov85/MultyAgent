@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import uuid
 from typing import Any, Literal
 
@@ -23,11 +22,10 @@ from ..query.templates import template_parameters, template_plan_problems
 from ..schemas import SQLPlan, ToolPlan
 from ..semantic.catalog import catalog_text
 from ..state import AnalyticsState
+from ..textscan import audit_codes, number_tokens
 from ..tools import db as db_tools
 from ..tools.registry import TOOL_SPECS, execute_tool
 from ..tools.sql_guard import UnsafeSQLError, validate_readonly_sql
-
-AUDIT_CODE_RE = re.compile(r"AUD-\d{4}-[A-Z]+-\d{2}", re.IGNORECASE)
 
 ANALYTICS_MODES = ("sql", "drilldown", "multi_tool", "chart")
 
@@ -124,7 +122,7 @@ def _summary_numbers_supported(
                 return False
             declared.add(value)
 
-    for token in re.findall(r"\d+(?:[.,]\d+)?", text or ""):
+    for token in number_tokens(text):
         try:
             value = float(token.replace(",", "."))
         except ValueError:
@@ -474,10 +472,10 @@ def build_analytics_graph(server, llm: LLMClient):
         return {"plan": plan.model_dump(), "strategy": "generated", "retry": False}
 
     def drilldown(state: AnalyticsState) -> dict[str, Any]:
-        code = AUDIT_CODE_RE.search(state["question"])
+        codes = audit_codes(state["question"])
         audit_code = (
-            code.group(0).upper()
-            if code
+            codes[0]
+            if codes
             else last_audit_code(state.get("conversation_context", ""))
         )
         if not audit_code:
@@ -551,10 +549,10 @@ def build_analytics_graph(server, llm: LLMClient):
         limit = config.MAX_AGENT_ITERATIONS
         truncated = requested > limit
         english = str(state.get("language")).lower() == "en"
-        code_match = AUDIT_CODE_RE.search(state["question"])
+        codes = audit_codes(state["question"])
         audit_code = (
-            code_match.group(0).upper()
-            if code_match
+            codes[0]
+            if codes
             else last_audit_code(state.get("conversation_context", ""))
         )
         lines: list[str] = [f"Проверка {audit_code}:" if audit_code else "Результаты:"]

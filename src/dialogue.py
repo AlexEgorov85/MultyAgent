@@ -13,14 +13,13 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
+
+from .textscan import audit_codes
 
 MAX_CONTEXT_MESSAGES = 12
 MAX_CONTEXT_CHARS = 6000
 MAX_MESSAGE_CHARS = 900
-
-_AUDIT_CODE_RE = re.compile(r"AUD-\d{4}-[A-Z]+-\d{2}", re.IGNORECASE)
 
 
 def content_text(content: Any) -> str:
@@ -146,5 +145,5 @@ def build_dialogue_context(
 
 def last_audit_code(text: str) -> str:
     """Последний AUD-код в тексте — для переноса контекста акта/проверки."""
-    matches = _AUDIT_CODE_RE.findall(text or "")
-    return matches[-1].upper() if matches else ""
+    matches = audit_codes(text)
+    return matches[-1] if matches else ""

@@ -161,6 +161,13 @@ flowchart TD
 | Report | `src/graph/report_graph.py` | проект раздела акта + Inspector |
 | Investigation | `src/graph/investigation_graph.py` | Coordinator: два ACL-раунда, факт vs гипотеза |
 
+### Разбор текста без регулярных выражений
+
+ID, годы, числа, сноски, предложения и абзацы разбирает `src/textscan.py`
+обычными строковыми операциями. Регулярные выражения в `src/` остались
+только в `src/guardrails.py` — это политика безопасности (блокировка
+изменения данных, PII и раскрытия промпта), а не понимание вопроса.
+
 ### Analytics
 
 ```mermaid
