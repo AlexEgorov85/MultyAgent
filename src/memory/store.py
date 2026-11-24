@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Mapping
 
 from .. import db_runtime
-from ..semantic.catalog import THEMES, find_theme
 
 ALLOWED_KEYS = {"focus_theme", "default_format", "signature"}
 
@@ -98,21 +97,15 @@ def normalize_fact(
         return None
     if key == "default_format":
         lower = text.lower()
-        if any(stem in lower for stem in ("кратк", "коротк", "сжат", "brief", "short")):
-            return "краткий"
-        if any(
-            stem in lower
-            for stem in ("подробн", "полн", "развёрнут", "развернут", "detailed", "full")
-        ):
-            return "подробный"
+        if lower in ("краткий", "подробный"):
+            return lower
         return None
     if key == "focus_theme":
         lower = text.lower()
-        candidates = tuple(themes)
-        for theme in candidates:
+        for theme in themes:
             if lower == str(theme).lower():
                 return str(theme)
-        return find_theme(text, candidates)
+        return None
     return text[:200]
 
 
@@ -126,35 +119,3 @@ def profile_text(profile: Mapping[str, str]) -> str:
     if profile.get("signature"):
         parts.append(f"Подпись: {profile['signature']}")
     return "; ".join(parts)
-
-
-def infer_memory(question: str) -> dict[str, str]:
-    """Аварийный детерминированный fallback без LLM.
-
-    Основной путь извлечения — ``LLMClient.extract_memory`` (маршрут
-    ``memory`` выбирает router). Этот парсер используется только когда
-    LLM-извлечение недоступно, поэтому намеренно консервативен.
-    """
-    text = question.lower()
-    triggers = (
-        "запомни",
-        "я проверяю",
-        "предпочитаю",
-        "акт нужен",
-        "нужен кратк",
-        "нужен подробн",
-        "в кратком формате",
-        "в подробном формате",
-    )
-    if not any(trigger in text for trigger in triggers):
-        return {}
-
-    facts: dict[str, str] = {}
-    theme = find_theme(text, THEMES)
-    if theme:
-        facts["focus_theme"] = theme
-    if "кратк" in text:
-        facts["default_format"] = "краткий"
-    elif "подробн" in text:
-        facts["default_format"] = "подробный"
-    return facts

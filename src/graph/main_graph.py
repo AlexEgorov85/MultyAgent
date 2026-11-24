@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import time
 import uuid
 from typing import Any
@@ -20,7 +19,6 @@ from ..guardrails import check_final_answer, check_request, extract_sql
 from ..llm import LLMClient
 from ..memory import store as memory_store
 from ..presentation import present
-from ..semantic.catalog import theme_in_text
 from ..state import MainState
 from .analytics_graph import build_analytics_graph, known_themes
 from .investigation_graph import build_investigation_graph
@@ -235,21 +233,12 @@ def build_main_graph(
                 )
             except Exception:
                 update = None
-        if update is not None:
-            facts = {fact.key: fact.value for fact in update.facts}
-            forget = list(update.forget)
-        else:
-            # Аварийный fallback: детерминированные триггеры без LLM.
-            facts = memory_store.infer_memory(question)
-            lower = question.lower()
-            forget = (
-                sorted(memory_store.ALLOWED_KEYS)
-                if any(
-                    marker in lower
-                    for marker in ("забудь", "сбрось", "очисти", "forget", "reset")
-                )
-                else []
-            )
+        facts = (
+            {fact.key: fact.value for fact in update.facts}
+            if update is not None
+            else {}
+        )
+        forget = list(update.forget) if update is not None else []
 
         for key in forget:
             if key in memory_store.ALLOWED_KEYS:
@@ -344,78 +333,21 @@ def build_main_graph(
         }
 
     def _fallback_route(question: str) -> dict[str, Any]:
-        """Минимальный fallback, если LLM недоступна.
+        """Честный fallback, если LLM недоступна.
 
-        Доменный маршрут не угадываем: лучше честно сказать, что
+        Маршрут не угадываем даже для приветствия: лучше сказать, что
         маршрутизация недоступна, чем выполнить не тот агент.
         """
-        lower = question.lower()
-        compact = re.sub(r"\s+", " ", lower).strip(" !?.,…")
-        if any(
-            phrase in compact
-            for phrase in (
-                "что ты умеешь",
-                "что ты можешь",
-                "чем ты можешь помочь",
-                "чем можешь помочь",
-                "твои возможности",
-                "кто ты",
-                "расскажи о себе",
-                "what can you do",
-                "who are you",
-            )
-        ):
-            return {
-                "route": "smalltalk",
-                "route_reason": "smalltalk:capabilities",
-                "route_confidence": 0.5,
-            }
-        if re.match(
-            r"^(привет|здравствуй(те)?|добрый (день|вечер)|доброе утро|хай|hello|hi|hey)\b",
-            compact,
-        ):
-            return {
-                "route": "smalltalk",
-                "route_reason": "smalltalk:greeting",
-                "route_confidence": 0.5,
-            }
-        if re.match(r"^(спасибо|благодарю|thanks|thank you)\b", compact):
-            return {
-                "route": "smalltalk",
-                "route_reason": "smalltalk:thanks",
-                "route_confidence": 0.5,
-            }
         return {
             "route": "out_of_domain",
             "route_reason": "маршрутизация недоступна",
         }
 
-    def _question_with_profile(state: MainState, receiver: str) -> str:
-        question = state.get("resolved_query") or state.get("user_query", "")
-        # Профиль — предпочтение для отчёта, а не фильтр данных. Для Analytics
-        # «Тема: ипотека» в вопросе превращается в theme_code='ипотека' даже
-        # когда пользователь просит разрез по всем карманам.
-        if receiver != "report_agent":
-            return question
-        profile = state.get("profile", {})
-        parts = []
-        if profile.get("focus_theme"):
-            mentions_theme = any(
-                theme_in_text(theme, question)
-                for theme in known_themes(server)
-            )
-            if not mentions_theme:
-                parts.append(f"Тема: {profile['focus_theme']}.")
-        if profile.get("default_format"):
-            parts.append(f"Формат: {profile['default_format']}.")
-        if parts:
-            question = question + "\n" + " ".join(parts)
-        return question
-
     def _call_branch(state: MainState, receiver: str, graph) -> dict[str, Any]:
         profile = state.get("profile", {})
         content: dict[str, Any] = {
-            "question": _question_with_profile(state, receiver),
+            "question": state.get("resolved_query")
+            or state.get("user_query", ""),
             "original_question": state.get("user_query", ""),
             "conversation_context": state.get("dialogue_context", ""),
             "dialogue_slots": state.get("dialogue_slots", {}),

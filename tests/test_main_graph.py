@@ -123,10 +123,12 @@ class ReportLLM:
     def __init__(self):
         self.questions: list[str] = []
         self.formats: list[str] = []
+        self.profiles: list[str] = []
 
     def draft_report(self, **kwargs):
         self.questions.append(kwargs["question"])
         self.formats.append(kwargs.get("report_format", "подробный"))
+        self.profiles.append(kwargs.get("profile_text", ""))
         # Черновик должен содержать обязательные разделы, иначе Inspector
         # отправит его на доработку (revise), а этот фейк её не поддерживает.
         if kwargs.get("report_format") == "краткий":
@@ -332,8 +334,9 @@ def test_long_term_memory_between_sessions(server, main_data):
     assert "Вводная часть" in second["final_answer"]
     assert "Сроки устранения" in second["final_answer"]
     assert report.questions
-    assert "Формат: краткий" in report.questions[-1]
-    assert "Тема: ипотека" in report.questions[-1]
+    assert report.formats[-1] == "краткий"
+    assert "Формат: краткий" in report.profiles[-1]
+    assert "Тема: ипотека" in report.profiles[-1]
     assert report.formats[-1] == "краткий"
 
 
@@ -384,8 +387,8 @@ def test_memory_forget_and_profile_query(server, main_data):
     assert count == 0
 
 
-def test_memory_fallback_when_extraction_unavailable(server, main_data):
-    """Без extract_memory (или при его сбое) работает детерминированный fallback."""
+def test_memory_is_not_inferred_without_llm(server, main_data):
+    """Без extract_memory профиль не обновляется: keyword-fallback удалён."""
 
     class BrokenExtractLLM(MainLLM):
         def extract_memory(self, **kwargs):
@@ -399,8 +402,13 @@ def test_memory_fallback_when_extraction_unavailable(server, main_data):
             "Я проверяю ипотеку, акт нужен в кратком формате",
         )
         assert result["route"] == "memory"
-        assert "Профиль сохранён" in result["final_answer"]
+        assert "Профиль сохранён" not in result["final_answer"]
         with db_runtime.connect(server) as conn:
+            count = conn.execute(
+                "SELECT count(*) FROM audit.auditor_memory "
+                "WHERE auditor_id = 'MAIN-001'"
+            ).fetchone()[0]
+            assert count == 0
             conn.execute(
                 "DELETE FROM audit.auditor_memory WHERE auditor_id = 'MAIN-001'"
             )
@@ -681,7 +689,9 @@ def test_explicit_theme_wins_over_profile_theme(server, main_data):
     )
 
     assert report.questions
+    assert "вкладов" in report.questions[-1]
     assert "Тема: ипотека" not in report.questions[-1]
+    assert "Тема: ипотека" in report.profiles[-1]
 
 
 def test_new_turn_does_not_reuse_previous_acl_response(server, main_data):

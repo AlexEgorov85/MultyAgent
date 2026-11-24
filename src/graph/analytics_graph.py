@@ -230,136 +230,8 @@ def known_themes(server) -> list[str]:
     return [str(row[0]) for row in rows]
 
 
-_YEAR_COLUMNS = ("pocket_year", "period_year", "year")
-_THEME_COLUMNS = (
-    "theme_code",
-    "theme",
-    "theme_name",
-    "pocket_title",
-    "pocket_id",
-)
-_MEASURE_COLUMNS = (
-    "closed_audits_count",
-    "completed_audits_count",
-    "completed_count",
-    "audit_count",
-    "deviations_count",
-    "items_count",
-    "total_items",
-    "overdue_open_items_count",
-    "critical_open_count",
-    "count",
-    "total",
-    "cnt",
-)
-
-
 def _is_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def _pick_column(
-    rows: list[dict[str, Any]],
-    columns: list[str],
-    candidates: tuple[str, ...],
-    *,
-    numeric: bool = False,
-) -> str | None:
-    for name in candidates:
-        if name not in columns:
-            continue
-        for row in rows:
-            value = row.get(name)
-            if value is None:
-                continue
-            if numeric and not _is_number(value):
-                break
-            return name
-    return None
-
-
-def _format_number(value: float) -> str:
-    return str(int(value)) if float(value).is_integer() else f"{value:g}"
-
-
-def _aggregate_summary(
-    rows: list[dict[str, Any]],
-    columns: list[str],
-    language: str | None = None,
-) -> str:
-    """Детерминированные итоги по годам и темам — без арифметики LLM."""
-    if not rows:
-        return ""
-    english = str(language).lower() == "en"
-    measure = _pick_column(rows, columns, _MEASURE_COLUMNS, numeric=True)
-    if measure is None:
-        measure = _pick_column(
-            rows,
-            columns,
-            tuple(column for column in columns if column not in _YEAR_COLUMNS),
-            numeric=True,
-        )
-    if measure is None:
-        return ""
-
-    parts: list[str] = []
-    year_column = _pick_column(rows, columns, _YEAR_COLUMNS)
-    theme_column = _pick_column(rows, columns, _THEME_COLUMNS)
-
-    def totals(column: str) -> dict[Any, float]:
-        result: dict[Any, float] = {}
-        for row in rows:
-            value = row.get(measure)
-            if not _is_number(value):
-                continue
-            key = row.get(column)
-            result[key] = result.get(key, 0.0) + float(value)
-        return result
-
-    if year_column:
-        by_year = totals(year_column)
-        if by_year:
-            body = ", ".join(
-                f"{key} — {_format_number(value)}"
-                for key, value in sorted(by_year.items(), key=lambda item: str(item[0]))
-            )
-            parts.append(f"By year: {body}." if english else f"По годам: {body}.")
-
-    if theme_column and theme_column != year_column:
-        by_theme = totals(theme_column)
-        if by_theme:
-            body = ", ".join(
-                f"{key} — {_format_number(value)}"
-                for key, value in sorted(
-                    by_theme.items(), key=lambda item: (-item[1], str(item[0]))
-                )
-            )
-            parts.append(f"By theme: {body}." if english else f"По темам: {body}.")
-
-    pocket_column = _pick_column(rows, columns, ("pocket", "pocket_title"))
-    if pocket_column and pocket_column not in (year_column, theme_column):
-        by_pocket = totals(pocket_column)
-        if by_pocket:
-            body = ", ".join(
-                f"{key} — {_format_number(value)}"
-                for key, value in sorted(
-                    by_pocket.items(), key=lambda item: (-item[1], str(item[0]))
-                )
-            )
-            parts.append(
-                f"By pocket: {body}." if english else f"По карманам: {body}."
-            )
-
-    grand_total = sum(
-        float(row[measure]) for row in rows if _is_number(row.get(measure))
-    )
-    if grand_total:
-        parts.append(
-            f"Total: {_format_number(grand_total)}."
-            if english
-            else f"Всего: {_format_number(grand_total)}."
-        )
-    return " ".join(parts)
 
 
 def _summary_numbers_supported(
@@ -997,19 +869,12 @@ def build_analytics_graph(server, llm: LLMClient):
                     "audit_count",
                     "completed_count",
                     "completed_audits_count",
-                ):
-                    if status_value.startswith("заверш"):
-                        headline_label = (
-                            "Completed audits"
-                            if english
-                            else "Завершённых проверок"
-                        )
-                    elif status_value.startswith("complet"):
-                        headline_label = (
-                            "Completed audits"
-                            if english
-                            else "Завершённых проверок"
-                        )
+                ) and status_value in ("завершена", "completed"):
+                    headline_label = (
+                        "Completed audits"
+                        if english
+                        else "Завершённых проверок"
+                    )
                 # Условия вопроса (год, тема, статус) пользователь уже знает:
                 # не дублируем их и не показываем технические имена колонок.
                 return f"{headline_label}: {row[headline]}."
@@ -1171,16 +1036,6 @@ def build_analytics_graph(server, llm: LLMClient):
                         and template_header.lower() not in text.lower()
                     ):
                         text = f"{template_header}. {text}"
-                    if len(rows) > 1:
-                        aggregate = _aggregate_summary(
-                            rows, columns, state.get("language")
-                        )
-                        return {
-                            "answer": "\n\n".join(
-                                part for part in (text, aggregate) if part
-                            ),
-                            "answer_source": "llm",
-                        }
                     return {"answer": text, "answer_source": "llm"}
                 if text:
                     logger.debug(
@@ -1188,10 +1043,6 @@ def build_analytics_graph(server, llm: LLMClient):
                     )
 
         answer = _format_rows(rows, columns, state.get("language"))
-        if len(rows) > 1:
-            aggregate = _aggregate_summary(rows, columns, state.get("language"))
-            if aggregate:
-                answer = aggregate
         if template_header:
             answer = f"{template_header}. {answer}"
         return {"answer": answer, "answer_source": "template"}

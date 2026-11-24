@@ -45,31 +45,6 @@ _HEADLINE_COLUMNS = (
     "total",
 )
 
-# Порядок колонок в таблице: сначала то, что осмысленно для человека,
-# затем остальные поля запроса. Иначе первыми попадают служебные ID.
-_TABLE_PREFERRED_COLUMNS = (
-    "item_number",
-    "title",
-    "risk_level",
-    "status",
-    "deadline",
-    "audit_code",
-    "act_number",
-    "pocket_year",
-    "pocket",
-    "year",
-    "theme_code",
-    "completed_audits_count",
-    "audit_count",
-    "deviations_count",
-    "items_count",
-)
-
-
-def _table_columns(columns: list[str]) -> list[str]:
-    preferred = [column for column in _TABLE_PREFERRED_COLUMNS if column in columns]
-    return preferred + [column for column in columns if column not in preferred]
-
 _LABELS_RU: dict[str, str] = {
     "audit_id": "проверка",
     "audit_code": "проверка",
@@ -98,7 +73,9 @@ _LABELS_RU: dict[str, str] = {
     "theme_name": "тема",
     "audit_count": "Проверок",
     "completed_count": "Завершённых проверок",
+    "completed_audits": "Завершённых проверок",
     "completed_audits_count": "Завершённых проверок",
+    "closed_audits_count": "Завершённых проверок",
     "count": "Всего",
     "total": "Всего",
     "cnt": "Всего",
@@ -142,7 +119,9 @@ _LABELS_EN: dict[str, str] = {
     "theme_name": "theme",
     "audit_count": "Audits",
     "completed_count": "Completed audits",
+    "completed_audits": "Completed audits",
     "completed_audits_count": "Completed audits",
+    "closed_audits_count": "Completed audits",
     "count": "Total",
     "total": "Total",
     "cnt": "Total",
@@ -248,44 +227,9 @@ def _english(state: dict[str, Any]) -> bool:
     return _lang(state).lower() == "en"
 
 
-def _dynamic_label(column: str, state: dict[str, Any]) -> str | None:
-    """Подпись по смыслу алиаса, когда точного совпадения нет.
-
-    LLM свободно называет колонки (``completed_audits``, ``total_deviations``),
-    поэтому опираемся на ключевые слова, а не только на точный словарь.
-    """
-    lower = column.lower()
-    english = _english(state)
-    completed = (
-        "completed" in lower
-        or "closed" in lower
-        or "заверш" in lower
-        or "закрыт" in lower
-    )
-    if "audit" in lower or "провер" in lower:
-        if english:
-            return "Completed audits" if completed else "Audits"
-        return "Завершённых проверок" if completed else "Проверок"
-    if "item" in lower or "пункт" in lower:
-        return "Items" if english else "Пунктов"
-    if "deviation" in lower or "отклон" in lower:
-        return "Deviations" if english else "Отклонений"
-    if "act" in lower or lower.endswith("акт"):
-        return "Acts" if english else "Актов"
-    if "count" in lower or lower.startswith(("cnt", "total")):
-        return "Total" if english else "Всего"
-    return None
-
-
 def _label(column: str, state: dict[str, Any]) -> str:
     labels = _LABELS_EN if _english(state) else _LABELS_RU
-    exact = labels.get(column)
-    if exact:
-        return exact
-    dynamic = _dynamic_label(column, state)
-    if dynamic:
-        return dynamic
-    return column.replace("_", " ").strip().capitalize()
+    return labels.get(column, column.replace("_", " ").strip().capitalize())
 
 
 def _fmt(value: Any, column: str, state: dict[str, Any]) -> str:
@@ -322,47 +266,9 @@ def _truncate(text: str, limit: int = 1200) -> str:
     return clean if len(clean) <= limit else clean[: limit - 1].rstrip() + "…"
 
 
-def _is_table_boilerplate(answer: str) -> bool:
-    """Служебная фраза «Найдено строк: N. Первые: …» не нужна перед таблицей."""
-    text = answer.strip().lower()
-    return not text or text.startswith(("найдено строк", "rows found"))
-
-
 def _escape_md(value: str) -> str:
     """Экранирует значение для ячейки Markdown-таблицы."""
     return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
-
-
-def _contextual_count_label(state: dict[str, Any], fallback: str) -> str:
-    """Уточняет счётную подпись по формулировке вопроса.
-
-    SQL может вернуть нейтральный алиас (``count``), но пользователь
-    спрашивал про завершённые проверки — подпись должна это отражать.
-    """
-    query = str(state.get("user_query") or "").lower()
-    if _english(state):
-        if "audit" in query:
-            if "completed" in query:
-                return "Completed audits"
-            if "overdue" in query:
-                return "Overdue audits"
-        if "item" in query and "overdue" in query:
-            return "Overdue items"
-        return fallback
-    if "провер" in query or "аудит" in query:
-        if "заверш" in query or "закрыт" in query:
-            return "Завершённых проверок"
-        if "просроч" in query:
-            return "Просроченных проверок"
-        if "открыт" in query:
-            return "Открытых проверок"
-        return fallback
-    if "пункт" in query:
-        if "просроч" in query:
-            return "Просроченных пунктов"
-        if "открыт" in query:
-            return "Открытых пунктов"
-    return fallback
 
 
 def _present_analytics(state: dict[str, Any]) -> dict[str, Any]:
@@ -385,12 +291,10 @@ def _present_analytics(state: dict[str, Any]) -> dict[str, Any]:
     if rows:
         if len(rows) == 1:
             row = rows[0]
-            source = str(content.get("answer_source") or "")
-            # LLM/агент уже сформулировали ответ словами — не заменяем его
-            # сухим шаблоном. Шаблон остаётся для fallback и старых payload'ов
-            # без answer_source.
-            use_answer = bool(answer) and not _is_table_boilerplate(answer) and (
-                source in ("llm", "agent") or not source
+            # Не показываем технические имена колонок, даже если они попали
+            # в шаблонный ответ. Это проверка формата, а не угадывание смысла.
+            use_answer = bool(answer) and not any(
+                column and column in answer for column in columns
             )
             headline = next(
                 (key for key in _HEADLINE_COLUMNS if key in row and row[key] is not None),
@@ -409,14 +313,10 @@ def _present_analytics(state: dict[str, Any]) -> dict[str, Any]:
                     row.get("status") or row.get("act_status") or ""
                 ).strip().lower()
                 if headline in _AUDIT_COUNT_COLUMNS:
-                    if status_value.startswith("заверш"):
+                    if status_value in ("завершена", "completed"):
                         label = "Завершённых проверок"
-                    elif status_value.startswith("complet"):
-                        label = "Completed audits"
                 value = _fmt(row[headline], headline, state)
                 is_count = headline in _HEADLINE_COLUMNS or single_numeric
-                if is_count:
-                    label = _contextual_count_label(state, label)
                 return {
                     "kind": "count" if is_count else "scalar",
                     "text": answer if use_answer else f"{label}: {value}.",
@@ -437,9 +337,9 @@ def _present_analytics(state: dict[str, Any]) -> dict[str, Any]:
                     "sql": sql,
                 }
 
-        shown_columns = _table_columns([column for column in columns if column])[:5]
+        shown_columns = [column for column in columns if column][:5]
         lines: list[str] = []
-        if answer and not _is_table_boilerplate(answer):
+        if answer:
             lines.extend([answer, ""])
         lines.extend([t(_lang(state), "present_table_title", count=len(rows)), ""])
         if shown_columns:

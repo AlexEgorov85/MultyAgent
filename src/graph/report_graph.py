@@ -17,32 +17,6 @@ from ..tools import db as db_tools
 
 AUDIT_CODE_RE = re.compile(r"AUD-\d{4}-[A-Z]+-\d{2}", re.IGNORECASE)
 
-# Обязательные разделы проекта акта: заголовок → ключевые корни для проверки.
-REQUIRED_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Вводная часть", ("вводн",)),
-    ("Выявленные отклонения и проблемы", ("отклонени", "проблем")),
-    ("Рекомендации", ("рекомендац", "рекоменд")),
-    ("Сроки устранения", ("срок",)),
-)
-
-
-def _missing_sections(text: str) -> list[str]:
-    """Детерминированно проверяет наличие обязательных разделов отчёта.
-
-    Если в черновике нет ни одного раздела, структуру оценивает Inspector:
-    детерминированная проверка имеет смысл только для размеченного текста.
-    """
-    lowered = text.lower()
-    present = {
-        title
-        for title, keywords in REQUIRED_SECTIONS
-        if any(keyword in lowered for keyword in keywords)
-    }
-    if not present:
-        return []
-    return [title for title, _ in REQUIRED_SECTIONS if title not in present]
-
-
 def _citation_pattern(allowed_ids: list[str]) -> re.Pattern[str]:
     """Собирает regex по префиксам допустимых ID, чтобы ловить и опечатки."""
     prefixes = sorted(
@@ -241,7 +215,6 @@ def build_report_graph(server, llm: LLMClient):
         issues = (
             [f"Несуществующие ID: {', '.join(issue_items)}"] if issue_items else []
         )
-        issues.extend(f"Нет раздела: {title}" for title in _missing_sections(text))
         return {
             "draft": {**draft_model, "text": text, "citations": citations},
             "citations": citations,

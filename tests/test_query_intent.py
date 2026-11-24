@@ -72,7 +72,6 @@ def test_specific_pocket_is_filter_not_breakdown():
 
     assert "pocket" not in completed.dimensions
     assert ("year", 2026) in _filter_pairs(completed)
-    assert ("theme", "ипотека") in _filter_pairs(completed)
 
 
 def test_kartina_is_not_a_pocket_breakdown():
@@ -84,19 +83,6 @@ def test_kartina_is_not_a_pocket_breakdown():
     assert "year" in completed.dimensions
 
 
-def test_theme_becomes_filter_when_not_a_breakdown():
-    plan = QueryPlan(metric="audit_count")
-
-    completed = complete_query_plan(
-        "Сколько завершённых проверок по ипотеке в 2026 году?",
-        plan,
-    )
-
-    assert ("theme", "ипотека") in _filter_pairs(completed)
-    assert ("status", "завершена") in _filter_pairs(completed)
-    assert ("year", 2026) in _filter_pairs(completed)
-
-
 def test_closed_item_uses_item_status_not_audit_status():
     plan = QueryPlan(metric="item_count")
 
@@ -104,23 +90,6 @@ def test_closed_item_uses_item_status_not_audit_status():
 
     assert ("status", "закрыт") in _filter_pairs(completed)
     assert ("status", "завершена") not in _filter_pairs(completed)
-
-
-def test_auditor_theme_is_specialization_filter():
-    plan = QueryPlan(metric="auditor_count")
-
-    completed = complete_query_plan(
-        "Сколько аудиторов специализируются на ипотеке?", plan
-    )
-
-    specialization = [
-        query_filter
-        for query_filter in completed.filters
-        if query_filter.field == "specialization"
-    ]
-    assert len(specialization) == 1
-    assert specialization[0].value == "ипотека"
-    assert specialization[0].op == "contains"
 
 
 def test_multiple_languages_are_a_breakdown():

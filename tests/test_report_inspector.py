@@ -304,30 +304,6 @@ def test_revision_preserves_citations_when_model_returns_none(server, report_dat
     assert llm.calls.count("revise") == 1
 
 
-def test_missing_section_causes_one_revision_then_marks(server, report_data):
-    incomplete = (
-        "Вводная часть. Проверка AUD-2026-DEPOSITS-77.\n"
-        "Выявленные отклонения и проблемы: некорректное начисление процентов.\n"
-        "Сроки устранения: 2026-06-01. Источник: ITM-REP-01."
-    )
-    llm = FakeReportLLM(
-        drafts=[ReportDraft(text=incomplete, citations=["ITM-REP-01"])],
-        reviews=[ReportReview(verdict="ok"), ReportReview(verdict="ok")],
-        revisions=[ReportDraft(text=incomplete, citations=["ITM-REP-01"])],
-    )
-    graph = build_report_graph(server, llm)
-
-    result = graph.invoke(
-        {"acl_request": acl_request("Сформируй раздел акта по AUD-2026-DEPOSITS-77")}
-    )
-
-    draft_text = result["acl_response"]["content"]["draft"]
-    assert result["iterations"] == 1
-    assert llm.calls.count("revise") == 1
-    assert "Нет раздела: Рекомендации" in draft_text
-    assert "Требует проверки" in draft_text
-
-
 def test_fabricated_id_in_text_is_discarded(server, report_data):
     llm = FakeReportLLM(
         drafts=[ReportDraft(text=complete_report("ITM-FAKE-99"), citations=[])],

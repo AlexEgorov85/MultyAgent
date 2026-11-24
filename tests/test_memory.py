@@ -62,21 +62,11 @@ def test_unknown_key_rejected(server, memory_auditor):
         store.save_fact(server, memory_auditor, "favourite_color", "синий")
 
 
-def test_memory_intent_detection():
-    assert store.infer_memory("Сколько проверок по ипотеке?") == {}
-    facts = store.infer_memory("Я проверяю ипотеку, акт нужен в кратком формате")
-    assert facts == {"focus_theme": "ипотека", "default_format": "краткий"}
-    # «Картина» — не тема «карты»; «карты» — тема.
-    assert store.infer_memory("Запомни: я проверяю картину") == {}
-    assert store.infer_memory("Запомни: я проверяю карты") == {
-        "focus_theme": "карты"
-    }
-
-
-def test_normalize_fact():
-    assert store.normalize_fact("default_format", "Краткий формат") == "краткий"
-    assert store.normalize_fact("default_format", "keep it brief") == "краткий"
-    assert store.normalize_fact("default_format", "подробный") == "подробный"
+def test_normalize_fact_accepts_only_canonical_values():
+    assert store.normalize_fact("default_format", "краткий") == "краткий"
+    assert store.normalize_fact("default_format", "Подробный") == "подробный"
+    assert store.normalize_fact("default_format", "Краткий формат") is None
+    assert store.normalize_fact("default_format", "keep it brief") is None
     assert store.normalize_fact("default_format", "синий") is None
     assert (
         store.normalize_fact("focus_theme", "Ипотека", ["ипотека", "вклады"])
@@ -84,18 +74,9 @@ def test_normalize_fact():
     )
     assert (
         store.normalize_fact("focus_theme", "по ипотеке", ["ипотека", "вклады"])
-        == "ипотека"
+        is None
     )
     assert store.normalize_fact("focus_theme", "криптовалюта", ["ипотека"]) is None
-    assert store.normalize_fact("focus_theme", "картина", ["карты"]) is None
-    assert (
-        store.normalize_fact("focus_theme", "банковские карты", ["карты"])
-        == "карты"
-    )
-    assert (
-        store.normalize_fact("focus_theme", "ипотечный кредит", ["ипотека"])
-        == "ипотека"
-    )
     assert store.normalize_fact("signature", "  Иванов И.И. ") == "Иванов И.И."
     assert store.normalize_fact("favourite_color", "синий") is None
     assert store.normalize_fact("default_format", "   ") is None

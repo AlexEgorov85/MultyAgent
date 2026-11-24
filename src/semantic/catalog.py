@@ -14,10 +14,9 @@ from typing import Any, Mapping, Sequence
 
 THEMES: tuple[str, ...] = ("ипотека", "потребкредитование", "платежи", "карты", "вклады")
 
-# Формы слов, а не подстроки: «картина» и «карточка» — не тема «карты»,
-# «ипотечный кредит» — тема «ипотека», «потребительский кредит» —
-# «потребкредитование». Семантический выбор темы делает LLM;
-# этот матчер нужен для валидации значения и проверки явного упоминания.
+# Доменный лексикон тем. Это не замена LLM, а проверка явного упоминания:
+# модель регулярно теряет фильтр темы, а бенчмарк показывает неверные числа.
+# Формы слов и исключения нужны для омонимов («картина» ≠ «карты»).
 _THEME_FORMS: dict[str, str] = {
     "ипотека": r"ипотечн\w*|ипотек(?:а|и|е|у|ой|ою|ам|ами|ах)?",
     "потребкредитование": r"потребкредит\w*|потребительск\w*\s+кредит\w*",
@@ -25,16 +24,10 @@ _THEME_FORMS: dict[str, str] = {
     "карты": r"карт(?:а|ы|е|у|ой|ою|ам|ами|ах)?|карточн\w*",
     "вклады": r"вклад(?:а|у|ом|е|ы|ов|ам|ами|ах)?|вкладчик\w*|вкладчиц\w*",
 }
-
-THEME_PATTERNS: dict[str, re.Pattern[str]] = {
-    theme: re.compile(
-        rf"(?<![а-яё])(?:{forms})(?![а-яё])",
-        re.IGNORECASE,
-    )
+_THEME_PATTERNS: dict[str, re.Pattern[str]] = {
+    theme: re.compile(rf"(?<![а-яё])(?:{forms})(?![а-яё])", re.IGNORECASE)
     for theme, forms in _THEME_FORMS.items()
 }
-
-# Коллокации, где «карта» — не банковская карта: их убираем до сопоставления.
 _THEME_EXCLUSIONS: dict[str, tuple[re.Pattern[str], ...]] = {
     "карты": (
         re.compile(r"карт\w*\s+провер(?:ки|ок|кам|ками|ках)", re.IGNORECASE),
@@ -51,44 +44,21 @@ def _normalise_text(text: str) -> str:
 
 
 def theme_in_text(theme: str, text: str) -> bool:
-    """Упоминается ли тема в тексте целым словом (с учётом падежей).
-
-    Неизвестные темы сравниваются как подстрока — вызывающий код обычно
-    передаёт значения из БД, а не произвольный текст.
-    """
+    """Упоминается ли тема целым словом с учётом падежей и омонимов."""
     value = str(theme or "").strip().lower()
     cleaned = _normalise_text(text)
     if not value or not cleaned:
         return False
-
-    pattern = THEME_PATTERNS.get(value)
+    pattern = _THEME_PATTERNS.get(value)
     if pattern is None:
         return value in cleaned
-
     for rule in _THEME_EXCLUSIONS.get(value, ()):
         cleaned = rule.sub(" ", cleaned)
     return bool(pattern.search(cleaned))
 
 
-def find_theme(
-    text: str,
-    themes: Sequence[str] | None = None,
-) -> str | None:
-    """Возвращает первую упомянутую тему из списка (по порядку списка)."""
-    candidates = tuple(themes) if themes is not None else THEMES
-    for theme in candidates:
-        if theme_in_text(theme, text):
-            return str(theme)
-    return None
-
-
-def find_themes(
-    text: str,
-    themes: Sequence[str] | None = None,
-) -> tuple[str, ...]:
-    """Все упомянутые темы — для выбора разреза вместо одного фильтра."""
-    candidates = tuple(themes) if themes is not None else THEMES
-    return tuple(str(theme) for theme in candidates if theme_in_text(theme, text))
+def find_themes(text: str) -> tuple[str, ...]:
+    return tuple(theme for theme in THEMES if theme_in_text(theme, text))
 
 
 AUDIT_STATUSES: tuple[str, ...] = ("запланирована", "в работе", "завершена", "отменена")

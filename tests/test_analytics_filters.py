@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from src.graph.analytics_graph import (
-    _aggregate_summary,
     _summary_numbers_supported,
     missing_question_filters,
 )
@@ -133,19 +132,6 @@ def test_complete_year_and_pocket_breakdown_is_accepted():
         )
         == []
     )
-
-
-def test_aggregate_summary_counts_all_rows_without_llm():
-    rows = [
-        {"pocket_year": 2025, "theme_code": "ипотека", "closed_audits_count": 8},
-        {"pocket_year": 2026, "theme_code": "ипотека", "closed_audits_count": 5},
-    ]
-    columns = ["pocket_year", "theme_code", "closed_audits_count"]
-
-    summary = _aggregate_summary(rows, columns)
-
-    assert "По годам: 2025 — 8, 2026 — 5." in summary
-    assert "Всего: 13." in summary
 
 
 def test_llm_numbers_outside_rows_are_rejected():

@@ -1,8 +1,8 @@
-"""Морфологически-аккуратный матчер тем: без ложных срабатываний."""
+"""Морфологически аккуратный матчер тем: без ложных срабатываний."""
 
 from __future__ import annotations
 
-from src.semantic.catalog import find_theme, theme_in_text
+from src.semantic.catalog import theme_in_text
 
 
 def test_bank_cards_are_recognized():
@@ -35,9 +35,3 @@ def test_theme_inflections_and_adjectives():
     assert theme_in_text("платежи", "платёжные поручения")
     assert theme_in_text("вклады", "данные по вкладчикам")
     assert not theme_in_text("вклады", "открой вкладку настроек")
-
-
-def test_find_theme_respects_candidates_and_order():
-    assert find_theme("картина отклонений", ["карты"]) is None
-    assert find_theme("проверки по картам", ["ипотека", "карты"]) == "карты"
-    assert find_theme("проверки по картам", ["ипотека"]) is None

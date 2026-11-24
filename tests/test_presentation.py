@@ -64,7 +64,7 @@ def test_count_alias_without_count_suffix_is_humanized():
     assert presentation["text"] == "Завершённых проверок: 5."
 
 
-def test_generic_count_alias_uses_question_context():
+def test_generic_count_alias_uses_exact_label():
     state = _state()
     state["acl_response"]["content"] = {
         "rows": [{"count": 5}],
@@ -74,7 +74,7 @@ def test_generic_count_alias_uses_question_context():
     presentation = build_presentation(state)
 
     assert presentation["kind"] == "count"
-    assert presentation["text"] == "Завершённых проверок: 5."
+    assert presentation["text"] == "Всего: 5."
 
 
 def test_llm_answer_replaces_single_row_template():
@@ -215,7 +215,7 @@ def test_trace_contains_route_sql_and_guard_steps():
     result = present(state)
     steps = {step["step"]: step for step in result["trace"]}
 
-    assert result["final_answer"] == "Завершённых проверок: 5."
+    assert result["final_answer"] == "Проверок: 5."
     assert "route" in steps
     assert {"label": "Режим", "value": "drilldown"} in steps["route"]["chips"]
     assert steps["sql"]["detail"].startswith("SELECT COUNT(*)")
