@@ -18,10 +18,10 @@ from ..dialogue import last_audit_code
 from ..i18n import t
 from ..llm import LLMClient
 from ..query.compiler import QueryCompileError, compile_query_plan
-from ..query.intent import complete_query_plan
+from ..query.intent import apply_plan_gaps
 from ..query.templates import template_parameters, template_plan_problems
 from ..schemas import SQLPlan, ToolPlan
-from ..semantic.catalog import catalog_text, get_metric, question_signals
+from ..semantic.catalog import catalog_text
 from ..state import AnalyticsState
 from ..tools import db as db_tools
 from ..tools.registry import TOOL_SPECS, execute_tool
@@ -33,111 +33,13 @@ ANALYTICS_MODES = ("sql", "drilldown", "multi_tool", "chart")
 
 logger = logging.getLogger(__name__)
 
-def _normalise(text: str) -> str:
-    return " ".join((text or "").lower().replace("ё", "е").split())
-
-
-_DIMENSION_LABELS: dict[str, str] = {
-    "pocket": "разбивка по карманам",
-    "year": "разбивка по годам",
-    "theme": "разбивка по темам",
-    "status": "разбивка по статусам",
-    "act_status": "разбивка по статусам акта",
-    "run_status": "разбивка по статусам запусков",
-    "item_type": "разбивка по типам находок",
-    "audit_type": "разбивка по типам проверок",
-    "risk_level": "разбивка по уровню риска",
-    "severity": "разбивка по уровню критичности",
-    "language": "разбивка по языкам",
-    "specialization": "разбивка по специализациям",
-    "audit_code": "разбивка по проверкам",
-    "title": "разбивка по формулировкам",
-}
-
-_FILTER_LABELS: dict[str, str] = {
-    "theme": "тема",
-    "status": "статус",
-    "risk_level": "уровень риска",
-    "severity": "уровень критичности",
-    "language": "язык",
-    "item_type": "тип находки",
-    "specialization": "специализация",
-}
-
-# Какие колонки в SELECT/GROUP BY доказывают, что разрез действительно есть.
-_DIMENSION_MARKERS: dict[str, tuple[str, ...]] = {
-    "year": (r"\bpocket_year\b", r"\bperiod_year\b", r"\byear\b"),
-    "theme": (r"\btheme_code\b", r"\btheme_name\b", r"\btheme\b"),
-    "status": (
-        r"\bstatus\b",
-        r"\bact_status\b",
-        r"\bitem_status\b",
-        r"\brun_status\b",
-    ),
-    "act_status": (r"\bact_status\b", r"\bstatus\b"),
-    "run_status": (r"\brun_status\b", r"\bstatus\b"),
-    "item_type": (r"\bitem_type\b",),
-    "audit_type": (r"\baudit_type\b",),
-    "risk_level": (r"\brisk_level\b",),
-    "severity": (r"\bseverity\b", r"\brisk_level\b"),
-    "language": (r"\blanguage\b",),
-    "specialization": (r"\bspecializations?\b",),
-    "audit_code": (r"\baudit_code\b",),
-    "title": (r"\btitle\b",),
-    "approved_by": (r"\bapproved_by\b",),
-    "lead_auditor_id": (r"\blead_auditor",),
-    "responsible_unit": (r"\bresponsible_unit\b",),
-    "is_repeat": (r"\bis_repeat\b",),
-    "entity_type": (r"\bentity_type\b",),
-    "metric_name": (r"\bmetric_name\b",),
-}
-
-
-def _structural_sql(sql: str) -> str:
-    """SELECT-список и GROUP BY: где виден разрез, а не только фильтр."""
-    text = _normalise(sql)
-    selects = re.findall(r"\bselect\b(.*?)\bfrom\b", text, re.DOTALL)
-    groups = re.findall(
-        r"\bgroup\s+by\b(.*?)(?:\border\s+by\b|\blimit\b|$)",
-        text,
-        re.DOTALL,
-    )
-    return " ".join(selects + groups)
-
-
-def _sql_covers_dimension(structural: str, dimension: str) -> bool:
-    if dimension == "pocket":
-        if re.search(
-            r"\bpocket_id\b|\bpocket_title\b|\bpocket\b", structural
-        ):
-            return True
-        # Карман — это пара (год, тема); view может отдавать их отдельно.
-        return "pocket_year" in structural and "theme_code" in structural
-    markers = _DIMENSION_MARKERS.get(dimension, ())
-    return any(re.search(marker, structural) for marker in markers)
-
-
-def _has_latest_year_marker(haystack: str) -> bool:
-    return bool(
-        re.search(
-            r"\bmax\s*\(\s*(?:[a-z_][a-z0-9_]*\.)?pocket_year\b",
-            haystack,
-        )
-        or "as_of_date" in haystack
-    )
-
 
 def _template_parameters(
     templates: list[dict[str, Any]],
     template_key: str,
     parameters: dict[str, Any] | None,
 ) -> tuple[dict[str, Any] | None, str]:
-    """Проверяет выбранный LLM шаблон и его параметры.
-
-    Возвращает ``(parameters, "")`` или ``(None, причина)``. Значения по
-    умолчанию из БД дополняют план, неизвестные параметры отклоняются:
-    ``run_script_template`` не принимает лишних ключей.
-    """
+    """Проверяет выбранный LLM шаблон и его параметры."""
     key = str(template_key or "").strip()
     template = next(
         (item for item in templates if item.get("template_key") == key),
@@ -155,67 +57,6 @@ def _template_parameters(
     if unknown:
         return None, f"неизвестные параметры: {', '.join(unknown)}"
     return {**declared, **provided}, ""
-
-
-def missing_question_filters(
-    question: str,
-    sql: str,
-    parameters: dict[str, Any] | None = None,
-    metric_id: str | None = None,
-) -> list[str]:
-    """Проверяет, что SQL покрывает условия вопроса.
-
-    В отличие от прежней проверки по отдельным словам, условия берутся из
-    semantic layer: ``question_signals`` знает про карман, последний год,
-    закрытую проверку, темы и т.п. Это позволяет применять одну и ту же
-    проверку и к Query IR, и к готовому шаблону.
-
-    ``metric_id`` нужен, чтобы отличать «закрытую проверку» от «закрытого
-    пункта» и проверять только те поля, которые есть у метрики.
-    """
-    text = _normalise(question)
-    haystack = _normalise(f"{sql or ''} {parameters or ''}")
-    structural = _structural_sql(sql or "")
-
-    spec = None
-    if metric_id:
-        try:
-            spec = get_metric(metric_id)
-        except KeyError:
-            spec = None
-
-    signals = question_signals(text, spec)
-    missing: list[str] = []
-
-    for dimension in signals.dimensions:
-        if not _sql_covers_dimension(structural, dimension):
-            missing.append(
-                _DIMENSION_LABELS.get(dimension, f"разбивка по {dimension}")
-            )
-
-    for label in signals.unsupported:
-        missing.append(label)
-
-    for query_filter in signals.filters:
-        field = query_filter.field
-        value = query_filter.value
-        if field == "year" and value == "last":
-            if not _has_latest_year_marker(haystack):
-                missing.append("период «последний год»")
-        elif field == "year":
-            if str(value) not in haystack:
-                missing.append(f"год {value}")
-        elif field == "is_repeat":
-            if "is_repeat" not in haystack and "true" not in haystack:
-                missing.append("признак повторной находки")
-        elif field == "audit_code":
-            if str(value).lower() not in haystack:
-                missing.append(f"проверка {value}")
-        elif _normalise(str(value)) not in haystack:
-            label = _FILTER_LABELS.get(field, field)
-            missing.append(f"{label} «{value}»")
-
-    return list(dict.fromkeys(missing))
 
 
 def known_themes(server) -> list[str]:
@@ -242,15 +83,20 @@ def _summary_numbers_supported(
     """Проверяет, что LLM не придумала числа вне таблицы.
 
     Годы (2025, 2026) разрешены как названия разрезов. Суммы и разницы,
-    которых нет в строках, считаются выдуманными: итоги добавляет
-    детерминированный агрегатор.
+    которых нет в строках, считаются выдуманными.
     """
     allowed: set[float] = {float(len(rows))}
-    for row in rows:
-        for column in columns:
+    for column in columns:
+        values: list[float] = []
+        for row in rows:
             value = row.get(column)
             if _is_number(value):
-                allowed.add(round(float(value), 2))
+                number = float(value)
+                allowed.add(round(number, 2))
+                values.append(number)
+        if values:
+            # Итог по колонке — допустимое производное число.
+            allowed.add(round(sum(values), 2))
 
     for token in re.findall(r"\d+(?:[.,]\d+)?", text or ""):
         try:
@@ -391,20 +237,6 @@ def build_analytics_graph(server, llm: LLMClient):
                 {},
             )
 
-        def template_covers_question(
-            key: str,
-            template_sql: str,
-            parameters: dict[str, Any],
-            metric_id: str | None,
-        ) -> list[str]:
-            """Шаблон обязан покрывать тот же вопрос, что и Query IR."""
-            return missing_question_filters(
-                question,
-                template_sql,
-                parameters,
-                metric_id=metric_id,
-            )
-
         def script_plan(
             key: str,
             selected_parameters: dict[str, Any],
@@ -417,17 +249,6 @@ def build_analytics_graph(server, llm: LLMClient):
             )
             if parameters is None:
                 logger.warning("template rejected: %s", error)
-                return None
-            missing = template_covers_question(
-                key,
-                str(template.get("sql_template") or ""),
-                parameters,
-                query_plan.metric,
-            )
-            if missing:
-                logger.warning(
-                    "template %s rejected: %s", key, ", ".join(missing)
-                )
                 return None
             return {
                 "plan": {
@@ -463,12 +284,21 @@ def build_analytics_graph(server, llm: LLMClient):
                 query_plan = None
 
             if query_plan is not None:
-                # LLM может вернуть верный смысл в reason, но пустые
-                # dimensions/filters. Дополняем план по semantic layer.
-                try:
-                    query_plan = complete_query_plan(question, query_plan)
-                except (QueryCompileError, KeyError):
-                    pass
+                # Вторая LLM-проверка: чего не хватает плану по сравнению
+                # с вопросом. Код применяет gaps и валидирует их каталогом.
+                reviewer = getattr(llm, "review_query_plan", None)
+                if reviewer is not None:
+                    try:
+                        gaps = reviewer(
+                            question=question,
+                            plan=query_plan,
+                            catalog_text=catalog_text(),
+                            context=state.get("conversation_context", ""),
+                            profile_text=state.get("profile_text", ""),
+                        )
+                        query_plan = apply_plan_gaps(query_plan, gaps)
+                    except Exception as exc:
+                        logger.warning("plan review failed: %s", exc)
 
                 key = str(query_plan.template_key or "").strip()
                 if key:
@@ -494,27 +324,18 @@ def build_analytics_graph(server, llm: LLMClient):
                 except (QueryCompileError, KeyError):
                     pass
                 else:
-                    missing = missing_question_filters(
-                        question,
-                        sql,
-                        metric_id=query_plan.metric,
-                    )
-                    if not missing:
-                        return {
-                            "plan": {
-                                "strategy": "generated",
-                                "template_key": "",
-                                "parameters": {},
-                                "sql": sql,
-                                "reason": query_plan.reason or "query_ir",
-                                "plan_source": "query_ir",
-                                "query_plan": query_plan.model_dump(),
-                            },
+                    return {
+                        "plan": {
                             "strategy": "generated",
-                        }
-                    logger.warning(
-                        "query_ir rejected: %s", ", ".join(missing)
-                    )
+                            "template_key": "",
+                            "parameters": {},
+                            "sql": sql,
+                            "reason": query_plan.reason or "query_ir",
+                            "plan_source": "query_ir",
+                            "query_plan": query_plan.model_dump(),
+                        },
+                        "strategy": "generated",
+                    }
 
         # Fallback: свободный SQL только когда Query IR не покрыл вопрос.
         # LLM здесь тоже не выбирает шаблон: только generated SQL.
@@ -568,27 +389,6 @@ def build_analytics_graph(server, llm: LLMClient):
         except UnsafeSQLError as exc:
             return {**_refuse(state, f"SQL отклонён: {exc}"), "retry": False}
 
-        query_plan = (state.get("plan") or {}).get("query_plan") or {}
-        metric_id = str(query_plan.get("metric") or "") or None
-        missing = missing_question_filters(
-            state.get("question", ""),
-            safe,
-            state["plan"].get("parameters"),
-            metric_id=metric_id,
-        )
-        if missing:
-            retries = int(state.get("retries", 0))
-            message = "SQL не учитывает условия вопроса: " + ", ".join(missing)
-            if retries < 2:
-                return {
-                    "sql": safe,
-                    "retry": True,
-                    "retries": retries + 1,
-                    "error": message + ". Добавь соответствующие фильтры.",
-                }
-            # Флаг retry обязательно сбрасываем: иначе цикл
-            # validate → repair → validate не завершится.
-            return {**_fail(state, message + "."), "retry": False}
         return {"sql": safe, "retry": False}
 
     def execute_sql(state: AnalyticsState) -> dict[str, Any]:
@@ -885,11 +685,7 @@ def build_analytics_graph(server, llm: LLMClient):
             ]
             if parts:
                 return t(language, "result", body=", ".join(parts))
-        preview = "; ".join(
-            ", ".join(f"{column}={row.get(column)}" for column in columns)
-            for row in rows[:20]
-        )
-        return t(language, "found_rows", count=len(rows), preview=preview)
+        return t(language, "present_table_title", count=len(rows))
 
     def chart(state: AnalyticsState) -> dict[str, Any]:
         """Диаграмма по строкам предыдущего аналитического ответа."""

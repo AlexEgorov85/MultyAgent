@@ -209,9 +209,9 @@ class AnswerEnvelope(BaseModel):
   `no_script_item_count`, `script_count`, `run_count`,
   `run_script_mismatch_count`, `deviation_count`, `auditor_count`.
 - [x] Добавлена валидация значений.
-- [x] `missing_question_filters` работает по сигналам каталога
-  (карман, последний год, закрытая проверка, тема, AUD-код), а не по
-  отдельным словам.
+- [x] Regex-парсер `question_signals` и `missing_question_filters` удалены:
+  проверку полноты плана делает `review_query_plan`, а `apply_plan_gaps`
+  валидирует поля/значения по каталогу.
 - [ ] Сгенерировать `SCHEMA_TEXT` из каталога для fallback-пути.
 
 ### Этап 2. Query IR + compiler
@@ -233,15 +233,16 @@ class AnswerEnvelope(BaseModel):
 - [x] Fallback на free SQL только для неподдержанных запросов.
 - [x] Analytics использует Query IR первым шагом.
 - [x] `metrics.plan_source = query_ir`.
+- [x] Вторая LLM-проверка плана (`review_query_plan` → `PlanGaps`)
+  и детерминированное применение gaps по каталогу.
 - [ ] Golden SQL tests на benchmark-кейсы.
-- [ ] Перевести `missing_question_filters` и repair на IR.
+- [ ] Перевести repair на IR.
 
 ### Этап 3. Capability registry
 
-Статус: **пересмотрено повторно**. Шаблон больше не выбирает LLM:
-это execution strategy, а не часть intent. `template_key` удалён из
-`QueryPlan`; код сопоставляет проверенный план с контрактами шаблонов
-(`src/query/templates.py`). Это устраняет подмену вопроса шаблоном.
+Статус: **финальная схема**. LLM выбирает `template_key`, но шаблон —
+только execution strategy. Код проверяет контракт (`src/query/templates.py`)
+и отклоняет шаблон, который не покрывает метрику/разрезы/фильтры плана.
 
 Сделано:
 

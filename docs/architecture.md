@@ -195,21 +195,18 @@ flowchart TD
    - LLM возвращает `QueryPlan(metric, dimensions, filters, template_key)`
      по семантическому каталогу `src/semantic/catalog.py`; шаблон она
      выбирает сама;
-   - `complete_query_plan` (`src/query/intent.py`) дополняет план
-     доменными сигналами: «по карманам», «за последний год», «закрытая
-     проверка», темы, AUD-код. Это компенсирует нестабильный structured
-     output модели;
+   - `review_query_plan` — вторая structured-проверка: LLM возвращает
+     `PlanGaps` (чего не хватает плану), а `apply_plan_gaps`
+     (`src/query/intent.py`) валидирует и применяет их по каталогу;
    - SQL собирает компилятор `src/query/compiler.py`;
    - выбранный LLM шаблон проверяется по контракту
      (`src/query/templates.py`): метрика, разрезы, фильтры. Шаблон
      запускается только при полном покрытии плана, иначе используется SQL;
-   - `missing_question_filters` проверяет покрытие вопроса одинаково для
-     шаблона и сгенерированного SQL. Если план неполный или метрика не
-     поддержана — fallback на свободный `SQLPlan` (только generated SQL).
+   - если план или метрика не поддержаны — fallback на свободный
+     `SQLPlan` (только generated SQL).
 3. **`validate`** — каждый SQL проходит `sql_guard` (`src/tools/sql_guard.py`):
    только `SELECT`, allowlist таблиц/колонок, принудительный `LIMIT`,
-   проверка значений фильтров. `missing_question_filters` повторяет
-   смысловую проверку покрытия до выполнения.
+   проверка значений фильтров.
 4. **`execute`** — выполнение через read-only роль `audit_ro` со
    `statement_timeout` 5 секунд.
 5. **`repair`** — при ошибке LLM получает текст ошибки и исправляет план;

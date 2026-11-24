@@ -7,7 +7,7 @@ import pytest
 from src.acl import make_acl_message
 from src import config, db_runtime, dialogue_store
 from src.graph.analytics_graph import build_analytics_graph
-from src.query import QueryFilter, QueryPlan
+from src.query import PlanFilter, PlanGaps, QueryFilter, QueryPlan
 from src.schemas import ChartPoint, ChartSpec, SQLPlan, ToolCall, ToolPlan
 
 
@@ -47,13 +47,23 @@ class FakeLLM:
 class QueryPlanFakeLLM(FakeLLM):
     """Fake с Query IR: SQL должен собрать компилятор, а не LLM."""
 
-    def __init__(self, plan: QueryPlan, answer: str) -> None:
+    def __init__(
+        self,
+        plan: QueryPlan,
+        answer: str,
+        gaps: PlanGaps | None = None,
+    ) -> None:
         super().__init__(answer=answer)
         self.query_plan = plan
+        self.gaps = gaps or PlanGaps()
 
     def plan_query(self, **kwargs):
         self.calls.append("plan_query")
         return self.query_plan
+
+    def review_query_plan(self, **kwargs):
+        self.calls.append("review_query_plan")
+        return self.gaps
 
     def plan_sql(self, **kwargs):
         self.calls.append("plan_sql")
@@ -369,7 +379,7 @@ def test_llm_template_choice_is_validated_by_contract(
     assert result["strategy"] == "script"
     assert result["rows"]
     assert result["evidence"][0]["type"] == "script_template"
-    assert llm.calls == ["plan_query", "summarize"]
+    assert llm.calls == ["plan_query", "review_query_plan", "summarize"]
     assert (
         result["acl_response"]["content"]["metrics"]["plan_source"]
         == "query_ir"
@@ -436,6 +446,13 @@ def test_incomplete_plan_is_completed_and_template_not_substituted(
         plan=QueryPlan(
             metric="audit_count",
             reason="LLM не заполнила dimensions/filters",
+        ),
+        gaps=PlanGaps(
+            missing_dimensions=["pocket"],
+            missing_filters=[
+                PlanFilter(field="status", value="завершена")
+            ],
+            period="last_year",
         ),
         answer="Готово.",
     )

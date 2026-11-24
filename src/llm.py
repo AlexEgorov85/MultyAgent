@@ -8,7 +8,7 @@ import time
 from typing import Any, Protocol
 
 from .prompts import format_guide, load_prompt
-from .query.plan import QueryPlan
+from .query.plan import PlanGaps, QueryPlan
 from . import telemetry
 from .schemas import (
     AnswerDraft,
@@ -82,6 +82,16 @@ class LLMClient(Protocol):
         profile_text: str = "",
         templates: list[dict[str, Any]] | None = None,
     ) -> QueryPlan: ...
+
+    def review_query_plan(
+        self,
+        *,
+        question: str,
+        plan: QueryPlan,
+        catalog_text: str,
+        context: str = "",
+        profile_text: str = "",
+    ) -> "PlanGaps": ...
 
     def plan_chart(
         self,
@@ -453,6 +463,30 @@ class OpenAILLM:
             ),
             schema=QueryPlan,
             max_tokens=1500,
+        )
+
+    def review_query_plan(
+        self,
+        *,
+        question: str,
+        plan: QueryPlan,
+        catalog_text: str,
+        context: str = "",
+        profile_text: str = "",
+    ) -> PlanGaps:
+        return self._parse(
+            system=load_prompt("analytics_review_plan"),
+            user=(
+                f"{self._profile_block(profile_text)}"
+                f"{self._context_block(context)}"
+                f"Вопрос: {question}\n\n"
+                f"Каталог:\n{catalog_text}\n\n"
+                f"Текущий план: {plan.model_dump_json()}\n\n"
+                "Верни PlanGaps: missing_dimensions, missing_filters, "
+                "period, year, issues."
+            ),
+            schema=PlanGaps,
+            max_tokens=1000,
         )
 
     def plan_chart(
