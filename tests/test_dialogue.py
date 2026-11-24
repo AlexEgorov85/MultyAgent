@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from src.dialogue import (
     build_dialogue_context,
-    is_followup,
     last_audit_code,
     normalize_client_history,
 )
@@ -68,19 +67,6 @@ def test_long_context_keeps_conversation_anchor():
     assert "message-1" in context
     assert "message-18" in context
     assert "…" in context
-
-
-def test_followup_detection():
-    assert is_followup("А за 2025 год?", has_history=True)
-    assert is_followup("Почему?", has_history=True)
-    assert is_followup("А по картам?", has_history=True)
-    assert is_followup("В 2025 году", has_history=True)
-    assert is_followup("Покажи их", has_history=True)
-    assert is_followup("Ипотека", has_history=True)
-    assert not is_followup("Сколько проверок по картам за 2026 год?", has_history=True)
-    assert not is_followup("Сколько проверок?", has_history=True)
-    assert not is_followup("Спасибо!", has_history=True)
-    assert not is_followup("А за 2025 год?", has_history=False)
 
 
 def test_last_audit_code():

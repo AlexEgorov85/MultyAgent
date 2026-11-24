@@ -32,4 +32,5 @@ class QueryPlan(BaseModel):
     filters: list[QueryFilter] = Field(default_factory=list)
     order_by: Literal["count_desc", "count_asc", "none"] = "count_desc"
     limit: int = Field(default=200, ge=1, le=200)
+    template_key: str = ""
     reason: str = ""

@@ -767,66 +767,6 @@ FILTER_CUES: dict[str, tuple[FilterCue, ...]] = {
     "auditor_count": (),
 }
 
-METRIC_HINTS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
-    (
-        re.compile(r"(?<![а-яё])провер\w*", re.IGNORECASE),
-        ("audit_count",),
-    ),
-    (
-        re.compile(r"(?<![а-яё])акт\w*", re.IGNORECASE),
-        ("act_count",),
-    ),
-    (
-        re.compile(
-            r"(?<![а-яё])пункт\w*|(?<![а-яё])находк\w*",
-            re.IGNORECASE,
-        ),
-        (
-            "item_count",
-            "critical_item_count",
-            "overdue_item_count",
-            "repeat_item_count",
-            "no_script_item_count",
-        ),
-    ),
-    (
-        re.compile(r"(?<![а-яё])скрипт\w*", re.IGNORECASE),
-        ("script_count",),
-    ),
-    (
-        re.compile(r"(?<![а-яё])запуск\w*", re.IGNORECASE),
-        ("run_count", "run_script_mismatch_count"),
-    ),
-    (
-        re.compile(r"(?<![а-яё])отклонен\w*", re.IGNORECASE),
-        ("deviation_count", "item_count", "critical_item_count"),
-    ),
-    (
-        re.compile(r"(?<![а-яё])аудитор\w*", re.IGNORECASE),
-        ("auditor_count",),
-    ),
-)
-
-
-def question_metric_hint(text: str) -> tuple[str, ...]:
-    """Какая сущность вопроса названа первой: проверки, акты, пункты и т.п.
-
-    Нужна для проверки шаблона: если вопрос говорит о пунктах, шаблон
-    «сводка по статусам проверок» не должен считаться подходящим, даже
-    если LLM выбрала его по описанию. Если сущность не названа
-    («покажи динамику»), ограничение не навязывается.
-    """
-    normalized = _normalise_text(text)
-    best: tuple[int, tuple[str, ...]] | None = None
-    for pattern, metrics in METRIC_HINTS:
-        match = pattern.search(normalized)
-        if match is None:
-            continue
-        if best is None or match.start() < best[0]:
-            best = (match.start(), metrics)
-    return best[1] if best is not None else ()
-
-
 LANGUAGE_CUES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("SQL", re.compile(r"(?<![a-zа-яё])sql(?![a-zа-яё])", re.IGNORECASE)),
     ("Python", re.compile(r"(?<![a-zа-яё])python(?![a-zа-яё])", re.IGNORECASE)),

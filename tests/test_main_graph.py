@@ -44,6 +44,13 @@ class MainLLM:
             return RouteDecision(
                 route="smalltalk", reason="smalltalk:greeting", confidence=0.95
             )
+        if "диаграмм" in question or "график" in question:
+            return RouteDecision(
+                route="analytics",
+                reason="нужна визуализация",
+                confidence=0.95,
+                analytics_mode="chart",
+            )
         if (
             "забудь" in question
             or "запомни" in question
@@ -281,7 +288,7 @@ def test_router_mode_is_passed_to_analytics(server, main_data):
     )
 
 
-def test_chart_request_forces_chart_mode(server, main_data):
+def test_router_selects_chart_mode(server, main_data):
     graph = build_main_graph(server, MainLLM(), analytics_llm=AnalyticsLLM())
 
     result = _invoke(

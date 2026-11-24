@@ -13,13 +13,13 @@ from langgraph.graph import END, START, StateGraph
 
 from .. import config, dialogue_store
 from ..acl import ACLMessage, ACLValidationError, make_reply, validate_acl
-from ..charts import build_chart_spec, ground_chart_points
+from ..charts import ground_chart_points
 from ..dialogue import last_audit_code
 from ..i18n import t
 from ..llm import LLMClient
 from ..query.compiler import QueryCompileError, compile_query_plan
 from ..query.intent import complete_query_plan
-from ..query.templates import select_template, select_template_from_question
+from ..query.templates import template_parameters, template_plan_problems
 from ..schemas import SQLPlan, ToolPlan
 from ..semantic.catalog import catalog_text, get_metric, question_signals
 from ..state import AnalyticsState
@@ -575,19 +575,8 @@ def build_analytics_graph(server, llm: LLMClient):
                 "strategy": "script",
             }
 
-        # 0. Детерминированный fast path для явных template-вопросов:
-        # шаблон выбирается по контракту без вызова LLM.
-        fast = select_template_from_question(question, latest_year)
-        if fast is not None:
-            key, selected_parameters, fast_plan = fast
-            result = script_plan(
-                key, selected_parameters, fast_plan, "template_contract"
-            )
-            if result is not None:
-                return result
-
-        # 1. Query IR: LLM описывает только смысл. Способ выполнения
-        # (шаблон или SQL) выбирает код по контракту проверенного плана.
+        # 1. Query IR: LLM описывает смысл и может выбрать шаблон.
+        # Контракт шаблона проверяет код; неподходящий шаблон отклоняется.
         planner = getattr(llm, "plan_query", None)
         if planner is not None:
             try:
@@ -596,6 +585,7 @@ def build_analytics_graph(server, llm: LLMClient):
                     catalog_text=catalog_text(),
                     context=state.get("conversation_context", ""),
                     profile_text=state.get("profile_text", ""),
+                    templates=templates,
                 )
             except Exception:
                 query_plan = None
@@ -608,16 +598,24 @@ def build_analytics_graph(server, llm: LLMClient):
                 except (QueryCompileError, KeyError):
                     pass
 
-                # Шаблон выбирает код, а не LLM. Контракт шаблона должен
-                # полностью покрывать план: метрику, разрезы и фильтры.
-                selection = select_template(question, query_plan, latest_year)
-                if selection is not None:
-                    key, selected_parameters = selection
-                    result = script_plan(
-                        key, selected_parameters, query_plan, "query_ir"
-                    )
-                    if result is not None:
-                        return result
+                key = str(query_plan.template_key or "").strip()
+                if key:
+                    problems = template_plan_problems(key, query_plan)
+                    if problems:
+                        logger.warning(
+                            "template %s rejected: %s",
+                            key,
+                            ", ".join(problems),
+                        )
+                    else:
+                        parameters = template_parameters(
+                            key, query_plan, latest_year
+                        )
+                        result = script_plan(
+                            key, parameters, query_plan, "query_ir"
+                        )
+                        if result is not None:
+                            return result
 
                 try:
                     sql = compile_query_plan(query_plan)
@@ -1103,19 +1101,8 @@ def build_analytics_graph(server, llm: LLMClient):
                 logger.warning("LLM chart spec rejected: %s", exc)
 
         if spec is None:
-            # Fallback: детерминированная диаграмма, если модель недоступна
-            # или вернула данные, которых нет в предыдущем ответе.
-            spec = build_chart_spec(
-                rows,
-                columns,
-                question=state.get("question", ""),
-                previous_question=previous_question,
-                language=str(language or "ru"),
-                labeler=lambda column: COLUMN_LABELS.get(column, column),
-            )
-        if spec is None:
             return {
-                "answer": t(language, "chart_no_metric"),
+                "answer": t(language, "chart_failed"),
                 "answer_source": "agent",
                 "strategy": "chart",
                 "rows": rows,

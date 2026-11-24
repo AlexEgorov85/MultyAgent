@@ -80,6 +80,7 @@ class LLMClient(Protocol):
         catalog_text: str,
         context: str = "",
         profile_text: str = "",
+        templates: list[dict[str, Any]] | None = None,
     ) -> QueryPlan: ...
 
     def plan_chart(
@@ -432,7 +433,13 @@ class OpenAILLM:
         catalog_text: str,
         context: str = "",
         profile_text: str = "",
+        templates: list[dict[str, Any]] | None = None,
     ) -> QueryPlan:
+        template_lines = "\n".join(
+            f"- {item['template_key']}: {item['title']} — "
+            f"{item.get('description') or ''}"
+            for item in (templates or [])
+        )
         return self._parse(
             system=load_prompt("analytics_plan_query"),
             user=(
@@ -440,8 +447,9 @@ class OpenAILLM:
                 f"{self._context_block(context)}"
                 f"Вопрос: {question}\n\n"
                 f"Каталог метрик и измерений:\n{catalog_text}\n\n"
+                f"Готовые шаблоны:\n{template_lines or '(нет)'}\n\n"
                 "Верни QueryPlan: metric, dimensions, filters, order_by, limit, "
-                "reason."
+                "template_key, reason."
             ),
             schema=QueryPlan,
             max_tokens=1500,

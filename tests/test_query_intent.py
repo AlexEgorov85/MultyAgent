@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from src.graph.analytics_graph import missing_question_filters
-from src.query import QueryFilter, QueryPlan, complete_query_plan, select_template
-from src.semantic.catalog import question_metric_hint
+from src.query import (
+    QueryFilter,
+    QueryPlan,
+    complete_query_plan,
+    template_parameters,
+    template_plan_problems,
+)
+
 
 
 def _filter_pairs(plan: QueryPlan) -> set[tuple[str, object]]:
@@ -184,61 +190,30 @@ def test_theme_dynamics_template_covers_theme_year_breakdown():
     )
 
 
-def test_metric_hint_uses_first_named_entity():
-    assert question_metric_hint("Сколько актов на проверках 2025 года?") == (
-        "act_count",
-    )
-    assert "item_count" in question_metric_hint(
-        "Сколько пунктов без скриптов?"
-    )
-    assert question_metric_hint("Покажи динамику по темам и годам") == ()
-
-
-def test_template_resolver_disambiguates_item_templates():
-    def selected(question: str, metric: str) -> str | None:
-        plan = complete_query_plan(question, QueryPlan(metric=metric))
-        selection = select_template(question, plan, latest_year=2026)
-        return selection[0] if selection else None
-
-    assert (
-        selected(
-            "Покажи пункты без доказательств (скриптов)",
-            "no_script_item_count",
-        )
-        == "items_without_scripts"
-    )
-    assert (
-        selected("Покажи просроченные открытые пункты", "overdue_item_count")
-        == "overdue_items"
+def test_template_contract_accepts_matching_plan():
+    plan = QueryPlan(
+        metric="audit_count",
+        dimensions=["status"],
+        template_key="status_summary",
     )
 
+    assert template_plan_problems("status_summary", plan) == []
+    assert template_parameters("status_summary", plan, 2026) == {"year": 2026}
 
-def test_template_resolver_uses_question_intent():
-    def selected(question: str, metric: str = "audit_count") -> str | None:
-        plan = complete_query_plan(question, QueryPlan(metric=metric))
-        selection = select_template(question, plan, latest_year=2026)
-        return selection[0] if selection else None
 
-    assert (
-        selected("Покажи сводку по статусам проверок за 2026 год")
-        == "status_summary"
-    )
-    assert selected("Покажи динамику по темам и годам", "item_count") == (
-        "theme_dynamics"
-    )
-    assert selected("Покажи риски по карманам") == "risk_by_pocket"
-    assert selected("Покажи топ-5 видов отклонений", "deviation_count") == (
-        "top_findings"
+def test_template_contract_rejects_wrong_metric_and_dimensions():
+    plan = QueryPlan(
+        metric="item_count",
+        dimensions=["pocket"],
+        filters=[QueryFilter(field="status", value="завершена")],
+        template_key="status_summary",
     )
 
+    problems = template_plan_problems("status_summary", plan)
 
-def test_template_resolver_does_not_substitute_pocket_question():
-    question = (
-        "Сколько было закрыто проверок за последний год по каждому карману?"
-    )
-    plan = complete_query_plan(question, QueryPlan(metric="audit_count"))
-
-    assert select_template(question, plan, latest_year=2026) is None
+    assert any("метрику" in problem for problem in problems)
+    assert any("разрезы" in problem for problem in problems)
+    assert any("фильтры" in problem for problem in problems)
 
 
 def test_plan_does_not_duplicate_existing_filters():

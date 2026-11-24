@@ -152,6 +152,12 @@ _TEXTS: dict[str, dict[str, str]] = {
         "en": "The previous result has no numeric metric and category "
         "suitable for a chart.",
     },
+    "chart_failed": {
+        "ru": "Не удалось построить диаграмму: модель не вернула корректные "
+        "данные, которых нет в предыдущем ответе.",
+        "en": "Could not build the chart: the model returned no data "
+        "grounded in the previous answer.",
+    },
     "trace_chart": {"ru": "Диаграмма", "en": "Chart"},
     "trace_chart_detail": {
         "ru": "Тип: {kind}, точек: {points}.",

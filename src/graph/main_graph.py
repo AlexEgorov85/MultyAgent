@@ -14,12 +14,11 @@ from langgraph.graph import END, START, StateGraph
 
 from .. import dialogue_store
 from ..acl import append_acl_log, make_acl_message
-from ..dialogue import build_dialogue_context, is_followup
+from ..dialogue import build_dialogue_context
 from ..dialogue_slots import DialogueSlots, augment_query, merge_slots
 from ..guardrails import check_final_answer, check_request, extract_sql
 from ..llm import LLMClient
 from ..memory import store as memory_store
-from ..charts import chart_requested
 from ..presentation import present
 from ..semantic.catalog import theme_in_text
 from ..state import MainState
@@ -173,18 +172,7 @@ def build_main_graph(
         text = question
         reason = ""
 
-        # «Построй диаграмму на основании этих данных» — это запрос к
-        # предыдущему результату, а не новый аналитический вопрос. Не
-        # переформулируем его в SQL-вопрос и не теряем слово «диаграмма».
-        if chart_requested(question):
-            slots = merge_slots(state.get("dialogue_slots"), question)
-            return {
-                "resolved_query": question,
-                "resolved_reason": "",
-                "dialogue_slots": slots.model_dump(),
-            }
-
-        if context and is_followup(question, True):
+        if context:
             resolver = getattr(llm, "resolve_followup", None)
             if resolver is not None:
                 try:
@@ -348,19 +336,6 @@ def build_main_graph(
             decision = None
         if decision is None:
             return _fallback_route(question)
-        # Явная просьба визуализировать — это режим Analytics, а не
-        # отдельный маршрут. Код фиксирует его детерминированно, чтобы
-        # модель не превратила «построй диаграмму» в повторный SQL-ответ.
-        if decision.route == "analytics" and (
-            chart_requested(state.get("user_query", ""))
-            or chart_requested(question)
-        ):
-            return {
-                "route": "analytics",
-                "route_reason": "запрос на визуализацию данных",
-                "route_confidence": max(0.9, float(decision.confidence)),
-                "analytics_mode": "chart",
-            }
         return {
             "route": decision.route,
             "route_reason": decision.reason,

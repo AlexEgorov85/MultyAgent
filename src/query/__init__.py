@@ -5,8 +5,8 @@ from .intent import complete_query_plan
 from .plan import QueryFilter, QueryPlan
 from .templates import (
     TemplateContract,
-    select_template,
-    select_template_from_question,
+    template_parameters,
+    template_plan_problems,
 )
 
 __all__ = [
@@ -16,6 +16,6 @@ __all__ = [
     "TemplateContract",
     "compile_query_plan",
     "complete_query_plan",
-    "select_template",
-    "select_template_from_question",
+    "template_parameters",
+    "template_plan_problems",
 ]

@@ -4,9 +4,11 @@
 отдельно. Основной граф использует их, чтобы:
 
 * собрать компактный контекст последних реплик;
-* понять, является ли вопрос уточнением («а за 2025?», «почему?»);
 * перенести код проверки из предыдущего ответа, если модель не сделала это
   сама.
+
+Является ли вопрос уточнением, решает LLM-резолвер: код больше не
+угадывает это по словам «а», «почему», «эти».
 """
 
 from __future__ import annotations
@@ -19,42 +21,6 @@ MAX_CONTEXT_CHARS = 6000
 MAX_MESSAGE_CHARS = 900
 
 _AUDIT_CODE_RE = re.compile(r"AUD-\d{4}-[A-Z]+-\d{2}", re.IGNORECASE)
-
-_SMALLTALK_RE = re.compile(
-    r"^(привет|здравствуй|добрый (день|вечер)|доброе утро|хай|hello|hi|hey|"
-    r"спасибо|благодарю|thanks|thank you|что ты умеешь|что ты можешь|"
-    r"чем ты можешь помочь|твои возможности|кто ты|расскажи о себе|"
-    r"what can you do|who are you)\b",
-    re.IGNORECASE,
-)
-
-_FOLLOWUP_START_RE = re.compile(
-    r"^(а|и|но|тогда|ещё|еще|теперь|также|по|за|с|без|для|почему|"
-    r"а если|а сколько|а какие|а покажи|а что)\b",
-    re.IGNORECASE,
-)
-
-_FOLLOWUP_ANY_RE = re.compile(
-    r"\b(этот|эта|эти|тот|та|те|там|тогда|ним|нему|ней|них|"
-    r"этому|этой|той|их)\b",
-    re.IGNORECASE,
-)
-
-_FOLLOWUP_PERIOD_RE = re.compile(
-    r"^(в|за|с|до|после)\s+(20\d{2}|прошл\w*|этом|этого|прошлом)",
-    re.IGNORECASE,
-)
-
-_DOMAIN_RE = re.compile(
-    r"(провер|аудит|акт|пункт|отклон|риск|ипотек|вклад|платеж|"
-    r"карт|кредит|просроч|дол|динамик|год|20\d{2}|aud-)",
-    re.IGNORECASE,
-)
-
-_THEME_ONLY_RE = re.compile(
-    r"^(ипотека|карты|вклады|платежи|кредиты|потребкредитование)$",
-    re.IGNORECASE,
-)
 
 
 def content_text(content: Any) -> str:
@@ -176,28 +142,6 @@ def build_dialogue_context(
         lines.append(line)
         used += len(line) + 1
     return "\n".join(lines)
-
-
-def is_followup(question: str, has_history: bool) -> bool:
-    """Похож ли вопрос на уточнение предыдущей реплики."""
-    if not has_history:
-        return False
-    text = " ".join((question or "").split()).strip(" !?.,…")
-    if not text:
-        return False
-    if _SMALLTALK_RE.match(text):
-        return False
-    if _FOLLOWUP_START_RE.match(text) or _FOLLOWUP_PERIOD_RE.match(text):
-        return True
-    if len(text.split()) <= 2 and not _DOMAIN_RE.search(text):
-        return True
-    if _THEME_ONLY_RE.match(text):
-        return True
-    if _FOLLOWUP_ANY_RE.search(text):
-        return True
-    if not _DOMAIN_RE.search(text) and len(text) <= 60:
-        return True
-    return False
 
 
 def last_audit_code(text: str) -> str:

@@ -350,14 +350,15 @@ def test_empty_result_is_honest(server, sample_graph_data):
     assert result["rows"] == []
 
 
-def test_template_is_selected_by_contract_not_by_llm(
+def test_llm_template_choice_is_validated_by_contract(
     server, sample_graph_data
 ):
     llm = QueryPlanFakeLLM(
         plan=QueryPlan(
             metric="audit_count",
             dimensions=["status"],
-            reason="LLM описала только смысл",
+            template_key="status_summary",
+            reason="LLM выбрала шаблон",
         ),
         answer="Статусы получены.",
     )
@@ -368,10 +369,10 @@ def test_template_is_selected_by_contract_not_by_llm(
     assert result["strategy"] == "script"
     assert result["rows"]
     assert result["evidence"][0]["type"] == "script_template"
-    assert llm.calls == ["summarize"]
+    assert llm.calls == ["plan_query", "summarize"]
     assert (
         result["acl_response"]["content"]["metrics"]["plan_source"]
-        == "template_contract"
+        == "query_ir"
     )
     assert result["plan"]["template_key"] == "status_summary"
     assert "Статусы получены." in result["answer"]
@@ -386,6 +387,7 @@ def test_template_selection_uses_plan_year_not_llm_choice(
             metric="audit_count",
             dimensions=["status"],
             filters=[QueryFilter(field="year", value=2026)],
+            template_key="status_summary",
             reason="год в плане",
         ),
         answer="Статусы получены.",
@@ -410,6 +412,7 @@ def test_template_uses_latest_year_when_plan_has_no_year(
         plan=QueryPlan(
             metric="audit_count",
             dimensions=["status"],
+            template_key="status_summary",
             reason="год не назван",
         ),
         answer="Статусы получены.",
@@ -428,7 +431,7 @@ def test_template_uses_latest_year_when_plan_has_no_year(
 def test_incomplete_plan_is_completed_and_template_not_substituted(
     server, sample_graph_data
 ):
-    """LLM не выбирает шаблон, а неполный план не подменяется статусами."""
+    """Неполный план не подменяется шаблоном по статусам."""
     llm = QueryPlanFakeLLM(
         plan=QueryPlan(
             metric="audit_count",
@@ -544,9 +547,7 @@ def test_chart_mode_uses_previous_analytics_payload(server, sample_graph_data):
         )
 
 
-def test_chart_hallucinated_data_falls_back_to_grounded_chart(
-    server, sample_graph_data
-):
+def test_chart_hallucinated_data_is_rejected(server, sample_graph_data):
     conversation_id = "conv-chart-fallback"
     try:
         dialogue_store.append_turn(
@@ -593,13 +594,8 @@ def test_chart_hallucinated_data_falls_back_to_grounded_chart(
 
         assert result["status"] == "ok"
         assert llm.calls == ["plan_chart"]
-        chart = result["acl_response"]["content"]["chart"]
-        assert chart["type"] == "bar"
-        assert chart["value_field"] == "cnt"
-        assert {point["label"] for point in chart["data"]} == {
-            "завершена",
-            "в работе",
-        }
+        assert "chart" not in result["acl_response"]["content"]
+        assert "не вернула корректные данные" in result["answer"]
     finally:
         dialogue_store.delete_thread(
             server, conversation_id, auditor_id="AUD-001"
