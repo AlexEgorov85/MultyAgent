@@ -20,7 +20,12 @@ class QueryFilter(BaseModel):
 
 
 class QueryPlan(BaseModel):
-    """План запроса: что считать и по каким разрезам."""
+    """План запроса: только смысл, без выбора способа выполнения.
+
+    Шаблон — это execution strategy, а не часть intent. LLM не выбирает
+    ``template_key``: иначе шаблон может подменить разрез/фильтры вопроса.
+    Способ выполнения выбирает код по контракту уже проверенного плана.
+    """
 
     metric: str = Field(min_length=1)
     dimensions: list[str] = Field(default_factory=list)

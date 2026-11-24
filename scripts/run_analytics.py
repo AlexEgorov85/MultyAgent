@@ -28,6 +28,12 @@ def main() -> int:
     parser.add_argument("--question", required=True, help="вопрос аудитора")
     parser.add_argument("--auditor-id", default="AUD-001")
     parser.add_argument("--conversation-id", default="conv-cli-001")
+    parser.add_argument(
+        "--mode",
+        choices=("sql", "drilldown", "multi_tool"),
+        default="sql",
+        help="режим Analytics; в основном графе его выбирает router",
+    )
     parser.add_argument("--json", type=Path, help="сохранить результат в JSON")
     args = parser.parse_args()
 
@@ -41,7 +47,11 @@ def main() -> int:
         performative="request",
         sender="orchestrator",
         receiver="analytics_agent",
-        content={"question": args.question, "auditor_id": args.auditor_id},
+        content={
+            "question": args.question,
+            "auditor_id": args.auditor_id,
+            "analytics_mode": args.mode,
+        },
         conversation_id=args.conversation_id,
     )
 

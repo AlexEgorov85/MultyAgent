@@ -209,7 +209,9 @@ class AnswerEnvelope(BaseModel):
   `no_script_item_count`, `script_count`, `run_count`,
   `run_script_mismatch_count`, `deviation_count`, `auditor_count`.
 - [x] Добавлена валидация значений.
-- [ ] Перевести `missing_question_filters` на каталог.
+- [x] `missing_question_filters` работает по сигналам каталога
+  (карман, последний год, закрытая проверка, тема, AUD-код), а не по
+  отдельным словам.
 - [ ] Сгенерировать `SCHEMA_TEXT` из каталога для fallback-пути.
 
 ### Этап 2. Query IR + compiler
@@ -236,30 +238,30 @@ class AnswerEnvelope(BaseModel):
 
 ### Этап 3. Capability registry
 
-Статус: базовый registry и deterministic matcher готовы.
-
-Файлы:
-
-- `src/capabilities/registry.py`
-- `src/capabilities/__init__.py`
-- `tests/test_capabilities.py`
+Статус: **пересмотрено повторно**. Шаблон больше не выбирает LLM:
+это execution strategy, а не часть intent. `template_key` удалён из
+`QueryPlan`; код сопоставляет проверенный план с контрактами шаблонов
+(`src/query/templates.py`). Это устраняет подмену вопроса шаблоном.
 
 Сделано:
 
-- [x] Typed capabilities для шести шаблонов.
-- [x] Deterministic matcher по явным фразам и слотам.
-- [x] Параметры `year`, `date_from`, `limit`.
-- [x] Analytics использует capability до LLM-планировщика.
-- [x] `plan_source = capability`.
-- [ ] Enum в structured output для fallback-планировщика.
-- [ ] Валидация capability против БД перед запуском.
+- [x] Typed-контракты для шести шаблонов (метрики, разрезы, фильтры,
+  параметры).
+- [x] LLM возвращает только `QueryPlan(metric, dimensions, filters)`.
+- [x] Для явных template-вопросов работает детерминированный fast path
+  без вызова LLM; шаблон выбирается по контракту.
+- [x] Код выбирает шаблон по контракту; при неполном покрытии — SQL.
+- [x] Валидация обязательных параметров шаблона перед запуском.
+- [x] Шаблон проверяется на покрытие разрезов, фильтров и периода вопроса.
+- [ ] Хранить контракты шаблонов в БД рядом с `script_templates`, а не в коде.
 
-Критерий: нет несуществующих `template_key`; template-кейсы выбирают
-capability детерминированно.
+Критерий: LLM не может вернуть `template_key`; template-кейсы выбирают
+шаблон детерминированно по контракту плана.
 
 ### Этап 4. DialogueState + resolver
 
-Статус: слоты и детерминированное восстановление готовы.
+Статус: год и AUD-код переносятся детерминированно; семантические слоты
+восстанавливает LLM-резолвер в тексте вопроса.
 
 Файлы:
 
@@ -270,11 +272,11 @@ capability детерминированно.
 
 Сделано:
 
-- [x] Слоты year/theme/item_type/risk/status/audit_code.
-- [x] merge_slots сохраняет предыдущий item_type.
-- [x] augment_query добавляет потерянные слоты в resolved_query.
+- [x] Слоты year/audit_code извлекаются детерминированно.
+- [x] Семантические слоты (тема, тип, риск, статус) не угадываются по словам.
+- [x] `augment_query` добавляет только год и код проверки.
 - [x] Слоты передаются в ACL-content Analytics.
-- [x] Тест `chain_correction`: «проблемы» сохраняются при смене года.
+- [x] Тест `chain_correction`: резолвер переносит «проблемы» при смене года.
 - [ ] Использовать slots в QueryPlan и report напрямую.
 - [ ] Восстанавливать slots из client_history после потери треда.
 

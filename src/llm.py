@@ -86,7 +86,6 @@ class LLMClient(Protocol):
         *,
         question: str,
         schema_text: str,
-        templates: list[dict[str, Any]],
         context: str = "",
         profile_text: str = "",
     ) -> SQLPlan: ...
@@ -428,7 +427,8 @@ class OpenAILLM:
                 f"{self._context_block(context)}"
                 f"Вопрос: {question}\n\n"
                 f"Каталог метрик и измерений:\n{catalog_text}\n\n"
-                "Верни QueryPlan: metric, dimensions, filters, order_by, limit, reason."
+                "Верни QueryPlan: metric, dimensions, filters, order_by, limit, "
+                "reason."
             ),
             schema=QueryPlan,
             max_tokens=1500,
@@ -439,15 +439,9 @@ class OpenAILLM:
         *,
         question: str,
         schema_text: str,
-        templates: list[dict[str, Any]],
         context: str = "",
         profile_text: str = "",
     ) -> SQLPlan:
-        template_lines = "\n".join(
-            f"- {item['template_key']}: {item['title']} "
-            f"(параметры: {item['parameters']})"
-            for item in templates
-        )
         return self._parse(
             system=load_prompt("analytics_plan_sql"),
             user=(
@@ -455,8 +449,8 @@ class OpenAILLM:
                 f"{self._context_block(context)}"
                 f"Вопрос: {question}\n\n"
                 f"Схема:\n{schema_text}\n\n"
-                f"Готовые шаблоны:\n{template_lines or '(нет)'}\n\n"
-                "Верни SQLPlan: strategy, template_key, parameters, sql, reason."
+                "Верни SQLPlan со strategy=generated, sql и reason. "
+                "Не выбирай готовый шаблон: шаблоны подбирает код."
             ),
             schema=SQLPlan,
             max_tokens=8192,

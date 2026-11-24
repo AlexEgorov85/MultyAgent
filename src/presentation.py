@@ -56,6 +56,7 @@ _TABLE_PREFERRED_COLUMNS = (
     "audit_code",
     "act_number",
     "pocket_year",
+    "pocket",
     "year",
     "theme_code",
     "completed_audits_count",
@@ -91,6 +92,7 @@ _LABELS_RU: dict[str, str] = {
     "pocket_year": "год",
     "pocket_id": "карман",
     "pocket_title": "карман",
+    "pocket": "карман",
     "theme_code": "тема",
     "theme": "тема",
     "theme_name": "тема",
@@ -134,6 +136,7 @@ _LABELS_EN: dict[str, str] = {
     "pocket_year": "year",
     "pocket_id": "pocket",
     "pocket_title": "pocket",
+    "pocket": "pocket",
     "theme_code": "theme",
     "theme": "theme",
     "theme_name": "theme",
@@ -633,6 +636,11 @@ def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dic
         and confidence > 0
     ):
         confidence_chip = f"{confidence * 100:.0f}%"
+    chips = _chips((t(lang, "trace_confidence"), confidence_chip))
+    if route == "analytics":
+        mode = str(state.get("analytics_mode") or "").strip()
+        if mode:
+            chips.append({"label": t(lang, "trace_mode"), "value": mode})
     steps.append(
         {
             "step": "route",
@@ -643,7 +651,7 @@ def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dic
             "kind": "route",
             "route": route,
             "route_label": route_label,
-            "chips": _chips((t(lang, "trace_confidence"), confidence_chip)),
+            "chips": chips,
         }
     )
 

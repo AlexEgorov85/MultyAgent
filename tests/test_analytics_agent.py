@@ -72,12 +72,15 @@ class FormattingFakeLLM(FakeLLM):
         return self.formatted
 
 
-def acl_request(question: str) -> dict:
+def acl_request(question: str, mode: str | None = None) -> dict:
+    content: dict[str, object] = {"question": question, "auditor_id": "AUD-001"}
+    if mode is not None:
+        content["analytics_mode"] = mode
     return make_acl_message(
         performative="request",
         sender="orchestrator",
         receiver="analytics_agent",
-        content={"question": question, "auditor_id": "AUD-001"},
+        content=content,
         conversation_id="conv-test-001",
     ).model_dump()
 
@@ -185,7 +188,7 @@ def test_generated_sql_answer(server, sample_graph_data):
     )
     graph = build_analytics_graph(server, llm)
 
-    result = graph.invoke({"acl_request": acl_request("Сколько проверок по статусам?")})
+    result = graph.invoke({"acl_request": acl_request("Покажи проверки")})
 
     assert result["status"] == "ok"
     assert result["answer"] == "Завершено: 1 проверка."
@@ -220,24 +223,26 @@ def test_query_ir_compiles_sql_without_plan_sql(server, sample_graph_data):
     assert result["rows"]
 
 
-def test_capability_template_runs_without_llm_plan(server, sample_graph_data):
-    llm = FakeLLM(answer="Завершено: 1 проверка.")
+def test_invalid_analytics_mode_falls_back_to_sql(server, sample_graph_data):
+    llm = FakeLLM(
+        plans=[
+            SQLPlan(
+                strategy="generated",
+                sql="SELECT audit_code, status FROM audit.audits",
+                reason="обычный SQL",
+            )
+        ],
+        answer="Найдена одна проверка.",
+    )
     graph = build_analytics_graph(server, llm)
 
     result = graph.invoke(
-        {
-            "acl_request": acl_request(
-                "Покажи сводку по статусам проверок за 2026 год"
-            )
-        }
+        {"acl_request": acl_request("Покажи проверки", mode="unknown-mode")}
     )
 
     assert result["status"] == "ok"
-    assert result["strategy"] == "script"
-    assert "plan_sql" not in llm.calls
-    assert "plan_query" not in llm.calls
-    assert result["acl_response"]["content"]["metrics"]["plan_source"] == "capability"
-    assert result["rows"] == [{"status": "завершена", "cnt": 1}]
+    assert result["mode"] == "sql"
+    assert llm.calls == ["plan_sql", "summarize"]
 
 
 def test_invalid_acl_is_refused_without_llm(server, sample_graph_data):
@@ -333,16 +338,15 @@ def test_empty_result_is_honest(server, sample_graph_data):
     assert result["rows"] == []
 
 
-def test_script_template_strategy(server, sample_graph_data):
-    llm = FakeLLM(
-        plans=[
-            SQLPlan(
-                strategy="script",
-                template_key="test_status",
-                parameters={},
-                reason="есть готовый шаблон",
-            )
-        ],
+def test_template_is_selected_by_contract_not_by_llm(
+    server, sample_graph_data
+):
+    llm = QueryPlanFakeLLM(
+        plan=QueryPlan(
+            metric="audit_count",
+            dimensions=["status"],
+            reason="LLM описала только смысл",
+        ),
         answer="Статусы получены.",
     )
     graph = build_analytics_graph(server, llm)
@@ -352,9 +356,117 @@ def test_script_template_strategy(server, sample_graph_data):
     assert result["strategy"] == "script"
     assert result["rows"]
     assert result["evidence"][0]["type"] == "script_template"
-    assert llm.calls == ["plan_sql", "summarize"]
-    assert result["answer"] == "Статусы получены."
+    assert llm.calls == ["summarize"]
+    assert (
+        result["acl_response"]["content"]["metrics"]["plan_source"]
+        == "template_contract"
+    )
+    assert result["plan"]["template_key"] == "status_summary"
+    assert "Статусы получены." in result["answer"]
     assert result["answer_source"] == "llm"
+
+
+def test_template_selection_uses_plan_year_not_llm_choice(
+    server, sample_graph_data
+):
+    llm = QueryPlanFakeLLM(
+        plan=QueryPlan(
+            metric="audit_count",
+            dimensions=["status"],
+            filters=[QueryFilter(field="year", value=2026)],
+            reason="год в плане",
+        ),
+        answer="Статусы получены.",
+    )
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke(
+        {"acl_request": acl_request("Покажи сводку по статусам проверок за 2026 год")}
+    )
+
+    assert result["status"] == "ok"
+    assert result["strategy"] == "script"
+    assert result["plan"]["template_key"] == "status_summary"
+    assert result["plan"]["parameters"]["year"] == 2026
+    assert "plan_sql" not in llm.calls
+
+
+def test_template_uses_latest_year_when_plan_has_no_year(
+    server, sample_graph_data
+):
+    llm = QueryPlanFakeLLM(
+        plan=QueryPlan(
+            metric="audit_count",
+            dimensions=["status"],
+            reason="год не назван",
+        ),
+        answer="Статусы получены.",
+    )
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke(
+        {"acl_request": acl_request("Покажи сводку по статусам проверок")}
+    )
+
+    assert result["status"] == "ok"
+    assert result["strategy"] == "script"
+    assert result["plan"]["parameters"]["year"] == 2026
+
+
+def test_incomplete_plan_is_completed_and_template_not_substituted(
+    server, sample_graph_data
+):
+    """LLM не выбирает шаблон, а неполный план не подменяется статусами."""
+    llm = QueryPlanFakeLLM(
+        plan=QueryPlan(
+            metric="audit_count",
+            reason="LLM не заполнила dimensions/filters",
+        ),
+        answer="Готово.",
+    )
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke(
+        {
+            "acl_request": acl_request(
+                "Сколько было закрыто проверок за последний год "
+                "по каждому карману?"
+            )
+        }
+    )
+
+    assert result["status"] == "ok"
+    assert result["strategy"] == "generated"
+    assert result["plan"]["plan_source"] == "query_ir"
+    assert result["plan"]["template_key"] == ""
+    assert result["evidence"][0]["type"] == "sql_result"
+
+    sql = result["acl_response"]["content"]["sql"]
+    assert "p.title AS pocket" in sql
+    assert "a.status = 'завершена'" in sql
+    assert "max(p_last.pocket_year)" in sql.lower()
+    assert result["plan"]["query_plan"]["dimensions"] == ["pocket"]
+
+
+def test_plan_without_template_compiles_sql(server, sample_graph_data):
+    llm = QueryPlanFakeLLM(
+        plan=QueryPlan(
+            metric="audit_count",
+            filters=[QueryFilter(field="year", value=2026)],
+            reason="обычный Query IR",
+        ),
+        answer="Найдена одна проверка.",
+    )
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke(
+        {"acl_request": acl_request("Сколько проверок в 2026 году?")}
+    )
+
+    assert result["status"] == "ok"
+    assert result["strategy"] == "generated"
+    assert result["acl_response"]["content"]["metrics"]["plan_source"] == "query_ir"
+    assert "plan_sql" not in llm.calls
 
 
 def test_drilldown_by_audit_code(server, sample_graph_data):
@@ -364,7 +476,8 @@ def test_drilldown_by_audit_code(server, sample_graph_data):
     result = graph.invoke(
         {
             "acl_request": acl_request(
-                "Какие критические отклонения в AUD-2026-MORTGAGE-03?"
+                "Какие критические отклонения в AUD-2026-MORTGAGE-03?",
+                mode="drilldown",
             )
         }
     )
@@ -382,7 +495,8 @@ def test_drilldown_is_formatted_by_llm(server, sample_graph_data):
     result = graph.invoke(
         {
             "acl_request": acl_request(
-                "Какие критические отклонения в AUD-2026-MORTGAGE-03?"
+                "Какие критические отклонения в AUD-2026-MORTGAGE-03?",
+                mode="drilldown",
             )
         }
     )
@@ -399,7 +513,8 @@ def test_drilldown_falls_back_when_llm_loses_total(server, sample_graph_data):
     result = graph.invoke(
         {
             "acl_request": acl_request(
-                "Какие критические отклонения в AUD-2026-MORTGAGE-03?"
+                "Какие критические отклонения в AUD-2026-MORTGAGE-03?",
+                mode="drilldown",
             )
         }
     )
@@ -427,7 +542,8 @@ def test_multi_tool_in_one_llm_call(server, sample_graph_data):
         {
             "acl_request": acl_request(
                 "Найди отклонения по AUD-2026-MORTGAGE-03 "
-                "и похожие формулировки в других актах"
+                "и похожие формулировки в других актах",
+                mode="multi_tool",
             )
         }
     )
@@ -460,7 +576,8 @@ def test_multi_tool_plan_is_truncated_to_limit(server, sample_graph_data):
         {
             "acl_request": acl_request(
                 "Найди отклонения по AUD-2026-MORTGAGE-03 "
-                "и похожие формулировки в других актах"
+                "и похожие формулировки в других актах",
+                mode="multi_tool",
             )
         }
     )
@@ -504,7 +621,8 @@ def test_multi_tool_is_formatted_by_llm(server, sample_graph_data):
         {
             "acl_request": acl_request(
                 "Найди отклонения по AUD-2026-MORTGAGE-03 "
-                "и похожие формулировки в других актах"
+                "и похожие формулировки в других актах",
+                mode="multi_tool",
             )
         }
     )

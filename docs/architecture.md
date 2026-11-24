@@ -163,11 +163,10 @@ flowchart TD
 ```mermaid
 flowchart TD
     S([START]) --> PA["parse_acl"]
-    PA -->|ok| CL["classify"]
+    PA -->|mode = sql| PL["plan"]
+    PA -->|mode = drilldown| DD["drilldown"]
+    PA -->|mode = multi_tool| MT["multi_tool"]
     PA -->|failure| PK["pack"]
-    CL -->|sql| PL["plan"]
-    CL -->|drilldown| DD["drilldown"]
-    CL -->|multi_tool| MT["multi_tool"]
     PL -->|strategy = script| RS["run_script"]
     PL -->|QueryPlan / SQLPlan| VA["validate"]
     PL -->|failed| SU["summarize"]
@@ -186,21 +185,31 @@ flowchart TD
 
 Как работает:
 
-1. **`classify`** выбирает режим: обычный SQL-вопрос, drill-down
-   («покажи строки») или multi-tool (несколько инструментов в одном ходе,
-   например `get_act_items` + `search_acts`).
-2. **`plan`** — трёхуровневая стратегия получения SQL:
-   - детерминированный matcher подбирает typed capability (готовый
-     шаблон: сводка по статусам, топ находок, динамика, просрочки,
-     пункты без скриптов);
+1. **Режим** приходит из router (`analytics_mode`: `sql`, `drilldown`,
+   `multi_tool`) — LLM выбирает его по смыслу вопроса, а `parse_acl`
+   валидирует enum. Словесных правил выбора режима нет.
+2. **`plan`** — двухуровневая стратегия получения SQL:
+   - для явных template-вопросов сначала работает детерминированный
+     fast path `select_template_from_question`: план собирается из
+     доменных сигналов, шаблон выбирается по контракту без вызова LLM;
    - иначе LLM возвращает `QueryPlan(metric, dimensions, filters)` по
-     семантическому каталогу `src/semantic/catalog.py`, а SQL собирает
-     компилятор `src/query/compiler.py`;
-   - если метрика не поддержана каталогом — fallback на свободный
-     `SQLPlan` от LLM.
+     семантическому каталогу `src/semantic/catalog.py`;
+   - `complete_query_plan` (`src/query/intent.py`) дополняет план
+     доменными сигналами: «по карманам», «за последний год», «закрытая
+     проверка», темы, AUD-код. Это компенсирует нестабильный structured
+     output модели;
+   - SQL собирает компилятор `src/query/compiler.py`;
+   - LLM **не выбирает шаблон**. Способ выполнения определяет код:
+     `select_template` (`src/query/templates.py`) сопоставляет план с
+     контрактами шаблонов (метрика, разрезы, фильтры). Шаблон запускается
+     только при полном покрытии плана, иначе используется SQL;
+   - `missing_question_filters` проверяет покрытие вопроса одинаково для
+     шаблона и сгенерированного SQL. Если план неполный или метрика не
+     поддержана — fallback на свободный `SQLPlan` (только generated SQL).
 3. **`validate`** — каждый SQL проходит `sql_guard` (`src/tools/sql_guard.py`):
    только `SELECT`, allowlist таблиц/колонок, принудительный `LIMIT`,
-   проверка значений фильтров.
+   проверка значений фильтров. `missing_question_filters` повторяет
+   смысловую проверку покрытия до выполнения.
 4. **`execute`** — выполнение через read-only роль `audit_ro` со
    `statement_timeout` 5 секунд.
 5. **`repair`** — при ошибке LLM получает текст ошибки и исправляет план;
@@ -208,8 +217,9 @@ flowchart TD
 6. **`summarize`** — ответ с числами и evidence (SQL, ID строк);
    **`pack`** упаковывает результат в ACL `inform`.
 
-Так модель не придумывает колонки и `template_key`: допустимые метрики,
-измерения и значения проверяются до выполнения. Подробнее —
+Так модель не придумывает колонки, метрики и способ выполнения:
+допустимые измерения и значения проверяются до выполнения, а шаблон
+выбирается кодом по контракту. Подробнее —
 [query_ir.md](query_ir.md) и [sql_safety.md](sql_safety.md).
 
 ### Retrieval

@@ -199,6 +199,7 @@ def test_trace_contains_route_sql_and_guard_steps():
     state = _state(
         route_confidence=0.9,
         route_reason="вопрос про количество",
+        analytics_mode="drilldown",
         acl_response={
             "performative": "inform",
             "sender": "analytics_agent",
@@ -216,6 +217,7 @@ def test_trace_contains_route_sql_and_guard_steps():
 
     assert result["final_answer"] == "Завершённых проверок: 5."
     assert "route" in steps
+    assert {"label": "Режим", "value": "drilldown"} in steps["route"]["chips"]
     assert steps["sql"]["detail"].startswith("SELECT COUNT(*)")
     assert "sql_result" in steps
     assert "guard_request" in steps

@@ -71,6 +71,12 @@ def test_router_prompt_mentions_every_route():
         assert route in text
 
 
+def test_router_prompt_describes_analytics_modes():
+    text = load_prompt("router")
+    for mode in ("sql", "drilldown", "multi_tool"):
+        assert mode in text
+
+
 def test_format_guides_are_built_from_versioned_prompts():
     for kind in FORMAT_KINDS:
         guide = format_guide(kind)

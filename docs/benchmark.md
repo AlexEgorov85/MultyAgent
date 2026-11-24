@@ -69,6 +69,11 @@
 
 ### Medium — join, группировка, шаблон
 
+Готовые шаблоны выбирает код по контракту `QueryPlan`: LLM возвращает
+только метрику, разрезы и фильтры. Если контракт шаблона покрывает план,
+выполняется `run_script_template`; иначе SQL собирает компилятор. LLM
+не может подменить запрос выбором шаблона.
+
 - статусы проверок 2026 года: завершено / в работе / запланировано / отменено;
 - статусы актов 2025 года;
 - акты с датой 2027 года;
@@ -411,3 +416,47 @@ Inspector и investigation полный прогон занял 263 chat-зап�
 Сравнивать прогоны нужно через `scripts/benchmark_diff.py` с `--gate`.
 Числа выше не следует выдавать за результат текущей ревизии, пока не
 выполнен новый прогон и не сохранён его `run_id`.
+
+## Абляция: LLM-семантика вместо регексов
+
+После удаления детерминированных semantic-правил (`classify`, capability
+matcher, извлечение темы/статуса/риска из слов) проверяем, что качество
+не падает, а рост числа LLM-вызовов умеренный.
+
+```powershell
+# шаблонные кейсы: шаблон выбирается кодом по контракту QueryPlan
+.venv\Scripts\python.exe scripts\benchmark.py --only medium_template_status_summary
+.venv\Scripts\python.exe scripts\benchmark.py --only medium_template_top_findings
+.venv\Scripts\python.exe scripts\benchmark.py --only medium_template_items_without_scripts
+.venv\Scripts\python.exe scripts\benchmark.py --only medium_template_theme_dynamics
+
+# контекст цепочек: год/тема/тип переносит LLM-резолвер
+.venv\Scripts\python.exe scripts\benchmark.py --tier chain
+
+# сравнение прогонов, если сохранены baseline/after
+.venv\Scripts\python.exe scripts\benchmark_diff.py --gate
+```
+
+Что смотреть: `strategy_accuracy`, `tool_accuracy`,
+`context_retention_rate`, `chain_context_retention_rate`,
+`llm_calls_total`, `latency_mean_sec`.
+
+### Ограничение free-тарифа
+
+Провайдер разрешает **3 запроса/мин**. Полный `--tier chain` — это
+~90 вызовов, поэтому он упирается в 429: клиент ждёт 25 с и делает не
+более двух повторов, после чего фиксирует `llm_errors`. Если
+`llm_errors_total > 0`, метрики прогона недействительны — запускайте
+цепочки по одной (`--only chain_correction`) или после сброса лимита.
+
+### Точечные прогоны шаблонов (22.11.2026)
+
+Все четыре `medium_template_*` прошли с `strategy=script` и
+`run_script_template`: шаблон выбран кодом по контракту `QueryPlan`,
+LLM не возвращает `template_key`. Около 3 LLM-вызовов на реплику.
+
+Прогон `--tier chain` в это же окно лимита недействителен
+(`llm_errors_total = 65`): провайдер ограничивает 3 запроса/мин.
+Контекст цепочек нужно перепроверить по одной цепочке после сброса
+лимита; если `chain_context_retention_rate` просядет, следующий шаг —
+структурные слоты в `ResolvedQuery` (enum + валидация).

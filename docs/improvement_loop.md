@@ -185,9 +185,11 @@ Copy-Item reports\benchmark.json reports\benchmark_baseline.json
    `template_key` или `status_summary` без `year`.
 6. **Efficiency**: 97.5% времени — LLM; около 4 LLM-вызовов на реплику.
 
-Первый практичный шаг — валидировать `template_key` и параметры до
-выполнения, с fallback на generated SQL. Это один слой, который закрывает
-сразу несколько кластеров.
+Исторический первый шаг — валидировать `template_key` и параметры до
+выполнения, с fallback на generated SQL. В итоговой архитектуре пошли
+дальше: `template_key` удалён из `QueryPlan`, шаблон выбирает код по
+контракту проверенного плана, поэтому LLM больше не может подменить
+вопрос шаблоном.
 
 ## Следующие шаги
 

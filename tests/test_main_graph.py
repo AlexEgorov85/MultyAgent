@@ -54,6 +54,18 @@ class MainLLM:
         return RouteDecision(route="analytics", reason="числа", confidence=0.8)
 
 
+class DrilldownLLM(MainLLM):
+    """Router, который выбирает режим drilldown по смыслу вопроса."""
+
+    def route(self, **kwargs):
+        return RouteDecision(
+            route="analytics",
+            reason="нужны пункты проверки",
+            confidence=0.9,
+            analytics_mode="drilldown",
+        )
+
+
 class MemoryLLM(MainLLM):
     """Фейковый экстрактор памяти: повторяет контракт extract_memory."""
 
@@ -252,6 +264,21 @@ def test_short_term_memory_accumulates_messages(server, main_data):
 
     other = _invoke(graph, "thread-other", "Сколько проверок?")
     assert len(other["messages"]) == 2
+
+
+def test_router_mode_is_passed_to_analytics(server, main_data):
+    graph = build_main_graph(server, DrilldownLLM(), analytics_llm=AnalyticsLLM())
+
+    result = _invoke(
+        graph, "thread-drilldown", "Какие пункты по AUD-2026-DEPOSITS-88?"
+    )
+
+    assert result["route"] == "analytics"
+    assert result["analytics_mode"] == "drilldown"
+    assert result["final_answer"]
+    assert any(
+        item.get("item_id") == "ITM-MAIN-01" for item in result["evidence"]
+    )
 
 
 def test_long_term_memory_between_sessions(server, main_data):
@@ -531,15 +558,33 @@ def test_followup_uses_previous_thread_history(server, main_data):
     assert "2025" in second["resolved_query"]
 
 
-def test_dialogue_slots_preserve_item_type_across_year_change(server, main_data):
+class CorrectionLLM(MainLLM):
+    """Резолвер переносит тип находки из контекста (семантика — у LLM)."""
+
+    def resolve_followup(self, **kwargs):
+        question = kwargs["question"]
+        context = str(kwargs.get("context", "")).lower()
+        if "2025" in question:
+            item_type = "проблемы" if "проблем" in context else "отклонения"
+            return ResolvedQuery(
+                question=f"Сколько {item_type} по ипотеке в 2025 году?",
+                is_followup=True,
+                reason="уточнение года и типа находки",
+            )
+        return ResolvedQuery(question=question, is_followup=False, reason="")
+
+
+def test_resolver_carries_item_type_across_year_change(server, main_data):
     analytics = DialogueAnalyticsLLM()
-    graph = build_main_graph(server, MainLLM(), analytics_llm=analytics)
+    graph = build_main_graph(server, CorrectionLLM(), analytics_llm=analytics)
 
     _invoke(graph, "thread-slots", "Сколько отклонений по ипотеке в 2026 году?")
     _invoke(graph, "thread-slots", "Нет, я имел в виду проблемы")
     third = _invoke(graph, "thread-slots", "А за 2025 год?")
 
-    assert third["dialogue_slots"]["item_type"] == "проблема"
+    # Семантический слот не угадывается регексом — его переносит резолвер.
+    assert third["dialogue_slots"]["year"] == 2025
+    assert third["dialogue_slots"]["item_type"] is None
     assert "2025" in third["resolved_query"]
     assert "проблем" in third["resolved_query"].lower()
     assert "проблем" in analytics.questions[-1].lower()

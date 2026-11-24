@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Mapping
 
 from .. import db_runtime
+from ..semantic.catalog import THEMES, find_theme
 
 ALLOWED_KEYS = {"focus_theme", "default_format", "signature"}
 
@@ -107,15 +108,11 @@ def normalize_fact(
         return None
     if key == "focus_theme":
         lower = text.lower()
-        for theme in themes:
+        candidates = tuple(themes)
+        for theme in candidates:
             if lower == str(theme).lower():
                 return str(theme)
-        for theme in themes:
-            value = str(theme).lower()
-            stem = value[:-1] if value.endswith(("а", "я", "ы")) else value
-            if len(stem) >= 4 and stem in lower:
-                return str(theme)
-        return None
+        return find_theme(text, candidates)
     return text[:200]
 
 
@@ -153,16 +150,9 @@ def infer_memory(question: str) -> dict[str, str]:
         return {}
 
     facts: dict[str, str] = {}
-    for theme, stem in (
-        ("ипотека", "ипотек"),
-        ("потребкредитование", "потребкредит"),
-        ("платежи", "платеж"),
-        ("карты", "карт"),
-        ("вклады", "вклад"),
-    ):
-        if stem in text:
-            facts["focus_theme"] = theme
-            break
+    theme = find_theme(text, THEMES)
+    if theme:
+        facts["focus_theme"] = theme
     if "кратк" in text:
         facts["default_format"] = "краткий"
     elif "подробн" in text:

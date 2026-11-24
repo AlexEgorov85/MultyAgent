@@ -66,6 +66,11 @@ def test_memory_intent_detection():
     assert store.infer_memory("Сколько проверок по ипотеке?") == {}
     facts = store.infer_memory("Я проверяю ипотеку, акт нужен в кратком формате")
     assert facts == {"focus_theme": "ипотека", "default_format": "краткий"}
+    # «Картина» — не тема «карты»; «карты» — тема.
+    assert store.infer_memory("Запомни: я проверяю картину") == {}
+    assert store.infer_memory("Запомни: я проверяю карты") == {
+        "focus_theme": "карты"
+    }
 
 
 def test_normalize_fact():
@@ -82,6 +87,15 @@ def test_normalize_fact():
         == "ипотека"
     )
     assert store.normalize_fact("focus_theme", "криптовалюта", ["ипотека"]) is None
+    assert store.normalize_fact("focus_theme", "картина", ["карты"]) is None
+    assert (
+        store.normalize_fact("focus_theme", "банковские карты", ["карты"])
+        == "карты"
+    )
+    assert (
+        store.normalize_fact("focus_theme", "ипотечный кредит", ["ипотека"])
+        == "ипотека"
+    )
     assert store.normalize_fact("signature", "  Иванов И.И. ") == "Иванов И.И."
     assert store.normalize_fact("favourite_color", "синий") is None
     assert store.normalize_fact("default_format", "   ") is None

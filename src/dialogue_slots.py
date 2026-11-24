@@ -1,8 +1,10 @@
 """Структурированные слоты диалога.
 
-Текстовая история полезна LLM, но для переноса года/темы/типа находки
-нужна структура. Слоты обновляются из текущего вопроса и результата
-resolver, а затем добавляются в resolved_query, чтобы контекст не терялся.
+Текстовая история полезна LLM, но год и код проверки удобно переносить
+структурно. Семантические слоты (тема, тип находки, риск, статус) здесь
+намеренно не извлекаются из слов: омонимия («карты» / «картина») делает
+regex-угадывание ненадёжным. Их восстанавливает LLM-резолвер в тексте
+вопроса, а валидирует код.
 """
 
 from __future__ import annotations
@@ -14,34 +16,6 @@ from pydantic import BaseModel, Field
 
 _AUDIT_CODE_RE = re.compile(r"AUD-\d{4}-[A-Z]+-\d{2}", re.IGNORECASE)
 _YEAR_RE = re.compile(r"\b(20\d{2})\b")
-
-_THEME_STEMS: tuple[tuple[str, str], ...] = (
-    ("потребкредит", "потребкредитование"),
-    ("ипотек", "ипотека"),
-    ("вклад", "вклады"),
-    ("платеж", "платежи"),
-    ("карт", "карты"),
-)
-_RISK_STEMS: tuple[tuple[str, str], ...] = (
-    ("критическ", "критический"),
-    ("высок", "высокий"),
-    ("средн", "средний"),
-    ("низк", "низкий"),
-)
-_ITEM_TYPES: tuple[tuple[str, str], ...] = (
-    ("проблем", "проблема"),
-    ("отклон", "отклонение"),
-)
-_STATUS_WORDS: tuple[tuple[str, str], ...] = (
-    ("на согласовании", "на согласовании"),
-    ("в работе", "в работе"),
-    ("черновик", "черновик"),
-    ("утвержд", "утверждён"),
-    ("заверш", "завершена"),
-    ("отмен", "отменена"),
-    ("закрыт", "закрыт"),
-    ("открыт", "открыт"),
-)
 
 
 class DialogueSlots(BaseModel):
@@ -60,7 +34,11 @@ def _normalise(text: str) -> str:
 
 
 def extract_slots(text: str) -> DialogueSlots:
-    """Извлекает только явно упомянутые в тексте слоты."""
+    """Извлекает только однозначные слоты: год и код проверки.
+
+    Тема, тип находки, риск и статус — семантические: их определяет
+    LLM-резолвер по смыслу вопроса, а не совпадение стемов.
+    """
     value = _normalise(text)
     slots = DialogueSlots()
 
@@ -71,26 +49,6 @@ def extract_slots(text: str) -> DialogueSlots:
     years = _YEAR_RE.findall(value)
     if years:
         slots.year = int(years[-1])
-
-    for stem, theme in _THEME_STEMS:
-        if stem in value:
-            slots.theme = theme
-            break
-
-    for stem, item_type in _ITEM_TYPES:
-        if stem in value:
-            slots.item_type = item_type
-            break
-
-    for stem, risk in _RISK_STEMS:
-        if stem in value:
-            slots.risk_level = risk
-            break
-
-    for phrase, status in _STATUS_WORDS:
-        if phrase in value:
-            slots.status = status
-            break
 
     return slots
 
@@ -134,10 +92,10 @@ def merge_slots(
 
 
 def augment_query(query: str, slots: DialogueSlots) -> str:
-    """Добавляет потерянные слоты в resolved_query.
+    """Добавляет потерянные однозначные слоты: год и код проверки.
 
-    Это не заменяет нормальную переформулировку, а страхует от потери
-    сущности: Analytics и benchmark видят её в тексте запроса.
+    Тема/статус/риск не дописываются: если резолвер их потерял, добавлять
+    их по сохранённому значению опасно (пользователь мог сменить тему).
     """
     text = " ".join((query or "").split())
     lower = _normalise(text)
@@ -145,14 +103,6 @@ def augment_query(query: str, slots: DialogueSlots) -> str:
 
     if slots.year is not None and str(slots.year) not in lower:
         additions.append(f"год {slots.year}")
-    if slots.theme and slots.theme[:4] not in lower:
-        additions.append(f"тема {slots.theme}")
-    if slots.item_type and slots.item_type[:7] not in lower:
-        additions.append(f"тип находки {slots.item_type}")
-    if slots.risk_level and slots.risk_level[:5] not in lower:
-        additions.append(f"риск {slots.risk_level}")
-    if slots.status and slots.status[:5] not in lower:
-        additions.append(f"статус {slots.status}")
     if slots.audit_code and slots.audit_code.lower() not in lower:
         additions.append(f"проверка {slots.audit_code}")
 

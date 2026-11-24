@@ -12,8 +12,16 @@ class QueryCompileError(ValueError):
     """QueryPlan не соответствует semantic layer."""
 
 
+_LATEST_YEAR_VALUES = frozenset(
+    {"last", "latest", "последний", "последний год"}
+)
+
+
 def _canonical_value(spec: MetricSpec, field_name: str, value: Any) -> Any:
     if field_name == "year":
+        text = str(value).strip().lower()
+        if text in _LATEST_YEAR_VALUES:
+            return "last"
         try:
             return int(value)
         except (TypeError, ValueError) as exc:
@@ -59,6 +67,12 @@ def _condition(spec: MetricSpec, query_filter: QueryFilter) -> str:
             f"Доступны: {', '.join(spec.dimensions)}"
         )
     value = _canonical_value(spec, field_name, query_filter.value)
+    if field_name == "year" and value == "last":
+        return (
+            f"{expression} = ("
+            "SELECT max(p_last.pocket_year) FROM audit.audit_pockets p_last"
+            ")"
+        )
     if query_filter.op == "contains":
         if field_name != "specialization":
             raise QueryCompileError(

@@ -250,12 +250,24 @@ def run_readonly_sql(
     return _execute(server, sql, params, cap)
 
 
+@telemetry.timed_tool("latest_pocket_year")
+def latest_pocket_year(server) -> int:
+    """Максимальный год карманов — для периода «последний год»."""
+    rows = _select(
+        server,
+        "SELECT max(pocket_year) AS year FROM audit.audit_pockets",
+    )
+    value = rows[0]["year"] if rows else None
+    return int(value) if value is not None else config.DEFAULT_AS_OF_DATE.year
+
+
 @telemetry.timed_tool("list_script_templates")
 def list_script_templates(server) -> list[dict[str, Any]]:
     """Возвращает активные шаблоны без выполнения."""
     with db_runtime.connect(server, role=db_runtime.READ_ONLY_ROLE) as conn:
         rows = conn.execute(
-            "SELECT template_key, title, description, parameters, max_rows_default "
+            "SELECT template_key, title, description, sql_template, parameters, "
+            "max_rows_default "
             "FROM audit.script_templates WHERE is_active ORDER BY template_key"
         ).fetchall()
     return [
@@ -263,10 +275,11 @@ def list_script_templates(server) -> list[dict[str, Any]]:
             "template_key": key,
             "title": title,
             "description": description,
+            "sql_template": sql_template,
             "parameters": params,
             "max_rows_default": max_rows,
         }
-        for key, title, description, params, max_rows in rows
+        for key, title, description, sql_template, params, max_rows in rows
     ]
 
 

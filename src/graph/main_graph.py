@@ -20,6 +20,7 @@ from ..guardrails import check_final_answer, check_request, extract_sql
 from ..llm import LLMClient
 from ..memory import store as memory_store
 from ..presentation import present
+from ..semantic.catalog import theme_in_text
 from ..state import MainState
 from .analytics_graph import build_analytics_graph, known_themes
 from .investigation_graph import build_investigation_graph
@@ -339,6 +340,7 @@ def build_main_graph(
             "route": decision.route,
             "route_reason": decision.reason,
             "route_confidence": decision.confidence,
+            "analytics_mode": decision.analytics_mode,
         }
 
     def _fallback_route(question: str) -> dict[str, Any]:
@@ -398,11 +400,8 @@ def build_main_graph(
         profile = state.get("profile", {})
         parts = []
         if profile.get("focus_theme"):
-            lower = question.lower()
             mentions_theme = any(
-                (
-                    theme[:-1] if theme.endswith(("а", "я", "ы")) else theme
-                ) in lower
+                theme_in_text(theme, question)
                 for theme in known_themes(server)
             )
             if not mentions_theme:
@@ -426,6 +425,8 @@ def build_main_graph(
             # в промпте, а не как условия вопроса.
             "profile_text": memory_store.profile_text(profile),
         }
+        if receiver == "analytics_agent":
+            content["analytics_mode"] = str(state.get("analytics_mode") or "sql")
         if receiver == "report_agent":
             content["report_format"] = str(
                 profile.get("default_format") or "подробный"

@@ -17,6 +17,8 @@ Route = Literal[
     "unsafe",
 ]
 
+AnalyticsMode = Literal["sql", "drilldown", "multi_tool"]
+
 
 class RouteDecision(BaseModel):
     """Решение маршрутизатора."""
@@ -24,6 +26,7 @@ class RouteDecision(BaseModel):
     route: Route
     reason: str = Field(min_length=1)
     confidence: float = Field(ge=0, le=1)
+    analytics_mode: AnalyticsMode = "sql"
 
 
 class ResolvedQuery(BaseModel):

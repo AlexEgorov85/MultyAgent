@@ -10,15 +10,31 @@ Analytics-агент больше не просит LLM сразу писать 
 вопрос
   → LLM plan_query (structured output)
   → QueryPlan(metric, dimensions, filters)
-  → compiler + semantic catalog
+  → complete_query_plan: доменные сигналы semantic layer
+  → проверка покрытия вопроса (та же для шаблона и для SQL)
+  → выбор шаблона по контракту ИЛИ compiler + semantic catalog
   → read-only SQL
   → sql_guard
   → execute
   → summarize
 ```
 
-Если метрика/разрез/значение не поддержаны, Analytics откатывается на
-старый `plan_sql` (free SQL). Это safety net, а не основной путь.
+Если метрика/разрез/значение не поддержаны или план не покрывает
+вопрос, Analytics откатывается на старый `plan_sql` (free SQL). Это
+safety net, а не основной путь.
+
+LLM **не выбирает** готовый шаблон и не возвращает `template_key`.
+Шаблон — это execution strategy, а не часть смысла вопроса. После
+проверки `QueryPlan` код сопоставляет его с контрактами шаблонов
+(`src/query/templates.py`). Шаблон запускается, только если его контракт
+покрывает метрику, разрезы и фильтры плана; иначе SQL собирает
+компилятор. Так шаблон не может подменить вопрос.
+
+Для явных template-вопросов («сводка по статусам», «топ видов»,
+«динамика», «просроченные», «пункты без скриптов», «риски по карманам»)
+работает детерминированный fast path `select_template_from_question`:
+план собирается из доменных сигналов, шаблон выбирается по контракту,
+LLM-планировщик не вызывается вовсе.
 
 ## Пример
 
@@ -74,16 +90,59 @@ LIMIT 200
 
 Измерения — только из каталога метрики. Основные:
 
-`year`, `theme`, `status`, `audit_type`, `risk_level`, `item_type`,
-`title`, `responsible_unit`, `is_repeat`, `audit_code`, `act_status`,
-`lead_auditor_id`, `approved_by`, `language`, `run_status`, `severity`,
-`entity_type`, `metric_name`, `specialization`.
+`year`, `theme`, `pocket`, `status`, `audit_type`, `risk_level`,
+`item_type`, `title`, `responsible_unit`, `is_repeat`, `audit_code`,
+`act_status`, `lead_auditor_id`, `approved_by`, `language`, `run_status`,
+`severity`, `entity_type`, `metric_name`, `specialization`.
+
+`pocket` — карман аудита (год + тема). Это отдельное измерение, а не
+`status`: «по каждому карману» нельзя выразить разрезом по статусам.
 
 Для `specialization` используется `op=contains`:
 
 ```json
 {"field": "specialization", "value": "ипотека", "op": "contains"}
 ```
+
+Период `year="last"` компилируется в максимальный год данных:
+
+```sql
+p.pocket_year = (SELECT max(p_last.pocket_year) FROM audit.audit_pockets p_last)
+```
+
+«Закрытая проверка» — `status="завершена"`, «закрытый пункт» —
+`status="закрыт"`. Эти значения выбираются по метрике, а не по слову
+«закрыт» вне контекста.
+
+## Дополнение и проверка плана
+
+LLM может вернуть верный смысл в `reason`, но пустые
+`dimensions`/`filters` или выбрать шаблон, который не покрывает вопрос.
+Поэтому между `plan_query` и компилятором работает детерминированный
+слой `src/query/intent.py`:
+
+1. `question_signals` (`src/semantic/catalog.py`) извлекает из текста
+   доменные сигналы: разрез по карманам/годам/статусам, «последний год»,
+   закрытую проверку, темы, языки, AUD-код.
+2. `complete_query_plan` дополняет `QueryPlan`, не перезаписывая уже
+   заданные условия. Если названо несколько статусов/тем/языков, это
+   разрез, а не несколько одновременных фильтров.
+3. `missing_question_filters` проверяет, что SQL (или шаблон) реально
+   содержит нужные разрезы и значения. Проверка общая: она применяется
+   и к Query IR, и к готовому шаблону.
+
+Шаблон не является вторым источником истины. Контракт шаблона описывает,
+какие метрики, разрезы и фильтры он умеет считать (`src/query/templates.py`).
+Например, `status_summary` требует `status` и допускает только `audit_count`
+и фильтр `year`; он не может ответить на вопрос «закрытые проверки по
+каждому карману», поэтому не выбирается, а SQL собирается из дополненного
+QueryPlan.
+
+Слой `intent` — это не обход шаблона, а детерминированный доменный парсер.
+Он нужен потому, что модель может вернуть корректный `reason` и пустой
+`QueryPlan`; без него пришлось бы либо молча выполнить не тот запрос,
+либо каждый раз падать в свободный SQL. Если модель станет надёжнее,
+`intent` можно ослабить, но разделение intent/execution остаётся.
 
 ## Валидация
 
@@ -95,20 +154,25 @@ LIMIT 200
 
 ```powershell
 .venv\Scripts\python.exe -m pytest tests\test_query_compiler.py -q
+.venv\Scripts\python.exe -m pytest tests\test_query_intent.py -q
 .venv\Scripts\python.exe -m pytest tests\test_analytics_agent.py -q
+.venv\Scripts\python.exe -m pytest tests\test_analytics_filters.py -q
 ```
 
 ## Связанные слои
 
-- `src/capabilities/` — typed-шаблоны и deterministic matcher. Явные
-  template-вопросы обрабатываются до Query IR, без LLM-планировщика.
-- `src/dialogue_slots.py` — слоты year/theme/item_type/risk/status/audit_code.
-  Потерянный слот добавляется в `resolved_query`, поэтому QueryPlan видит
-  контекст даже при слабом resolver.
+- `src/graph/main_graph.py` — router выбирает `analytics_mode`
+  (`sql` / `drilldown` / `multi_tool`) по смыслу вопроса; Analytics
+  валидирует значение по enum.
+- `src/dialogue_slots.py` — детерминированно переносит только год и
+  AUD-код. Тема, тип находки, риск и статус — семантика: их восстанавливает
+  LLM-резолвер в тексте вопроса, а QueryPlan видит результат.
 
 ## Что дальше
 
 - Golden SQL для benchmark-кейсов.
-- Перевести `missing_question_filters` и repair на IR.
+- Перевести repair с текста SQL на структуру QueryPlan.
 - Добавить list-метрики (не только count) для «покажи пункты».
 - Использовать slots в QueryPlan напрямую, а не только через текст запроса.
+- Хранить контракт шаблона (метрика, разрезы, период) в БД, а не в
+  `src/query/templates.py`: сейчас это код, синхронный с `script_templates`.

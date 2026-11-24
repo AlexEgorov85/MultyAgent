@@ -1,4 +1,4 @@
-"""Проверка покрытия условий вопроса в SQL аналитика."""
+"""Проверка структурных условий вопроса в SQL аналитика."""
 
 from __future__ import annotations
 
@@ -8,31 +8,30 @@ from src.graph.analytics_graph import (
     missing_question_filters,
 )
 
-THEMES = ["ипотека", "карты", "вклады", "расчёты"]
 
-
-def test_detects_missing_theme_in_sql():
+def test_theme_words_are_not_inferred_by_code():
     sql = (
         "SELECT COUNT(*) AS audit_count FROM audit.audits "
         "WHERE pocket_year = 2026 AND status = 'завершена'"
     )
-    missing = missing_question_filters(
-        "Сколько завершённых проверок по ипотеке в 2026 году?",
-        sql,
-        THEMES,
+    # Тема «ипотека» есть в вопросе, но это семантика: LLM-планировщик
+    # отвечает за фильтр, код не угадывает его по словам.
+    assert (
+        missing_question_filters(
+            "Сколько завершённых проверок по ипотеке в 2026 году?",
+            sql,
+        )
+        == []
     )
-    assert "тема «ипотека»" in missing
 
 
-def test_detects_missing_year_and_status():
+def test_detects_missing_year_only():
     sql = "SELECT COUNT(*) FROM audit.audits WHERE theme_code = 'ипотека'"
     missing = missing_question_filters(
         "Сколько завершённых проверок по ипотеке в 2026 году?",
         sql,
-        THEMES,
     )
-    assert "год 2026" in missing
-    assert "статус «завершена»" in missing
+    assert missing == ["год 2026"]
 
 
 def test_complete_sql_has_no_missing_filters():
@@ -46,7 +45,6 @@ def test_complete_sql_has_no_missing_filters():
         missing_question_filters(
             "Сколько завершённых проверок по ипотеке в 2026 году?",
             sql,
-            THEMES,
         )
         == []
     )
@@ -59,10 +57,9 @@ def test_template_parameters_count_as_filters():
         missing_question_filters(
             "Сколько завершённых проверок по ипотеке в 2026 году?",
             sql,
-            THEMES,
             parameters,
         )
-        == ["статус «завершена»"]
+        == []
     )
 
 
@@ -72,41 +69,42 @@ def test_case_and_inflection_are_handled():
         missing_question_filters(
             "Сколько проверок по ипотеке в 2026 году?",
             sql,
-            THEMES,
         )
         == []
     )
 
 
-def test_detects_extra_theme_filter_not_mentioned_in_question():
+def test_theme_homonyms_do_not_trigger_repairs():
+    """«Картина отклонений» — не повод требовать фильтр темы «карты»."""
+    sql = (
+        "SELECT p.pocket_year, count(*) AS audit_count "
+        "FROM audit.audit_pockets AS p "
+        "GROUP BY p.pocket_year"
+    )
+    assert (
+        missing_question_filters(
+            "Покажи картину отклонений по годам",
+            sql,
+        )
+        == []
+    )
+
+
+def test_status_words_are_not_checked_by_code():
     sql = (
         "SELECT p.pocket_year, p.pocket_id, count(*) AS audit_count "
         "FROM audit.audit_pockets AS p "
         "JOIN audit.audits AS a ON a.pocket_id = p.pocket_id "
-        "WHERE p.theme_code = 'ипотека' "
         "GROUP BY p.pocket_year, p.pocket_id"
     )
-    missing = missing_question_filters(
-        "Сделай аналитику по годам и карманам",
-        sql,
-        THEMES,
+    # «Закрыто» — семантика: код не требует конкретного status в SQL.
+    assert (
+        missing_question_filters(
+            "Сделай аналитику по годам и карманам: сколько проверок было закрыто",
+            sql,
+        )
+        == []
     )
-    assert "лишний фильтр темы «ипотека»" in missing
-
-
-def test_closed_audit_requires_completed_status():
-    sql = (
-        "SELECT p.pocket_year, p.pocket_id, count(*) AS audit_count "
-        "FROM audit.audit_pockets AS p "
-        "JOIN audit.audits AS a ON a.pocket_id = p.pocket_id "
-        "GROUP BY p.pocket_year, p.pocket_id"
-    )
-    missing = missing_question_filters(
-        "Сделай аналитику по годам и карманам: сколько проверок было закрыто",
-        sql,
-        THEMES,
-    )
-    assert "статус «завершена» (закрытая проверка)" in missing
 
 
 def test_year_and_pocket_dimensions_are_required():
@@ -114,7 +112,6 @@ def test_year_and_pocket_dimensions_are_required():
     missing = missing_question_filters(
         "Сколько закрытых проверок по годам и карманам?",
         sql,
-        THEMES,
     )
     assert "разбивка по карманам" in missing
     assert "разбивка по годам" in missing
@@ -133,7 +130,6 @@ def test_complete_year_and_pocket_breakdown_is_accepted():
         missing_question_filters(
             "Сделай аналитику по годам и карманам: сколько проверок было закрыто",
             sql,
-            THEMES,
         )
         == []
     )
