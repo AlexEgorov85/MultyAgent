@@ -17,7 +17,7 @@ Route = Literal[
     "unsafe",
 ]
 
-AnalyticsMode = Literal["sql", "drilldown", "multi_tool"]
+AnalyticsMode = Literal["sql", "drilldown", "multi_tool", "chart"]
 
 
 class RouteDecision(BaseModel):
@@ -27,6 +27,39 @@ class RouteDecision(BaseModel):
     reason: str = Field(min_length=1)
     confidence: float = Field(ge=0, le=1)
     analytics_mode: AnalyticsMode = "sql"
+
+
+class ChartPoint(BaseModel):
+    """Одна точка диаграммы: категория и числовое значение."""
+
+    label: str = Field(min_length=1, max_length=120)
+    value: float
+
+
+class ChartSpec(BaseModel):
+    """Спецификация диаграммы, которую выбирает LLM по готовым данным."""
+
+    type: Literal["bar", "line", "pie"] = "bar"
+    title: str = Field(min_length=1, max_length=200)
+    subtitle: str = ""
+    category_label: str = ""
+    value_label: str = ""
+    unit: str = ""
+    data: list[ChartPoint] = Field(default_factory=list)
+
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs):
+        schema = super().model_json_schema(*args, **kwargs)
+        schema["required"] = [
+            "type",
+            "title",
+            "subtitle",
+            "category_label",
+            "value_label",
+            "unit",
+            "data",
+        ]
+        return schema
 
 
 class ResolvedQuery(BaseModel):

@@ -7,6 +7,7 @@ import {
   type ThreadMessageLike,
 } from "@assistant-ui/react";
 import { useCallback } from "react";
+import { sanitizeChart, type ChartSpec } from "./chart";
 import {
   newId,
   useChats,
@@ -55,6 +56,13 @@ function answerFromState(state: unknown): string {
   return "";
 }
 
+function chartFromState(state: unknown): ChartSpec | undefined {
+  if (!state || typeof state !== "object") return undefined;
+  const presentation = (state as { presentation?: unknown }).presentation;
+  if (!presentation || typeof presentation !== "object") return undefined;
+  return sanitizeChart((presentation as { chart?: unknown }).chart);
+}
+
 async function createThread(language: string): Promise<string> {
   const response = await fetch(`${API_BASE}/threads`, {
     method: "POST",
@@ -100,8 +108,13 @@ export function MyRuntimeProvider({
       createdAt: new Date(message.createdAt),
       content: [{ type: "text", text: message.text }],
       metadata:
-        message.trace && message.trace.length > 0
-          ? { custom: { trace: message.trace } }
+        (message.trace && message.trace.length > 0) || message.chart
+          ? {
+              custom: {
+                ...(message.trace ? { trace: message.trace } : {}),
+                ...(message.chart ? { chart: message.chart } : {}),
+              },
+            }
           : undefined,
     }),
     [],
@@ -133,6 +146,7 @@ export function MyRuntimeProvider({
 
       let answer: string;
       let trace: TraceStep[] = [];
+      let chart: ChartSpec | undefined;
       try {
         const send = async (threadId: string) =>
           fetch(`${API_BASE}/threads/${threadId}/runs/wait`, {
@@ -185,6 +199,7 @@ export function MyRuntimeProvider({
           trace = Array.isArray(state?.trace)
             ? (state.trace as TraceStep[])
             : [];
+          chart = chartFromState(state);
         }
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
@@ -198,6 +213,7 @@ export function MyRuntimeProvider({
         role: "assistant",
         text: answer,
         trace,
+        ...(chart ? { chart } : {}),
         createdAt: Date.now(),
       });
     },

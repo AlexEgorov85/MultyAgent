@@ -371,6 +371,16 @@ def _present_analytics(state: dict[str, Any]) -> dict[str, Any]:
     columns = content.get("columns") or []
     answer = str(content.get("answer") or "").strip()
     sql = content.get("sql")
+    chart = content.get("chart")
+
+    if isinstance(chart, dict) and chart.get("data"):
+        return {
+            "kind": "chart",
+            "text": answer or t(_lang(state), "chart_ready"),
+            "chart": chart,
+            "facts": [],
+            "sql": sql,
+        }
 
     if rows:
         if len(rows) == 1:
@@ -728,6 +738,32 @@ def build_trace(state: dict[str, Any], presentation: dict[str, Any]) -> list[dic
                 ),
             }
         )
+        chart = content.get("chart")
+        if isinstance(chart, dict) and chart.get("data"):
+            chart_kind = str(chart.get("type") or "bar")
+            kind_label = t(lang, f"chart_{chart_kind}")
+            steps.append(
+                {
+                    "step": "chart",
+                    "title": t(lang, "trace_chart"),
+                    "detail": t(
+                        lang,
+                        "trace_chart_detail",
+                        kind=kind_label,
+                        points=len(chart.get("data") or []),
+                    ),
+                    "status": "ok",
+                    "agent": t(lang, "agent_analytics"),
+                    "kind": "chart",
+                    "chips": _chips(
+                        (t(lang, "trace_mode"), kind_label),
+                        (
+                            t(lang, "trace_rows"),
+                            len(chart.get("data") or []),
+                        ),
+                    ),
+                }
+            )
 
     if route == "retrieval":
         citations = content.get("citations") or []

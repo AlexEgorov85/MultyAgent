@@ -12,6 +12,7 @@ from .query.plan import QueryPlan
 from . import telemetry
 from .schemas import (
     AnswerDraft,
+    ChartSpec,
     Critique,
     InvestigationAnswer,
     InvestigationPlan,
@@ -80,6 +81,18 @@ class LLMClient(Protocol):
         context: str = "",
         profile_text: str = "",
     ) -> QueryPlan: ...
+
+    def plan_chart(
+        self,
+        *,
+        question: str,
+        previous_question: str,
+        columns: list[str],
+        rows: list[dict[str, Any]],
+        language: str = "ru",
+        context: str = "",
+        profile_text: str = "",
+    ) -> "ChartSpec": ...
 
     def plan_sql(
         self,
@@ -432,6 +445,35 @@ class OpenAILLM:
             ),
             schema=QueryPlan,
             max_tokens=1500,
+        )
+
+    def plan_chart(
+        self,
+        *,
+        question: str,
+        previous_question: str,
+        columns: list[str],
+        rows: list[dict[str, Any]],
+        language: str = "ru",
+        context: str = "",
+        profile_text: str = "",
+    ) -> ChartSpec:
+        preview = rows[:40]
+        return self._parse(
+            system=load_prompt("analytics_chart"),
+            user=(
+                f"{self._profile_block(profile_text)}"
+                f"{self._context_block(context)}"
+                f"Текущий запрос: {question}\n"
+                f"Вопрос, по которому получены данные: {previous_question or '—'}\n"
+                f"Язык ответа: {language}\n"
+                f"Колонки: {columns}\n"
+                f"Строки: {json.dumps(preview, ensure_ascii=False, default=str)}\n\n"
+                "Верни ChartSpec: type, title, subtitle, category_label, "
+                "value_label, unit, data."
+            ),
+            schema=ChartSpec,
+            max_tokens=1600,
         )
 
     def plan_sql(

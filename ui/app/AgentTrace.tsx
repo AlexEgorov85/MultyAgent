@@ -41,6 +41,14 @@ const STEP_ICONS: Record<string, ReactNode> = {
       <path d="M4 9h16M9 9v11" />
     </>
   ),
+  chart: (
+    <>
+      <path d="M4 20V4M4 20h16" />
+      <rect x="7" y="12" width="3" height="5" rx="0.6" />
+      <rect x="12" y="8" width="3" height="9" rx="0.6" />
+      <rect x="17" y="5" width="3" height="12" rx="0.6" />
+    </>
+  ),
   search: (
     <>
       <circle cx="10.5" cy="10.5" r="6" />

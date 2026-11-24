@@ -27,6 +27,8 @@ class AnalyticsState(TypedDict, total=False):
     sql: str
     rows: list[dict[str, Any]]
     columns: list[str]
+    chart: dict[str, Any]
+    chart_source_question: str
     facts: list[dict[str, Any]]
     evidence: list[dict[str, Any]]
     tool_calls: list[dict[str, Any]]

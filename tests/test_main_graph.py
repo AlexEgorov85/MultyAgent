@@ -281,6 +281,20 @@ def test_router_mode_is_passed_to_analytics(server, main_data):
     )
 
 
+def test_chart_request_forces_chart_mode(server, main_data):
+    graph = build_main_graph(server, MainLLM(), analytics_llm=AnalyticsLLM())
+
+    result = _invoke(
+        graph,
+        "thread-chart-mode",
+        "Построй диаграмму на основании этих данных",
+    )
+
+    assert result["route"] == "analytics"
+    assert result["analytics_mode"] == "chart"
+    assert "Нет предыдущего аналитического результата" in result["final_answer"]
+
+
 def test_long_term_memory_between_sessions(server, main_data):
     report = ReportLLM()
     graph = build_main_graph(server, MemoryLLM(), report_llm=report)

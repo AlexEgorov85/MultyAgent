@@ -56,9 +56,12 @@ def append_turn(
     assistant_text: str,
     trace: list[dict[str, Any]] | None = None,
     resolved_query: str = "",
+    payload: dict[str, Any] | None = None,
 ) -> None:
     """Записывает один ход диалога: user + assistant.
 
+    ``payload`` хранит данные ответа (строки, колонки, SQL), чтобы
+    follow-up «построй диаграмму по этим данным» не зависел от текста.
     Повторный вызов с тем же ``turn_id`` не создаёт дублей.
     """
     conversation_id = str(conversation_id or "").strip()
@@ -70,6 +73,11 @@ def append_turn(
     trace_json = (
         json.dumps(trace or [], ensure_ascii=False, default=str)
         if trace is not None
+        else None
+    )
+    payload_json = (
+        json.dumps(payload, ensure_ascii=False, default=str)
+        if payload is not None
         else None
     )
     resolved = str(resolved_query or "").strip() or None
@@ -100,8 +108,8 @@ def append_turn(
             conn.execute(
                 "INSERT INTO audit.chat_messages "
                 "(message_id, conversation_id, turn_id, role, content, "
-                " trace, resolved_query) "
-                "VALUES (%s, %s, %s, 'assistant', %s, %s, %s) "
+                " trace, resolved_query, payload) "
+                "VALUES (%s, %s, %s, 'assistant', %s, %s, %s, %s) "
                 "ON CONFLICT (conversation_id, turn_id, role) DO NOTHING",
                 (
                     f"{turn}-assistant",
@@ -110,6 +118,7 @@ def append_turn(
                     assistant_text,
                     trace_json,
                     resolved,
+                    payload_json,
                 ),
             )
 
@@ -199,6 +208,85 @@ def load_history(
             (conversation_id, max(1, int(limit))),
         ).fetchall()
     return [{"role": row[0], "content": row[1]} for row in rows]
+
+
+def _trace_sql(trace: Any) -> str:
+    steps = trace
+    if isinstance(steps, str):
+        try:
+            steps = json.loads(steps)
+        except (TypeError, ValueError):
+            return ""
+    if not isinstance(steps, list):
+        return ""
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if step.get("step") != "sql":
+            continue
+        code = step.get("code") or step.get("detail")
+        if isinstance(code, str) and code.strip():
+            return code.strip()
+    return ""
+
+
+def load_last_analytics(
+    server,
+    conversation_id: str,
+    *,
+    auditor_id: str = "",
+    limit: int = 20,
+) -> dict[str, Any] | None:
+    """Данные последнего аналитического ответа для follow-up.
+
+    Сначала используется ``payload`` (точные строки/колонки), затем
+    fallback на SQL из trace для старых сообщений без payload.
+    """
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return None
+    with _connect(server) as conn:
+        owner = _thread_owner(conn, conversation_id)
+        caller = str(auditor_id or "").strip()
+        if caller and owner and owner != caller:
+            return None
+        rows = conn.execute(
+            "SELECT turn_id, trace, payload FROM audit.chat_messages "
+            "WHERE conversation_id = %s AND role = 'assistant' "
+            "ORDER BY created_at DESC LIMIT %s",
+            (conversation_id, max(1, int(limit))),
+        ).fetchall()
+        for turn_id, trace, payload in rows:
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except (TypeError, ValueError):
+                    payload = None
+            if isinstance(payload, dict):
+                payload_rows = payload.get("rows")
+                payload_columns = payload.get("columns")
+                if isinstance(payload_rows, list) and payload_rows:
+                    result = dict(payload)
+                    result["sql"] = str(payload.get("sql") or "")
+                    result["question"] = str(payload.get("question") or "")
+                    result["rows"] = payload_rows
+                    result["columns"] = (
+                        payload_columns if isinstance(payload_columns, list) else []
+                    )
+                    return result
+            sql = _trace_sql(trace)
+            if not sql:
+                continue
+            user_row = conn.execute(
+                "SELECT content FROM audit.chat_messages "
+                "WHERE conversation_id = %s AND turn_id = %s AND role = 'user'",
+                (conversation_id, turn_id),
+            ).fetchone()
+            return {
+                "sql": sql,
+                "question": str(user_row[0]) if user_row is not None else "",
+            }
+    return None
 
 
 def load_threads(

@@ -30,7 +30,7 @@ def main() -> int:
     parser.add_argument("--conversation-id", default="conv-cli-001")
     parser.add_argument(
         "--mode",
-        choices=("sql", "drilldown", "multi_tool"),
+        choices=("sql", "drilldown", "multi_tool", "chart"),
         default="sql",
         help="режим Analytics; в основном графе его выбирает router",
     )

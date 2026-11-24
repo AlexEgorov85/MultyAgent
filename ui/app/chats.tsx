@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { sanitizeChart, type ChartSpec } from "./chart";
 import {
   deleteBackendThread,
   deleteRemoteChat,
@@ -40,6 +41,7 @@ export type ChatMessage = {
   role: "user" | "assistant";
   text: string;
   trace?: TraceStep[];
+  chart?: ChartSpec;
   createdAt: number;
 };
 
@@ -162,12 +164,14 @@ function sanitizeMessage(value: unknown): ChatMessage | null {
     return null;
   }
   const trace = sanitizeTrace(raw.trace);
+  const chart = sanitizeChart(raw.chart);
   return {
     id: raw.id,
     role: raw.role,
     text: raw.text,
     createdAt: asTimestamp(raw.createdAt, Date.now()),
     ...(trace ? { trace } : {}),
+    ...(chart ? { chart } : {}),
   };
 }
 

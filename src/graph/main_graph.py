@@ -19,6 +19,7 @@ from ..dialogue_slots import DialogueSlots, augment_query, merge_slots
 from ..guardrails import check_final_answer, check_request, extract_sql
 from ..llm import LLMClient
 from ..memory import store as memory_store
+from ..charts import chart_requested
 from ..presentation import present
 from ..semantic.catalog import theme_in_text
 from ..state import MainState
@@ -171,6 +172,17 @@ def build_main_graph(
         context = state.get("dialogue_context", "")
         text = question
         reason = ""
+
+        # «Построй диаграмму на основании этих данных» — это запрос к
+        # предыдущему результату, а не новый аналитический вопрос. Не
+        # переформулируем его в SQL-вопрос и не теряем слово «диаграмма».
+        if chart_requested(question):
+            slots = merge_slots(state.get("dialogue_slots"), question)
+            return {
+                "resolved_query": question,
+                "resolved_reason": "",
+                "dialogue_slots": slots.model_dump(),
+            }
 
         if context and is_followup(question, True):
             resolver = getattr(llm, "resolve_followup", None)
@@ -336,6 +348,19 @@ def build_main_graph(
             decision = None
         if decision is None:
             return _fallback_route(question)
+        # Явная просьба визуализировать — это режим Analytics, а не
+        # отдельный маршрут. Код фиксирует его детерминированно, чтобы
+        # модель не превратила «построй диаграмму» в повторный SQL-ответ.
+        if decision.route == "analytics" and (
+            chart_requested(state.get("user_query", ""))
+            or chart_requested(question)
+        ):
+            return {
+                "route": "analytics",
+                "route_reason": "запрос на визуализацию данных",
+                "route_confidence": max(0.9, float(decision.confidence)),
+                "analytics_mode": "chart",
+            }
         return {
             "route": decision.route,
             "route_reason": decision.reason,
@@ -564,6 +589,23 @@ def build_main_graph(
         started = metrics.pop("started_at", None)
         if started is not None:
             metrics["latency_total_sec"] = round(time.perf_counter() - started, 4)
+        acl = state.get("acl_response") or {}
+        content = acl.get("content") if isinstance(acl, dict) else {}
+        content = content if isinstance(content, dict) else {}
+        payload: dict[str, Any] | None = None
+        if content.get("rows") and content.get("columns"):
+            payload = {
+                "rows": content.get("rows")[:200],
+                "columns": content.get("columns"),
+                "sql": str(content.get("sql") or ""),
+                "question": str(
+                    content.get("source_question")
+                    or state.get("user_query")
+                    or ""
+                ),
+            }
+            if content.get("chart"):
+                payload["chart"] = content.get("chart")
         try:
             dialogue_store.append_turn(
                 server,
@@ -574,6 +616,7 @@ def build_main_graph(
                 assistant_text=answer,
                 trace=state.get("trace", []),
                 resolved_query=state.get("resolved_query", ""),
+                payload=payload,
             )
         except Exception as exc:  # ответ важнее записи истории
             logger.warning("Не удалось сохранить историю диалога: %s", exc)

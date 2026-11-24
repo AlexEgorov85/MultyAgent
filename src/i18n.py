@@ -131,6 +131,35 @@ _TEXTS: dict[str, dict[str, str]] = {
         "ru": "Не удалось получить ответ.",
         "en": "Could not get an answer.",
     },
+    "chart_ready": {
+        "ru": "Диаграмма построена по данным предыдущего ответа.",
+        "en": "The chart was built from the previous answer data.",
+    },
+    "chart_no_previous": {
+        "ru": "Нет предыдущего аналитического результата для визуализации. "
+        "Сначала задайте вопрос с числами, например: «Сколько проверок по "
+        "статусам за 2026 год?».",
+        "en": "There is no previous analytics result to visualize. Ask a "
+        "numeric question first, e.g. “How many audits by status in 2026?”.",
+    },
+    "chart_no_data": {
+        "ru": "В предыдущих данных нет строк для построения диаграммы.",
+        "en": "The previous result has no rows to build a chart.",
+    },
+    "chart_no_metric": {
+        "ru": "В предыдущих данных нет числовой метрики и категории, "
+        "по которым можно построить диаграмму.",
+        "en": "The previous result has no numeric metric and category "
+        "suitable for a chart.",
+    },
+    "trace_chart": {"ru": "Диаграмма", "en": "Chart"},
+    "trace_chart_detail": {
+        "ru": "Тип: {kind}, точек: {points}.",
+        "en": "Type: {kind}, points: {points}.",
+    },
+    "chart_bar": {"ru": "столбчатая", "en": "bar"},
+    "chart_line": {"ru": "линейная", "en": "line"},
+    "chart_pie": {"ru": "круговая", "en": "pie"},
     "trace_acl": {"ru": "Сообщение агента", "en": "Agent message"},
     "trace_route": {"ru": "Выбранный маршрут", "en": "Selected route"},
     "trace_followup": {"ru": "Уточнение вопроса", "en": "Follow-up resolution"},

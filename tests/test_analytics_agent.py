@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 
 from src.acl import make_acl_message
-from src import config, db_runtime
+from src import config, db_runtime, dialogue_store
 from src.graph.analytics_graph import build_analytics_graph
 from src.query import QueryFilter, QueryPlan
-from src.schemas import SQLPlan, ToolCall, ToolPlan
+from src.schemas import ChartPoint, ChartSpec, SQLPlan, ToolCall, ToolPlan
 
 
 class FakeLLM:
@@ -58,6 +58,18 @@ class QueryPlanFakeLLM(FakeLLM):
     def plan_sql(self, **kwargs):
         self.calls.append("plan_sql")
         raise AssertionError("plan_sql не должен вызываться при валидном QueryPlan")
+
+
+class ChartFakeLLM(FakeLLM):
+    """Fake с выбором визуализации моделью."""
+
+    def __init__(self, chart: ChartSpec, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.chart = chart
+
+    def plan_chart(self, **kwargs):
+        self.calls.append("plan_chart")
+        return self.chart
 
 
 class FormattingFakeLLM(FakeLLM):
@@ -467,6 +479,153 @@ def test_plan_without_template_compiles_sql(server, sample_graph_data):
     assert result["strategy"] == "generated"
     assert result["acl_response"]["content"]["metrics"]["plan_source"] == "query_ir"
     assert "plan_sql" not in llm.calls
+
+
+def test_chart_mode_uses_previous_analytics_payload(server, sample_graph_data):
+    conversation_id = "conv-chart-test"
+    try:
+        dialogue_store.append_turn(
+            server,
+            conversation_id=conversation_id,
+            auditor_id="AUD-001",
+            turn_id="turn-chart-1",
+            user_text="Сколько закрыто проверок по каждому карману?",
+            assistant_text="По карманам: ...",
+            trace=[],
+            payload={
+                "rows": [
+                    {"pocket": "2026. Ипотека", "cnt": 5},
+                    {"pocket": "2026. Карты", "cnt": 7},
+                ],
+                "columns": ["pocket", "cnt"],
+                "sql": "SELECT 1",
+                "question": "Сколько закрыто проверок по каждому карману?",
+            },
+        )
+        request = make_acl_message(
+            performative="request",
+            sender="orchestrator",
+            receiver="analytics_agent",
+            content={
+                "question": "Построй диаграмму на основании этих данных",
+                "auditor_id": "AUD-001",
+                "analytics_mode": "chart",
+            },
+            conversation_id=conversation_id,
+        )
+        llm = ChartFakeLLM(
+            ChartSpec(
+                type="pie",
+                title="Закрытые проверки по карманам",
+                value_label="Проверок",
+                data=[
+                    ChartPoint(label="2026. Ипотека", value=5),
+                    ChartPoint(label="2026. Карты", value=7),
+                ],
+            )
+        )
+        graph = build_analytics_graph(server, llm)
+
+        result = graph.invoke({"acl_request": request.model_dump()})
+
+        assert result["status"] == "ok"
+        assert result["strategy"] == "chart"
+        assert llm.calls == ["plan_chart"]
+        chart = result["acl_response"]["content"]["chart"]
+        assert chart["type"] == "pie"
+        assert chart["title"] == "Закрытые проверки по карманам"
+        assert [point["label"] for point in chart["data"]] == [
+            "2026. Ипотека",
+            "2026. Карты",
+        ]
+    finally:
+        dialogue_store.delete_thread(
+            server, conversation_id, auditor_id="AUD-001"
+        )
+
+
+def test_chart_hallucinated_data_falls_back_to_grounded_chart(
+    server, sample_graph_data
+):
+    conversation_id = "conv-chart-fallback"
+    try:
+        dialogue_store.append_turn(
+            server,
+            conversation_id=conversation_id,
+            auditor_id="AUD-001",
+            turn_id="turn-chart-2",
+            user_text="Сколько проверок по статусам?",
+            assistant_text="Статусы",
+            payload={
+                "rows": [
+                    {"status": "завершена", "cnt": 28},
+                    {"status": "в работе", "cnt": 10},
+                ],
+                "columns": ["status", "cnt"],
+                "sql": "SELECT 1",
+                "question": "Сколько проверок по статусам?",
+            },
+        )
+        request = make_acl_message(
+            performative="request",
+            sender="orchestrator",
+            receiver="analytics_agent",
+            content={
+                "question": "Построй диаграмму на основании этих данных",
+                "auditor_id": "AUD-001",
+                "analytics_mode": "chart",
+            },
+            conversation_id=conversation_id,
+        )
+        llm = ChartFakeLLM(
+            ChartSpec(
+                type="pie",
+                title="Придуманные данные",
+                data=[
+                    ChartPoint(label="не существует", value=999),
+                    ChartPoint(label="тоже нет", value=1000),
+                ],
+            )
+        )
+        graph = build_analytics_graph(server, llm)
+
+        result = graph.invoke({"acl_request": request.model_dump()})
+
+        assert result["status"] == "ok"
+        assert llm.calls == ["plan_chart"]
+        chart = result["acl_response"]["content"]["chart"]
+        assert chart["type"] == "bar"
+        assert chart["value_field"] == "cnt"
+        assert {point["label"] for point in chart["data"]} == {
+            "завершена",
+            "в работе",
+        }
+    finally:
+        dialogue_store.delete_thread(
+            server, conversation_id, auditor_id="AUD-001"
+        )
+
+
+def test_chart_mode_without_previous_data_is_honest(server, sample_graph_data):
+    request = make_acl_message(
+        performative="request",
+        sender="orchestrator",
+        receiver="analytics_agent",
+        content={
+            "question": "Построй диаграмму на основании этих данных",
+            "auditor_id": "AUD-001",
+            "analytics_mode": "chart",
+        },
+        conversation_id="conv-chart-empty",
+    )
+    graph = build_analytics_graph(server, FakeLLM())
+
+    result = graph.invoke({"acl_request": request.model_dump()})
+
+    assert result["status"] == "ok"
+    assert result["strategy"] == "chart"
+    assert "Нет предыдущего аналитического результата" in result["answer"]
+    assert "chart" not in result["acl_response"]["content"]
 
 
 def test_drilldown_by_audit_code(server, sample_graph_data):

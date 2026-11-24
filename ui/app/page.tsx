@@ -8,6 +8,8 @@ import {
 } from "@assistant-ui/react";
 import { useCallback, useState } from "react";
 import { AgentTrace } from "./AgentTrace";
+import { Chart } from "./ChartView";
+import { type ChartSpec } from "./chart";
 import { MarkdownText } from "./MarkdownText";
 import { ChatSidebar } from "./ChatSidebar";
 import { useChats } from "./chats";
@@ -97,6 +99,13 @@ function UserMessage() {
   );
 }
 
+function MessageChart() {
+  const custom = useAuiState((state) => state.message.metadata?.custom);
+  const chart = (custom as { chart?: ChartSpec } | undefined)?.chart;
+  if (!chart) return null;
+  return <Chart spec={chart} />;
+}
+
 function AssistantMessage() {
   const { t } = useI18n();
   const { settings } = useSettings();
@@ -141,6 +150,7 @@ function AssistantMessage() {
           <div className="aui-text app-chat-text">
             <MessagePrimitive.Parts components={{ Text: MarkdownText }} />
           </div>
+          <MessageChart />
           <MessagePrimitive.Error>
             <div className="app-danger app-round-sm mt-2 border px-3 py-2 text-xs leading-relaxed">
               <div className="font-semibold">{t.errorTitle}</div>

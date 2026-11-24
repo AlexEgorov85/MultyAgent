@@ -166,6 +166,7 @@ flowchart TD
     PA -->|mode = sql| PL["plan"]
     PA -->|mode = drilldown| DD["drilldown"]
     PA -->|mode = multi_tool| MT["multi_tool"]
+    PA -->|mode = chart| CH["chart"]
     PA -->|failure| PK["pack"]
     PL -->|strategy = script| RS["run_script"]
     PL -->|QueryPlan / SQLPlan| VA["validate"]
@@ -186,8 +187,10 @@ flowchart TD
 Как работает:
 
 1. **Режим** приходит из router (`analytics_mode`: `sql`, `drilldown`,
-   `multi_tool`) — LLM выбирает его по смыслу вопроса, а `parse_acl`
-   валидирует enum. Словесных правил выбора режима нет.
+   `multi_tool`, `chart`) — LLM выбирает его по смыслу вопроса, а
+   `parse_acl` валидирует enum. Для явной просьбы «построй диаграмму»
+   режим `chart` фиксируется детерминированно, чтобы визуализация не
+   превратилась в повторный SQL-ответ.
 2. **`plan`** — двухуровневая стратегия получения SQL:
    - для явных template-вопросов сначала работает детерминированный
      fast path `select_template_from_question`: план собирается из
@@ -214,7 +217,12 @@ flowchart TD
    `statement_timeout` 5 секунд.
 5. **`repair`** — при ошибке LLM получает текст ошибки и исправляет план;
    число попыток ограничено.
-6. **`summarize`** — ответ с числами и evidence (SQL, ID строк);
+6. **`chart`** — для `analytics_mode=chart` берёт payload предыдущего
+   аналитического ответа (`rows`, `columns`, `question`) и просит LLM
+   выбрать `ChartSpec` (bar/line/pie, подписи, точки). Код проверяет,
+   что точки действительно есть в строках, иначе использует
+   детерминированный fallback. Подробнее — [visualization.md](visualization.md).
+7. **`summarize`** — ответ с числами и evidence (SQL, ID строк);
    **`pack`** упаковывает результат в ACL `inform`.
 
 Так модель не придумывает колонки, метрики и способ выполнения:

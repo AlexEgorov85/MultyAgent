@@ -11,8 +11,9 @@ from typing import Any, Literal
 import psycopg
 from langgraph.graph import END, START, StateGraph
 
-from .. import config
+from .. import config, dialogue_store
 from ..acl import ACLMessage, ACLValidationError, make_reply, validate_acl
+from ..charts import build_chart_spec, ground_chart_points
 from ..dialogue import last_audit_code
 from ..i18n import t
 from ..llm import LLMClient
@@ -28,7 +29,7 @@ from ..tools.sql_guard import UnsafeSQLError, validate_readonly_sql
 
 AUDIT_CODE_RE = re.compile(r"AUD-\d{4}-[A-Z]+-\d{2}", re.IGNORECASE)
 
-ANALYTICS_MODES = ("sql", "drilldown", "multi_tool")
+ANALYTICS_MODES = ("sql", "drilldown", "multi_tool", "chart")
 
 logger = logging.getLogger(__name__)
 
@@ -935,6 +936,7 @@ def build_analytics_graph(server, llm: LLMClient):
         "audit_count": "Проверок",
         "completed_count": "Завершённых проверок",
         "completed_audits_count": "Завершённых проверок",
+        "cnt": "Всего",
         "count": "Всего",
         "total": "Всего",
         "items_count": "Пунктов",
@@ -1025,6 +1027,123 @@ def build_analytics_graph(server, llm: LLMClient):
             for row in rows[:20]
         )
         return t(language, "found_rows", count=len(rows), preview=preview)
+
+    def chart(state: AnalyticsState) -> dict[str, Any]:
+        """Диаграмма по строкам предыдущего аналитического ответа."""
+        language = state.get("language")
+        try:
+            previous = dialogue_store.load_last_analytics(
+                server,
+                state.get("conversation_id", ""),
+                auditor_id=state.get("auditor_id", ""),
+            )
+        except Exception as exc:
+            logger.warning("Не удалось загрузить данные для диаграммы: %s", exc)
+            previous = None
+
+        if not previous:
+            return {
+                "answer": t(language, "chart_no_previous"),
+                "answer_source": "agent",
+                "strategy": "chart",
+                "rows": [],
+                "columns": [],
+                "evidence": [],
+            }
+
+        rows = list(previous.get("rows") or [])
+        columns = list(previous.get("columns") or [])
+        sql = str(previous.get("sql") or "")
+        if not rows and sql:
+            try:
+                result = db_tools.run_readonly_sql(server, sql)
+            except Exception as exc:
+                return _fail(state, f"Данные для диаграммы недоступны: {exc}")
+            rows = result["rows"]
+            columns = result["columns"]
+            sql = result["sql"]
+
+        if not rows:
+            return {
+                "answer": t(language, "chart_no_data"),
+                "answer_source": "agent",
+                "strategy": "chart",
+                "rows": [],
+                "columns": columns,
+                "sql": sql,
+                "evidence": [],
+            }
+
+        previous_question = str(previous.get("question") or "")
+        spec: dict[str, Any] | None = None
+        chart_planner = getattr(llm, "plan_chart", None)
+        if chart_planner is not None:
+            try:
+                candidate = chart_planner(
+                    question=state.get("question", ""),
+                    previous_question=previous_question,
+                    columns=columns,
+                    rows=rows,
+                    language=str(language or "ru"),
+                    context=state.get("conversation_context", ""),
+                    profile_text=state.get("profile_text", ""),
+                )
+                candidate_payload = (
+                    candidate.model_dump()
+                    if hasattr(candidate, "model_dump")
+                    else dict(candidate)
+                )
+                grounded = ground_chart_points(
+                    candidate_payload, rows, columns
+                )
+                if grounded is not None:
+                    candidate_payload["data"] = grounded
+                    spec = candidate_payload
+            except Exception as exc:
+                logger.warning("LLM chart spec rejected: %s", exc)
+
+        if spec is None:
+            # Fallback: детерминированная диаграмма, если модель недоступна
+            # или вернула данные, которых нет в предыдущем ответе.
+            spec = build_chart_spec(
+                rows,
+                columns,
+                question=state.get("question", ""),
+                previous_question=previous_question,
+                language=str(language or "ru"),
+                labeler=lambda column: COLUMN_LABELS.get(column, column),
+            )
+        if spec is None:
+            return {
+                "answer": t(language, "chart_no_metric"),
+                "answer_source": "agent",
+                "strategy": "chart",
+                "rows": rows,
+                "columns": columns,
+                "sql": sql,
+                "evidence": [
+                    {"type": "previous_result", "row_count": len(rows)}
+                ],
+            }
+
+        return {
+            "answer": t(language, "chart_ready"),
+            "answer_source": "agent",
+            "strategy": "chart",
+            "rows": rows,
+            "columns": columns,
+            "chart": spec,
+            "chart_source_question": str(previous.get("question") or ""),
+            "sql": sql,
+            "evidence": [
+                {"type": "previous_result", "row_count": len(rows)},
+                {
+                    "type": "chart",
+                    "chart_type": spec["type"],
+                    "points": len(spec["data"]),
+                },
+            ],
+        }
 
     def summarize(state: AnalyticsState) -> dict[str, Any]:
         if state.get("status") in ("refused", "failed"):
@@ -1138,6 +1257,10 @@ def build_analytics_graph(server, llm: LLMClient):
             content["columns"] = state["columns"]
         if state.get("rows"):
             content["rows"] = state["rows"]
+        if state.get("chart"):
+            content["chart"] = state["chart"]
+        if state.get("chart_source_question"):
+            content["source_question"] = state["chart_source_question"]
         return _reply(state, "inform", content)
 
     builder = StateGraph(AnalyticsState)
@@ -1149,6 +1272,7 @@ def build_analytics_graph(server, llm: LLMClient):
     builder.add_node("repair", repair_sql)
     builder.add_node("drilldown", drilldown)
     builder.add_node("multi_tool", multi_tool)
+    builder.add_node("chart", chart)
     builder.add_node("summarize", summarize)
     builder.add_node("pack", pack_response)
 
@@ -1160,6 +1284,7 @@ def build_analytics_graph(server, llm: LLMClient):
             "sql": "plan",
             "drilldown": "drilldown",
             "multi_tool": "multi_tool",
+            "chart": "chart",
             "pack": "pack",
         },
     )
@@ -1190,6 +1315,7 @@ def build_analytics_graph(server, llm: LLMClient):
     builder.add_edge("run_script", "summarize")
     builder.add_edge("drilldown", "summarize")
     builder.add_edge("multi_tool", "summarize")
+    builder.add_edge("chart", "summarize")
     builder.add_edge("summarize", "pack")
     builder.add_edge("pack", END)
 
