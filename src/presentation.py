@@ -236,10 +236,14 @@ def _label(column: str, state: dict[str, Any]) -> str:
 
 
 def _fmt(value: Any, column: str, state: dict[str, Any]) -> str:
+    from decimal import Decimal
+
     if value is None:
         return "—"
     if isinstance(value, bool):
         return t(_lang(state), "yes" if value else "no")
+    if isinstance(value, Decimal):
+        value = float(value)
     if isinstance(value, float):
         number = f"{value:.1f}" if column.endswith("_pct") else f"{value:g}"
         if not _english(state):

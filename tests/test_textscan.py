@@ -86,3 +86,13 @@ def test_paragraphs_split_on_blank_lines():
 
 def test_words_keep_cyrillic_and_digits():
     assert words("Пункт 5.1 — Проверка") == ["Пункт", "5", "1", "Проверка"]
+
+
+def test_negative_numbers_keep_sign_but_ids_and_ranges_do_not():
+    assert number_tokens("-7 дней, -4.5 и 2025-2026") == [
+        "-7",
+        "-4.5",
+        "2025",
+        "2026",
+    ]
+    assert number_tokens("AUD-2025-MORTGAGE-03") == ["2025", "03"]

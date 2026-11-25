@@ -95,6 +95,24 @@ def number_tokens(text: str) -> list[str]:
     has_separator = False
     raw = text or ""
     for index, char in enumerate(raw):
+        if (
+            char == "-"
+            and not current
+            and index + 1 < len(raw)
+            and raw[index + 1] in _ASCII_DIGITS
+            and (
+                index == 0
+                or (
+                    raw[index - 1] not in _ASCII_DIGITS
+                    and raw[index - 1] not in _ASCII_LETTERS
+                    and raw[index - 1] not in "-_.,"
+                )
+            )
+        ):
+            # Отрицательное число: «-7», « -4.5». Дефис в AUD-2025
+            # и диапазон 2025-2026 знаком не считается.
+            current.append("-")
+            continue
         if char in _ASCII_DIGITS:
             current.append(char)
             continue

@@ -61,6 +61,10 @@ _TEXTS: dict[str, dict[str, str]] = {
         "ru": "Запрос отклонён",
         "en": "Request declined",
     },
+    "sql_rejected": {
+        "ru": "SQL отклонён: запрос не прошёл проверку безопасности.",
+        "en": "SQL rejected: the query failed the safety check.",
+    },
     "request_failed": {
         "ru": "Не удалось выполнить запрос",
         "en": "Could not complete the request",

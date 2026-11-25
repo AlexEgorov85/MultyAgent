@@ -140,12 +140,32 @@ def _summary_allowed_numbers(
             value = row.get(column)
             if _is_number(value):
                 number = float(value)
+                allowed.add(number)
                 allowed.add(round(number, 2))
                 values.append(number)
         if values:
             # Итог по колонке — допустимое производное число.
-            allowed.add(round(sum(values), 2))
+            total = sum(values)
+            allowed.add(total)
+            allowed.add(round(total, 2))
     return allowed
+
+
+def _number_grounded(value: float, allowed: set[float]) -> bool:
+    """Число совпадает с допустимым, его округлением или процентом от доли."""
+    if round(value, 2) in allowed:
+        return True
+    for candidate in allowed:
+        if round(value, 1) == round(candidate, 1):
+            return True
+        if (
+            0 < abs(candidate) <= 1
+            and abs(value) <= 100
+            and round(value, 1) == round(candidate * 100, 1)
+        ):
+            # Доля 0.0746 и «7,5%» — одно и то же число в разных единицах.
+            return True
+    return False
 
 
 def _summary_numbers_supported(
@@ -168,12 +188,12 @@ def _summary_numbers_supported(
         for claim in claims:
             if not _is_number(claim):
                 return False
-            value = round(float(claim), 2)
+            value = float(claim)
             # Годы — не результат запроса, их можно называть свободно.
             if 2000 <= value <= 2099:
                 declared.add(value)
                 continue
-            if value not in allowed:
+            if not _number_grounded(value, allowed):
                 return False
             declared.add(value)
 
@@ -184,10 +204,9 @@ def _summary_numbers_supported(
             continue
         if 2000 <= value <= 2099:
             continue
-        rounded = round(value, 2)
-        if rounded not in allowed:
+        if not _number_grounded(value, allowed):
             return False
-        if declared is not None and rounded not in declared:
+        if declared is not None and not _number_grounded(value, declared):
             return False
     return True
 
@@ -523,7 +542,13 @@ def build_analytics_graph(server, llm: LLMClient):
         try:
             safe = validate_readonly_sql(state["plan"]["sql"])
         except UnsafeSQLError as exc:
-            return {**_refuse(state, f"SQL отклонён: {exc}"), "retry": False}
+            logger.warning("SQL guard rejected: %s", exc)
+            return {
+                **_refuse(
+                    state, t(state.get("language"), "sql_rejected")
+                ),
+                "retry": False,
+            }
 
         return {"sql": safe, "retry": False}
 
@@ -532,7 +557,8 @@ def build_analytics_graph(server, llm: LLMClient):
         try:
             result = db_tools.run_readonly_sql(server, state["sql"])
         except UnsafeSQLError as exc:
-            return _refuse(state, f"SQL отклонён: {exc}")
+            logger.warning("SQL guard rejected on execute: %s", exc)
+            return _refuse(state, t(state.get("language"), "sql_rejected"))
         except psycopg.Error as exc:
             retries = int(state.get("retries", 0))
             if retries < 2:

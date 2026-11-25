@@ -86,6 +86,19 @@ def _limit_value(tree: exp.Select) -> int | None:
         return None
 
 
+def _clean_sql(sql: str) -> str:
+    """Убирает Markdown-обёртку, если модель вернула SQL в блоке кода."""
+    text = sql.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
 def validate_readonly_sql_with_limit(
     sql: str, max_rows: int | None = None
 ) -> tuple[str, bool]:
@@ -99,6 +112,10 @@ def validate_readonly_sql_with_limit(
             по разрешённой схеме.
     """
     if not isinstance(sql, str) or not sql.strip():
+        raise UnsafeSQLError("Пустой SQL-запрос.")
+
+    sql = _clean_sql(sql)
+    if not sql:
         raise UnsafeSQLError("Пустой SQL-запрос.")
 
     try:

@@ -51,3 +51,18 @@ def test_undeclared_digit_is_rejected():
         columns,
         claims=[2025, 8],
     )
+
+
+def test_negative_median_is_grounded():
+    rows = [{"theme_code": "ипотека", "median": -7}]
+    columns = ["theme_code", "median"]
+
+    assert _summary_numbers_supported("Медиана: -7 дней.", rows, columns)
+    assert not _summary_numbers_supported("Медиана: -9 дней.", rows, columns)
+
+
+def test_rounded_percentage_is_grounded():
+    rows = [{"critical_share": 0.074626}]
+    columns = ["critical_share"]
+
+    assert _summary_numbers_supported("Доля: 7,5%.", rows, columns)

@@ -175,6 +175,8 @@ class LLMClient(Protocol):
         context: str,
         profile_text: str = "",
         language: str = "ru",
+        columns: list[str] | None = None,
+        rows: list[dict[str, Any]] | None = None,
     ) -> str: ...
 
     def summarize(
@@ -727,8 +729,11 @@ class OpenAILLM:
         context: str,
         profile_text: str = "",
         language: str = "ru",
+        columns: list[str] | None = None,
+        rows: list[dict[str, Any]] | None = None,
     ) -> str:
         """Поясняет предыдущий ответ, не выполняя новый запрос."""
+        preview = (rows or [])[:10]
         try:
             response = self._request(
                 schema_name="explain_previous",
@@ -744,6 +749,8 @@ class OpenAILLM:
                             f"{self._profile_block(profile_text)}"
                             f"{self._context_block(context)}"
                             f"Язык: {language}\n"
+                            f"Колонки предыдущего ответа: {columns or '(нет)'}\n"
+                            f"Строки предыдущего ответа: {preview}\n"
                             f"Просьба пользователя: {question}"
                         ),
                     },

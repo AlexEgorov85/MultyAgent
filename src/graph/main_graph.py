@@ -673,6 +673,17 @@ def build_main_graph(
         explainer = getattr(llm, "explain_previous", None)
         answer = ""
         if explainer is not None:
+            previous = None
+            try:
+                previous = dialogue_store.load_last_analytics(
+                    server,
+                    state.get("conversation_id", ""),
+                    auditor_id=state.get("auditor_id", ""),
+                )
+            except Exception:
+                previous = None
+            columns = list((previous or {}).get("columns") or [])
+            rows = list((previous or {}).get("rows") or [])[:10]
             try:
                 answer = explainer(
                     question=state.get("user_query", ""),
@@ -681,6 +692,8 @@ def build_main_graph(
                         state.get("profile", {})
                     ),
                     language=str(state.get("language") or "ru"),
+                    columns=columns,
+                    rows=rows,
                 )
             except Exception:
                 answer = ""

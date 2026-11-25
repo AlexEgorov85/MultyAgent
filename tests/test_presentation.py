@@ -295,3 +295,4 @@ def test_metric_label_names_what_was_measured():
     presentation = build_presentation(state)
 
     assert "Разрыв с порогом" in presentation["text"]
+

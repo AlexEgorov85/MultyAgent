@@ -69,6 +69,16 @@ Enum values:
 - script_language: SQL, Python, R, Excel, Другое
 - entity_type отклонения: договор, транзакция, карта, счёт
 
+Связи (используй только их):
+- audit.audits.audit_id → audit.acts.audit_id
+- audit.acts.act_id → audit.act_items.act_id
+- audit.act_items.item_id → audit.scripts.item_id
+- audit.scripts.script_id → audit.script_runs.script_id
+- audit.act_items.item_id → audit.deviations.item_id
+- audit.audits.pocket_id → audit.audit_pockets.pocket_id
+- audit.audits.lead_auditor_id → audit.auditors.auditor_id
+- У audit.act_items нет audit_id: связь с проверкой только через audit.acts.
+
 Domain terms:
 - «карман» — это audit.audit_pockets (год + тема). «По годам и карманам» —
   GROUP BY pocket_year, theme_code (или pocket_id), без фильтра по теме,
