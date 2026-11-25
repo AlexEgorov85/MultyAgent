@@ -212,7 +212,8 @@ flowchart TD
 1. **Режим** приходит из router (`analytics_mode`: `sql`, `drilldown`,
    `multi_tool`, `chart`) — LLM выбирает его по смыслу вопроса, а
    `parse_acl` валидирует enum. Режим `chart` выбирает LLM-router по
-   смыслу запроса.
+   смыслу запроса. `drilldown` без кода проверки в вопросе или контексте
+   детерминированно откатывается в `sql`: детализация без кода невозможна.
 2. **`plan`** — двухуровневая стратегия получения SQL:
    - LLM возвращает `QueryPlan(metric, dimensions, filters, template_key)`
      по семантическому каталогу `src/semantic/catalog.py`; шаблон она

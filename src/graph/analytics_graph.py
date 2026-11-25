@@ -20,7 +20,7 @@ from ..query.compiler import QueryCompileError, compile_query_plan
 from ..query.intent import apply_plan_gaps
 from ..query.templates import template_parameters, template_plan_problems
 from ..schemas import SQLPlan
-from ..semantic.catalog import catalog_text
+from ..semantic.catalog import catalog_text, get_metric
 from ..state import AnalyticsState
 from ..textscan import audit_codes, number_tokens
 from ..tools import db as db_tools
@@ -38,6 +38,30 @@ def _normalize_question(text: str) -> str:
         " ".join(str(text or "").lower().replace("ё", "е").split())
         .strip(" ?!.,;:")
     )
+
+
+def _complete_metric_dimensions(plan):
+    """Дополняет план обязательными измерениями метрики.
+
+    Метрика сама описывает, какие поля нужны, чтобы назвать результат:
+    например, «самое крупное отклонение» бессмысленно без названия пункта
+    и кода проверки. Это контракт semantic layer, а не правило под вопрос.
+    """
+    try:
+        spec = get_metric(plan.metric)
+    except KeyError:
+        return plan
+    missing = [
+        name
+        for name in spec.required_dimensions
+        if name not in plan.dimensions
+    ]
+    update: dict[str, Any] = {}
+    if missing:
+        update["dimensions"] = [*plan.dimensions, *missing]
+    if spec.single_row and plan.limit != 1:
+        update["limit"] = 1
+    return plan.model_copy(update=update) if update else plan
 
 
 def _split_tool_call(name: str) -> tuple[str, dict[str, str]]:
@@ -262,6 +286,14 @@ def build_analytics_graph(server, llm: LLMClient):
         mode = str(message.content.get("analytics_mode") or "sql").strip().lower()
         if mode not in ANALYTICS_MODES:
             mode = "sql"
+        if mode == "drilldown":
+            # Детализация возможна только по коду проверки. Если кода нет
+            # ни в вопросе, ни в контексте — это обычный агрегат.
+            context_text = str(
+                message.content.get("conversation_context", "")
+            )
+            if not audit_codes(question) and not last_audit_code(context_text):
+                mode = "sql"
 
         asked = message.content.get("asked_clarifications")
         asked_clarifications = (
@@ -386,6 +418,7 @@ def build_analytics_graph(server, llm: LLMClient):
                                     },
                                 }
                         query_plan = apply_plan_gaps(query_plan, gaps)
+                        query_plan = _complete_metric_dimensions(query_plan)
                     except Exception as exc:
                         logger.warning("plan review failed: %s", exc)
 
@@ -639,7 +672,11 @@ def build_analytics_graph(server, llm: LLMClient):
             else last_audit_code(state.get("conversation_context", ""))
         )
         if not audit_code:
-            return _fail(state, "Не найден код проверки")
+            return _fail(
+                state,
+                "Для детализации нужен код проверки, например "
+                "AUD-2026-MORTGAGE-03.",
+            )
         items = db_tools.get_act_items(server, audit_code, limit=50)
         english = str(state.get("language")).lower() == "en"
         if not items:
@@ -1190,6 +1227,7 @@ def build_analytics_graph(server, llm: LLMClient):
             "answer": answer,
             "answer_source": state.get("answer_source", "template"),
             "strategy": state.get("strategy", "sql"),
+            "analytics_mode": state.get("mode", "sql"),
             "evidence": state.get("evidence", []),
             "metrics": metrics,
         }

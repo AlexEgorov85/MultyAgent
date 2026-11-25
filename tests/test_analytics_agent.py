@@ -940,3 +940,42 @@ def test_multi_tool_is_formatted_by_llm(server, sample_graph_data):
     )
     assert result["answer_source"] == "llm"
     assert llm.calls == ["plan_tools", "format_answer"]
+
+
+def test_drilldown_without_code_falls_back_to_sql(server, sample_graph_data):
+    llm = FakeLLM(
+        plans=[
+            SQLPlan(
+                strategy="generated",
+                sql="SELECT count(*) AS cnt FROM audit.audits",
+                reason="количество",
+            )
+        ]
+    )
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke(
+        {
+            "acl_request": acl_request(
+                "Какое отклонение самое крупное по ипотеке?",
+                mode="drilldown",
+            )
+        }
+    )
+
+    assert "plan_sql" in llm.calls
+    assert result["status"] == "ok"
+    assert "Не найден код" not in result.get("answer", "")
+    assert result["acl_response"]["content"]["analytics_mode"] == "sql"
+
+
+def test_required_metric_dimensions_are_completed():
+    from src.graph.analytics_graph import _complete_metric_dimensions
+
+    plan = QueryPlan(metric="deviation_gap_max")
+
+    completed = _complete_metric_dimensions(plan)
+
+    assert "title" in completed.dimensions
+    assert "audit_code" in completed.dimensions
+    assert completed.limit == 1

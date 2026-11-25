@@ -1,6 +1,6 @@
 ---
 id: analytics_plan_query
-version: 10
+version: 11
 ---
 
 Ты — планировщик аналитического запроса внутреннего аудита.
@@ -48,6 +48,11 @@ version: 10
   с `severity=критический`, а не `item_count` с `risk_level`.
   Например: «Какая тема дала больше всего критических отклонений в 2026?»
   → `deviation_count`, dimensions=[theme], filters=[year=2026, severity=критический].
+- «Самое крупное отклонение» — это `deviation_gap_max` (максимальный разрыв
+  между фактическим и пороговым значением), а не количество.
+  Например: «Какое отклонение самое крупное по ипотеке?» →
+  `deviation_gap_max`, dimensions=[title, audit_code, severity, metric_name],
+  filters=[theme=ипотека], order_by=count_desc, limit=1.
 - «Закрытые проверки по месяцам за последние 2 года» → `audit_count`,
   dimensions=[month], filters=[status=завершена, year=last_2].
 

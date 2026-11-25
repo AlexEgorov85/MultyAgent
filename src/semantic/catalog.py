@@ -157,6 +157,8 @@ class MetricSpec:
     extra_where: tuple[str, ...] = field(default_factory=tuple)
     allowed_values: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     description: str = ""
+    required_dimensions: tuple[str, ...] = ()
+    single_row: bool = False
 
 
 METRICS: dict[str, MetricSpec] = {
@@ -332,6 +334,28 @@ METRICS: dict[str, MetricSpec] = {
             "используй item_count с filter item_type=отклонение."
         ),
     ),
+    "deviation_gap_max": MetricSpec(
+        id="deviation_gap_max",
+        title="Максимальное отклонение",
+        from_sql=DEVIATION_FROM,
+        dimensions=DEVIATION_DIMENSIONS,
+        count_expr="max(abs(d.metric_value - d.threshold_value))",
+        allowed_values={
+            "severity": RISK_LEVELS,
+            "entity_type": ENTITY_TYPES,
+            "theme": THEMES,
+            "item_type": ITEM_TYPES,
+        },
+        description=(
+            "Крупнейшее отклонение: максимальный разрыв между фактическим "
+            "(metric_value) и пороговым (threshold_value) значением. Для "
+            "вопроса «какое отклонение самое крупное» используй "
+            "dimensions=[title, audit_code, severity, metric_name], "
+            "order_by=count_desc, limit=1."
+        ),
+        required_dimensions=("title", "audit_code"),
+        single_row=True,
+    ),
 }
 
 CATALOG = METRICS
@@ -438,6 +462,7 @@ METRIC_LABELS: dict[str, str] = {
     "run_count": "Запусков скриптов",
     "run_script_mismatch_count": "Запусков с расхождением",
     "deviation_count": "Отклонений",
+    "deviation_gap_max": "Разрыв с порогом",
 }
 
 

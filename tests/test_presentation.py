@@ -276,3 +276,22 @@ def test_clarification_is_rendered_from_acl_content():
     assert presentation["kind"] == "clarify"
     assert "Речь о проверках" in presentation["text"]
     assert "пункты" in presentation["text"]
+
+
+def test_metric_label_names_what_was_measured():
+    state = _state(
+        acl_response={
+            "performative": "inform",
+            "sender": "analytics_agent",
+            "content": {
+                "metric": "deviation_gap_max",
+                "rows": [{"cnt": 922.79}],
+                "columns": ["cnt"],
+                "answer": "Всего: 922.79",
+            },
+        }
+    )
+
+    presentation = build_presentation(state)
+
+    assert "Разрыв с порогом" in presentation["text"]

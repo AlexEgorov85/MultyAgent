@@ -518,6 +518,11 @@ def build_main_graph(
             "acl_response": response,
             "final_answer": _response_text(content),
             "evidence": content.get("evidence", []),
+            "analytics_mode": str(
+                content.get("analytics_mode")
+                or state.get("analytics_mode")
+                or "sql"
+            ),
         }
 
     def analytics_branch(state: MainState) -> dict[str, Any]:

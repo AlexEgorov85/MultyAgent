@@ -299,6 +299,10 @@ def _present_analytics(state: dict[str, Any]) -> dict[str, Any]:
             use_answer = bool(answer) and not any(
                 column and column in answer for column in columns
             )
+            metric = str(content.get("metric") or "").strip()
+            metric_label = (
+                _metric_label(metric) if _lang(state) != "en" else ""
+            )
             headline = next(
                 (key for key in _HEADLINE_COLUMNS if key in row and row[key] is not None),
                 None,
@@ -312,10 +316,6 @@ def _present_analytics(state: dict[str, Any]) -> dict[str, Any]:
                 )
             if headline is not None:
                 label = _label(headline, state)
-                metric = str(content.get("metric") or "").strip()
-                metric_label = (
-                    _metric_label(metric) if _lang(state) != "en" else ""
-                )
                 if metric_label and use_answer and metric_label.lower() not in answer.lower():
                     # Ответ вида «Всего: 28» не говорит, что посчитано.
                     use_answer = False
@@ -335,11 +335,16 @@ def _present_analytics(state: dict[str, Any]) -> dict[str, Any]:
                     "facts": [{"label": label, "value": value}],
                     "sql": sql,
                 }
-            parts = [
-                f"{_label(column, state)}: {_fmt(row[column], column, state)}"
-                for column in columns
-                if row.get(column) is not None
-            ]
+            parts: list[str] = []
+            for column in columns:
+                if row.get(column) is None:
+                    continue
+                column_label = _label(column, state)
+                if metric_label and column in ("cnt", "count", "total"):
+                    column_label = metric_label
+                parts.append(
+                    f"{column_label}: {_fmt(row[column], column, state)}"
+                )
             if parts:
                 body = ", ".join(parts)
                 return {
