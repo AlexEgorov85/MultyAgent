@@ -29,6 +29,8 @@
 | `evidence_coverage` | есть evidence для фактических ответов |
 | `citation_coverage` | есть цитаты для retrieval |
 | `steps_ok` | обязательные шаги `trace` присутствуют |
+| `result_check` | проверка SQL против вопроса: `ok` / `retry` / `clarify` / `warning` |
+| `clarification_asked` | агент задал уточняющий вопрос вместо догадки |
 
 `investigation_completeness` считается в `metrics` ACL-ответа
 Coordinator как доля обязательных типов evidence, которые удалось собрать;
