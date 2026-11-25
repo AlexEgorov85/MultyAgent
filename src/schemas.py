@@ -53,7 +53,13 @@ class ChartPoint(BaseModel):
 
     model_config = ConfigDict(
         json_schema_extra={
-            "required": ["label", "value", "row_index", "measure"],
+            "required": [
+                "label",
+                "value",
+                "row_index",
+                "measure",
+                "series",
+            ],
         }
     )
 
@@ -61,6 +67,7 @@ class ChartPoint(BaseModel):
     value: float
     row_index: int | None = None
     measure: str = ""
+    series: str = ""
 
 
 class ChartSpec(BaseModel):

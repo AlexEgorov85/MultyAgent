@@ -1,6 +1,7 @@
 export type ChartPoint = {
   label: string;
   value: number;
+  series?: string;
 };
 
 export type ChartSpec = {
@@ -40,7 +41,12 @@ export function sanitizeChart(value: unknown): ChartSpec | undefined {
       if (!label || typeof numeric !== "number" || !Number.isFinite(numeric)) {
         return null;
       }
-      return { label, value: numeric };
+      const series = text((point as Partial<ChartPoint>).series, 120);
+      return {
+        label,
+        value: numeric,
+        ...(series ? { series } : {}),
+      };
     })
     .filter((point): point is ChartPoint => point !== null)
     .slice(0, 40);

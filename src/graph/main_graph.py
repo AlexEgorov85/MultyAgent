@@ -180,6 +180,15 @@ def build_main_graph(
         auditor_id = state.get("auditor_id", "")
         profile = memory_store.load_profile(server, auditor_id)
         slots = merge_slots(state.get("dialogue_slots"), question)
+        previous_kind = ""
+        try:
+            previous_kind = dialogue_store.last_assistant_kind(
+                server,
+                conversation_id,
+                auditor_id=str(auditor_id or ""),
+            )
+        except Exception as exc:
+            logger.warning("Не удалось определить тип предыдущего ответа: %s", exc)
         return {
             "user_query": question,
             "resolved_query": question,
@@ -200,6 +209,7 @@ def build_main_graph(
             "clarification_history": clarification_history[-10:],
             "answered_clarification": False,
             "meta_query": False,
+            "previous_answer_kind": previous_kind,
             "guardrail": {},
             "answer_guardrail": {},
             "final_answer": "",
@@ -450,6 +460,8 @@ def build_main_graph(
                 question=question,
                 profile_text=memory_store.profile_text(state.get("profile", {})),
                 context=state.get("dialogue_context", ""),
+                previous_kind=str(state.get("previous_answer_kind") or ""),
+                original_question=str(state.get("user_query") or ""),
             )
         except Exception:
             decision = None

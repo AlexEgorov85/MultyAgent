@@ -183,3 +183,35 @@ def test_combined_category_is_grounded():
         {"label": "ипотека · 2025", "value": 41.0},
         {"label": "ипотека · 2026", "value": 23.0},
     ]
+
+
+def test_series_is_preserved_for_multi_line_charts():
+    rows = [
+        {"month": "2025-03", "pocket": "Ипотека", "cnt": 2},
+        {"month": "2025-03", "pocket": "Карты", "cnt": 1},
+    ]
+
+    points = ground_chart_points(
+        {
+            "data": [
+                {
+                    "label": "Март 2025",
+                    "value": 2,
+                    "row_index": 0,
+                    "measure": "cnt",
+                    "series": "Ипотека",
+                },
+                {
+                    "label": "Март 2025",
+                    "value": 1,
+                    "row_index": 1,
+                    "measure": "cnt",
+                    "series": "Карты",
+                },
+            ]
+        },
+        rows,
+        ["month", "pocket", "cnt"],
+    )
+
+    assert [point["series"] for point in points] == ["Ипотека", "Карты"]

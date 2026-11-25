@@ -1056,7 +1056,11 @@ def build_analytics_graph(server, llm: LLMClient):
                             )
                         )
                     candidate_payload["data"] = [
-                        {"label": point["label"], "value": point["value"]}
+                        {
+                            key: point[key]
+                            for key in ("label", "value", "series")
+                            if key in point
+                        }
                         for point in grounded
                     ]
                     spec = candidate_payload

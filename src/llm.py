@@ -64,7 +64,13 @@ class LLMClient(Protocol):
     ) -> "ResolvedQuery": ...
 
     def route(
-        self, *, question: str, profile_text: str, context: str = ""
+        self,
+        *,
+        question: str,
+        profile_text: str,
+        context: str = "",
+        previous_kind: str = "",
+        original_question: str = "",
     ) -> "RouteDecision": ...
 
     def extract_memory(
@@ -448,15 +454,29 @@ class OpenAILLM:
         )
 
     def route(
-        self, *, question: str, profile_text: str, context: str = ""
+        self,
+        *,
+        question: str,
+        profile_text: str,
+        context: str = "",
+        previous_kind: str = "",
+        original_question: str = "",
     ) -> RouteDecision:
         """Выбирает маршрут запроса и режим Analytics."""
+        previous = {
+            "chart": "диаграмма",
+            "text": "текст",
+        }.get(previous_kind, "нет")
         return self._parse(
             system=load_prompt("router"),
             user=(
                 f"{self._context_block(context)}"
-                f"Вопрос: {question}\nПрофиль аудитора: {profile_text or 'нет'}\n\n"
-                "Верни RouteDecision: route, reason, confidence."
+                f"Предыдущий ответ: {previous}\n"
+                f"Исходная реплика: {original_question or question}\n"
+                f"Вопрос после разрешения ссылок: {question}\n"
+                f"Профиль аудитора: {profile_text or 'нет'}\n\n"
+                "Верни RouteDecision: route, reason, confidence, "
+                "analytics_mode, chart_source."
             ),
             schema=RouteDecision,
         )

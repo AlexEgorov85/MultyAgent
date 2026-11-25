@@ -157,6 +157,7 @@ class MainState(TypedDict, total=False):
     clarification_history: list[str]
     answered_clarification: bool
     meta_query: bool
+    previous_answer_kind: str
     analytics_mode: str
     profile: dict[str, str]
     memory_saved: bool

@@ -125,6 +125,10 @@ def ground_chart_points(
                 "label": str(point.get("label")),
                 "value": float(value),
             }
+            series = str(point.get("series") or "").strip()
+            if series:
+                # Разрез: несколько рядов на одном графике (месяц × карман).
+                grounded_point["series"] = series
             if (
                 source_row is not None
                 and isinstance(category, str)

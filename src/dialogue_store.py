@@ -230,6 +230,53 @@ def _trace_sql(trace: Any) -> str:
     return ""
 
 
+def last_assistant_kind(
+    server,
+    conversation_id: str,
+    *,
+    auditor_id: str = "",
+) -> str:
+    """Тип последнего ответа ассистента: chart / text / пусто.
+
+    Нужен, чтобы router понимал, что пользователь дополняет диаграмму,
+    а не начинает новый аналитический вопрос.
+    """
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return ""
+    with _connect(server) as conn:
+        owner = _thread_owner(conn, conversation_id)
+        caller = str(auditor_id or "").strip()
+        if caller and owner and owner != caller:
+            return ""
+        row = conn.execute(
+            "SELECT role, payload, trace FROM audit.chat_messages "
+            "WHERE conversation_id = %s "
+            "ORDER BY created_at DESC, message_id DESC LIMIT 1",
+            (conversation_id,),
+        ).fetchone()
+    if not row or str(row[0]) != "assistant":
+        return ""
+    payload, trace = row[1], row[2]
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (TypeError, ValueError):
+            payload = None
+    if isinstance(payload, dict) and payload.get("chart"):
+        return "chart"
+    if isinstance(trace, str):
+        try:
+            trace = json.loads(trace)
+        except (TypeError, ValueError):
+            trace = None
+    if isinstance(trace, list) and any(
+        isinstance(step, dict) and step.get("kind") == "chart" for step in trace
+    ):
+        return "chart"
+    return "text"
+
+
 def load_pending_clarification(
     server,
     conversation_id: str,

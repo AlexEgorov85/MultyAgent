@@ -52,70 +52,127 @@ function LineChart({ data }: { data: ChartPoint[] }) {
   const padding = { left: 48, right: 16, top: 18, bottom: 52 };
   const innerW = width - padding.left - padding.right;
   const innerH = height - padding.top - padding.bottom;
+
+  const labels: string[] = [];
+  for (const point of data) {
+    if (!labels.includes(point.label)) labels.push(point.label);
+  }
+  const groups = new Map<string, ChartPoint[]>();
+  for (const point of data) {
+    const key = point.series ?? "";
+    const list = groups.get(key) ?? [];
+    list.push(point);
+    groups.set(key, list);
+  }
+  const series = Array.from(groups.entries());
+  const multiple = series.length > 1;
   const max = Math.max(...data.map((point) => point.value), 1);
-  const step = data.length > 1 ? innerW / (data.length - 1) : 0;
-  const points = data.map((point, index) => ({
-    ...point,
-    x: padding.left + index * step,
-    y: padding.top + innerH - (point.value / max) * innerH,
-  }));
-  const path = points
-    .map((point, index) => `${index === 0 ? "M" : "L"}${point.x},${point.y}`)
-    .join(" ");
-  const labelEvery = Math.max(1, Math.ceil(data.length / 6));
+  const step = labels.length > 1 ? innerW / (labels.length - 1) : 0;
+  const xFor = (label: string) =>
+    padding.left +
+    (labels.length > 1 ? labels.indexOf(label) * step : innerW / 2);
+  const yFor = (value: number) =>
+    padding.top + innerH - (value / max) * innerH;
+  const labelEvery = Math.max(1, Math.ceil(labels.length / 6));
 
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      className="app-chart-svg"
-      role="img"
-      aria-label="Line chart"
-    >
-      {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-        const y = padding.top + innerH * ratio;
-        return (
-          <g key={ratio}>
-            <line
-              x1={padding.left}
-              x2={width - padding.right}
-              y1={y}
-              y2={y}
-              className="app-chart-grid"
-            />
+    <div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="app-chart-svg"
+        role="img"
+        aria-label="Line chart"
+      >
+        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+          const y = padding.top + innerH * ratio;
+          return (
+            <g key={ratio}>
+              <line
+                x1={padding.left}
+                x2={width - padding.right}
+                y1={y}
+                y2={y}
+                className="app-chart-grid"
+              />
+              <text
+                x={padding.left - 8}
+                y={y + 3}
+                textAnchor="end"
+                className="app-chart-axis"
+              >
+                {format.format(max * (1 - ratio))}
+              </text>
+            </g>
+          );
+        })}
+        {series.map(([name, points], index) => {
+          const color = PALETTE[index % PALETTE.length];
+          const sorted = [...points].sort(
+            (a, b) => labels.indexOf(a.label) - labels.indexOf(b.label),
+          );
+          const path = sorted
+            .map(
+              (point, pointIndex) =>
+                `${pointIndex === 0 ? "M" : "L"}${xFor(point.label)},${yFor(
+                  point.value,
+                )}`,
+            )
+            .join(" ");
+          return (
+            <g key={`${name}-${index}`}>
+              <path
+                d={path}
+                className="app-chart-line"
+                style={multiple ? { stroke: color } : undefined}
+              />
+              {sorted.map((point, pointIndex) => (
+                <circle
+                  key={`${point.label}-${pointIndex}`}
+                  cx={xFor(point.label)}
+                  cy={yFor(point.value)}
+                  r="4"
+                  className="app-chart-point"
+                  style={multiple ? { fill: color } : undefined}
+                >
+                  <title>
+                    {name ? `${name} · ` : ""}
+                    {point.label}: {format.format(point.value)}
+                  </title>
+                </circle>
+              ))}
+            </g>
+          );
+        })}
+        {labels.map((label, index) =>
+          index % labelEvery === 0 || index === labels.length - 1 ? (
             <text
-              x={padding.left - 8}
-              y={y + 3}
-              textAnchor="end"
-              className="app-chart-axis"
-            >
-              {format.format(max * (1 - ratio))}
-            </text>
-          </g>
-        );
-      })}
-      <path d={path} className="app-chart-line" />
-      {points.map((point, index) => (
-        <g key={`${point.label}-${index}`}>
-          <circle cx={point.x} cy={point.y} r="4" className="app-chart-point">
-            <title>
-              {point.label}: {format.format(point.value)}
-            </title>
-          </circle>
-          {index % labelEvery === 0 || index === points.length - 1 ? (
-            <text
-              x={point.x}
+              key={`${label}-${index}`}
+              x={xFor(label)}
               y={height - 18}
               textAnchor="middle"
               className="app-chart-axis"
             >
-              {point.label.length > 14
-                ? `${point.label.slice(0, 13)}…`
-                : point.label}
+              {label.length > 14 ? `${label.slice(0, 13)}…` : label}
             </text>
-          ) : null}
-        </g>
-      ))}
-    </svg>
+          ) : null,
+        )}
+      </svg>
+      {multiple ? (
+        <ul className="app-chart-legend">
+          {series.map(([name], index) => (
+            <li key={`${name}-${index}`}>
+              <span
+                className="app-chart-swatch"
+                style={{ background: PALETTE[index % PALETTE.length] }}
+              />
+              <span className="app-chart-legend-label" title={name}>
+                {name || "—"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
