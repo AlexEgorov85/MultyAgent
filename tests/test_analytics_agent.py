@@ -979,3 +979,34 @@ def test_required_metric_dimensions_are_completed():
     assert "title" in completed.dimensions
     assert "audit_code" in completed.dimensions
     assert completed.limit == 1
+
+
+class UnsupportedPlanLLM(FakeLLM):
+    def __init__(self, answer: str = "Готово.") -> None:
+        super().__init__(answer=answer)
+
+    def plan_query(self, **kwargs):
+        self.calls.append("plan_query")
+        return QueryPlan(metric="item_count", unsupported=True)
+
+    def plan_sql(self, **kwargs):
+        self.calls.append("plan_sql")
+        return SQLPlan(
+            strategy="generated",
+            sql="SELECT count(*) AS cnt FROM audit.audits",
+            reason="нет подходящей метрики",
+        )
+
+
+def test_unsupported_query_ir_uses_free_sql(server, sample_graph_data):
+    llm = UnsupportedPlanLLM()
+    graph = build_analytics_graph(server, llm)
+
+    result = graph.invoke(
+        {"acl_request": acl_request("Средний срок устранения по темам")}
+    )
+
+    assert "plan_query" in llm.calls
+    assert "plan_sql" in llm.calls
+    assert result["status"] == "ok"
+    assert result["acl_response"]["content"]["metrics"]["plan_source"] == "llm_sql"

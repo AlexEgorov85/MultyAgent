@@ -384,7 +384,11 @@ def build_analytics_graph(server, llm: LLMClient):
             except Exception:
                 query_plan = None
 
-            if query_plan is not None:
+            if query_plan is not None and query_plan.unsupported:
+                logger.info(
+                    "Query IR не покрывает вопрос: %s", query_plan.reason
+                )
+            if query_plan is not None and not query_plan.unsupported:
                 # Вторая LLM-проверка: чего не хватает плану по сравнению
                 # с вопросом. Код применяет gaps и валидирует их каталогом.
                 reviewer = getattr(llm, "review_query_plan", None)
