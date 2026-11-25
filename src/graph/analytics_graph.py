@@ -32,6 +32,14 @@ ANALYTICS_MODES = ("sql", "drilldown", "multi_tool", "chart")
 logger = logging.getLogger(__name__)
 
 
+def _normalize_question(text: str) -> str:
+    """Нормализует текст вопроса для проверки повторов."""
+    return (
+        " ".join(str(text or "").lower().replace("ё", "е").split())
+        .strip(" ?!.,;:")
+    )
+
+
 def _split_tool_call(name: str) -> tuple[str, dict[str, str]]:
     """Разбирает форму `tool(arg=value, ...)`, если модель положила туда аргументы.
 
@@ -255,11 +263,18 @@ def build_analytics_graph(server, llm: LLMClient):
         if mode not in ANALYTICS_MODES:
             mode = "sql"
 
+        asked = message.content.get("asked_clarifications")
+        asked_clarifications = (
+            [str(item) for item in asked if str(item).strip()]
+            if isinstance(asked, list)
+            else []
+        )
         return {
             "status": "ok",
             "request": message.model_dump(),
             "question": question,
             "mode": mode,
+            "asked_clarifications": asked_clarifications,
             "conversation_context": str(
                 message.content.get("conversation_context", "")
             ),
@@ -351,19 +366,25 @@ def build_analytics_graph(server, llm: LLMClient):
                             profile_text=state.get("profile_text", ""),
                         )
                         if gaps.clarification.strip():
-                            # Две равноправные трактовки: не считаем наугад.
-                            return {
-                                "status": "ok",
-                                "strategy": "clarify",
-                                "clarification": {
-                                    "question": gaps.clarification.strip(),
-                                    "missing": list(gaps.missing_dimensions),
-                                    "options": [],
-                                    "original_query": question,
-                                    "route": "analytics",
-                                    "attempts": 0,
-                                },
+                            asked = {
+                                _normalize_question(item)
+                                for item in state.get("asked_clarifications") or []
+                                if str(item).strip()
                             }
+                            if _normalize_question(gaps.clarification) not in asked:
+                                # Две равноправные трактовки: не считаем наугад.
+                                return {
+                                    "status": "ok",
+                                    "strategy": "clarify",
+                                    "clarification": {
+                                        "question": gaps.clarification.strip(),
+                                        "missing": list(gaps.missing_dimensions),
+                                        "options": [],
+                                        "original_query": question,
+                                        "route": "analytics",
+                                        "attempts": 0,
+                                    },
+                                }
                         query_plan = apply_plan_gaps(query_plan, gaps)
                     except Exception as exc:
                         logger.warning("plan review failed: %s", exc)
@@ -509,6 +530,11 @@ def build_analytics_graph(server, llm: LLMClient):
         verifier = getattr(llm, "verify_result", None)
         if verifier is None:
             return {"verify_retry": False}
+        asked = {
+            _normalize_question(item)
+            for item in state.get("asked_clarifications") or []
+            if str(item).strip()
+        }
         try:
             check = verifier(
                 question=state.get("question", ""),
@@ -516,6 +542,9 @@ def build_analytics_graph(server, llm: LLMClient):
                 columns=list(state.get("columns") or []),
                 rows=rows,
                 language=str(state.get("language") or "ru"),
+                asked_clarifications=list(
+                    state.get("asked_clarifications") or []
+                ),
             )
         except Exception as exc:
             logger.warning("result verify failed: %s", exc)
@@ -539,6 +568,8 @@ def build_analytics_graph(server, llm: LLMClient):
             # Без конкретного пропущенного условия или неверной метрики
             # повтор плана только добавил бы шум.
             metrics["result_check"] = "ok"
+            if check.assumption.strip():
+                metrics["verify_assumption"] = check.assumption.strip()
             return {"verify_retry": False, "metrics": metrics}
         update: dict[str, Any] = {
             "verify_attempts": attempts + 1,
@@ -551,7 +582,8 @@ def build_analytics_graph(server, llm: LLMClient):
             update["question"] = check.corrected_question.strip()
             update["verify_retry"] = True
             return update
-        if check.clarification.strip():
+        question = _normalize_question(check.clarification)
+        if question and question not in asked:
             metrics["result_check"] = "clarify"
             metrics["clarification_asked"] = 1
             update.update(
@@ -569,12 +601,12 @@ def build_analytics_graph(server, llm: LLMClient):
                 }
             )
             return update
+        if check.assumption.strip():
+            metrics["result_check"] = "ok"
+            metrics["verify_assumption"] = check.assumption.strip()
+            return update
+        # Технические подробности проверки остаются в метриках, а не в ответе.
         metrics["result_check"] = "warning"
-        detail = "; ".join(issues) or "условие вопроса могло быть учтено не полностью"
-        if str(state.get("language") or "ru").lower() == "en":
-            update["verify_warning"] = f"Completeness check: {detail}."
-        else:
-            update["verify_warning"] = f"Проверка полноты: {detail}."
         return update
 
     def repair_sql(state: AnalyticsState) -> dict[str, Any]:
@@ -1154,8 +1186,6 @@ def build_analytics_graph(server, llm: LLMClient):
         # Флаги усечения плана инструментов, выставленные в multi_tool.
         metrics.update(state.get("metrics") or {})
         answer = str(state.get("answer") or "")
-        if state.get("verify_warning"):
-            answer = f"{answer}\n\n{state['verify_warning']}".strip()
         content: dict[str, Any] = {
             "answer": answer,
             "answer_source": state.get("answer_source", "template"),

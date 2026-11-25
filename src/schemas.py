@@ -233,6 +233,7 @@ class ResultCheck(BaseModel):
     wrong_metric: bool = False
     corrected_question: str = ""
     clarification: str = ""
+    assumption: str = ""
     reason: str = ""
 
     @classmethod
@@ -244,6 +245,7 @@ class ResultCheck(BaseModel):
             "wrong_metric",
             "corrected_question",
             "clarification",
+            "assumption",
             "reason",
         ]
         return schema

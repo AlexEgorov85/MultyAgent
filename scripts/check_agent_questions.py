@@ -76,7 +76,7 @@ CASES: list[dict] = [
     },
     {
         "id": "clarify_ambiguous_object",
-        "query": "Покажи закрытые по ипотеке",
+        "query": "Сколько закрытых: проверки или пункты?",
         "route": "analytics",
         "expect_clarification": True,
     },

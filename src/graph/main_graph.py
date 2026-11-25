@@ -89,6 +89,17 @@ def _pick(state: MainState, ru: str, en: str) -> str:
     return en if state.get("language") == "en" else ru
 
 
+def _same_question(left: str, right: str) -> bool:
+    """Сравнивает вопросы без регистра, ё и пунктуации по краям."""
+    def norm(text: str) -> str:
+        return (
+            " ".join(str(text or "").lower().replace("ё", "е").split())
+            .strip(" ?!.,;:")
+        )
+
+    return bool(norm(left)) and norm(left) == norm(right)
+
+
 def build_main_graph(
     server,
     llm: LLMClient,
@@ -155,6 +166,17 @@ def build_main_graph(
             except Exception as exc:
                 logger.warning("Не удалось загрузить уточнение: %s", exc)
                 pending = None
+        clarification_history = [
+            str(item)
+            for item in state.get("clarification_history") or []
+            if str(item).strip()
+        ]
+        if (
+            isinstance(pending, dict)
+            and pending.get("question")
+            and pending["question"] not in clarification_history
+        ):
+            clarification_history.append(str(pending["question"]))
         auditor_id = state.get("auditor_id", "")
         profile = memory_store.load_profile(server, auditor_id)
         slots = merge_slots(state.get("dialogue_slots"), question)
@@ -174,6 +196,7 @@ def build_main_graph(
             "pending_clarification": pending or {},
             "clarification": {},
             "clarification_assumption": "",
+            "clarification_history": clarification_history[-10:],
             "answered_clarification": False,
             "guardrail": {},
             "answer_guardrail": {},
@@ -225,6 +248,10 @@ def build_main_graph(
             elif (
                 resolution.clarification_question.strip()
                 and int(pending.get("attempts", 0)) < 1
+                and not _same_question(
+                    resolution.clarification_question,
+                    str(pending.get("question") or ""),
+                )
             ):
                 next_pending = {
                     **pending,
@@ -448,6 +475,11 @@ def build_main_graph(
             "dialogue_slots": state.get("dialogue_slots", {}),
             "auditor_id": state.get("auditor_id", ""),
             "language": state.get("language", "ru"),
+            "asked_clarifications": [
+                str(item)
+                for item in state.get("clarification_history") or []
+                if str(item).strip()
+            ][-5:],
             # Профиль передаётся всем агентам как блок предпочтений
             # в промпте, а не как условия вопроса.
             "profile_text": memory_store.profile_text(profile),
@@ -648,6 +680,15 @@ def build_main_graph(
         acl = state.get("acl_response") or {}
         content = _acl_content(acl)
         clarification = state.get("clarification") or content.get("clarification")
+        history = [
+            str(item)
+            for item in state.get("clarification_history") or []
+            if str(item).strip()
+        ]
+        if isinstance(clarification, dict) and clarification.get("question"):
+            question = str(clarification["question"])
+            if not any(_same_question(question, item) for item in history):
+                history.append(question)
         assumption = str(state.get("clarification_assumption") or "").strip()
         if assumption:
             note = _pick(
@@ -693,6 +734,7 @@ def build_main_graph(
             "pending_clarification": clarification
             if isinstance(clarification, dict) and clarification
             else (state.get("pending_clarification") or {}),
+            "clarification_history": history[-10:],
             "metrics": metrics,
         }
 

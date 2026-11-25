@@ -975,3 +975,31 @@ def test_pending_clarification_is_loaded_from_history(server, main_data):
         )
         is None
     )
+
+
+def test_same_clarification_is_not_repeated(server, main_data):
+    pending = _pending()
+    resolver = ClarifyLLM(
+        ClarificationResolution(
+            resolved=False,
+            question="Сколько завершённых проверок?",
+            clarification_question=pending["question"],
+            assumption="закрытая проверка = статус «завершена»",
+        )
+    )
+    analytics = AnalyticsLLM()
+    graph = build_main_graph(server, resolver, analytics_llm=analytics)
+
+    result = graph.invoke(
+        {
+            "messages": [{"role": "user", "content": "Не знаю"}],
+            "auditor_id": "MAIN-001",
+            "conversation_id": "thread-clarify-same",
+            "pending_clarification": pending,
+        },
+        config={"configurable": {"thread_id": "thread-clarify-same"}},
+    )
+
+    assert analytics.calls == 1
+    assert result["final_answer"] != pending["question"]
+    assert "Допущение" in result["final_answer"]

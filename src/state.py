@@ -38,7 +38,7 @@ class AnalyticsState(TypedDict, total=False):
     verify_attempts: int
     verify_retry: bool
     verify_issues: list[str]
-    verify_warning: str
+    asked_clarifications: list[str]
     answer: str
     answer_source: str  # llm | agent | template
     clarification: dict[str, Any]
@@ -152,6 +152,7 @@ class MainState(TypedDict, total=False):
     pending_clarification: dict[str, Any]
     clarification: dict[str, Any]
     clarification_assumption: str
+    clarification_history: list[str]
     answered_clarification: bool
     analytics_mode: str
     profile: dict[str, str]

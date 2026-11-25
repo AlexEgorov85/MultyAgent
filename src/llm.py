@@ -148,6 +148,7 @@ class LLMClient(Protocol):
         columns: list[str],
         rows: list[dict[str, Any]],
         language: str = "ru",
+        asked_clarifications: list[str] | None = None,
     ) -> "ResultCheck": ...
 
     def resolve_clarification(
@@ -644,9 +645,11 @@ class OpenAILLM:
         columns: list[str],
         rows: list[dict[str, Any]],
         language: str = "ru",
+        asked_clarifications: list[str] | None = None,
     ) -> ResultCheck:
         """Проверяет, что SQL и результат отвечают на вопрос."""
         preview = rows[:5]
+        asked = "; ".join(asked_clarifications or []) or "(нет)"
         return self._parse(
             system=load_prompt("analytics_verify_result"),
             user=(
@@ -654,7 +657,8 @@ class OpenAILLM:
                 f"Вопрос: {question}\n"
                 f"SQL: {sql}\n"
                 f"Колонки: {columns}\n"
-                f"Строки (до 5): {preview}"
+                f"Строки (до 5): {preview}\n"
+                f"Уже спрашивали: {asked}"
             ),
             schema=ResultCheck,
             max_tokens=700,
