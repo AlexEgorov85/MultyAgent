@@ -177,6 +177,54 @@ class ToolArguments(BaseModel):
         return result
 
 
+class Clarification(BaseModel):
+    """Уточняющий вопрос вместо догадки."""
+
+    question: str = Field(min_length=1, max_length=300)
+    missing: list[str] = Field(default_factory=list)
+    options: list[str] = Field(default_factory=list)
+    original_query: str = ""
+    route: str = ""
+    attempts: int = 0
+
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs):
+        schema = super().model_json_schema(*args, **kwargs)
+        schema["required"] = [
+            "question",
+            "missing",
+            "options",
+            "original_query",
+            "route",
+            "attempts",
+        ]
+        return schema
+
+
+class ClarificationResolution(BaseModel):
+    """Разбор ответа пользователя на уточняющий вопрос."""
+
+    resolved: bool
+    question: str = ""
+    topic_changed: bool = False
+    clarification_question: str = ""
+    assumption: str = ""
+    reason: str = ""
+
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs):
+        schema = super().model_json_schema(*args, **kwargs)
+        schema["required"] = [
+            "resolved",
+            "question",
+            "topic_changed",
+            "clarification_question",
+            "assumption",
+            "reason",
+        ]
+        return schema
+
+
 class ResultCheck(BaseModel):
     """Проверка: отвечает ли выполненный SQL на заданный вопрос."""
 

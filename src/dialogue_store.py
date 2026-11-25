@@ -230,6 +230,50 @@ def _trace_sql(trace: Any) -> str:
     return ""
 
 
+def load_pending_clarification(
+    server,
+    conversation_id: str,
+    *,
+    auditor_id: str = "",
+) -> dict[str, Any] | None:
+    """Незакрытый уточняющий вопрос последнего хода.
+
+    Возвращает clarification, только если последнее сообщение — ответ
+    ассистента с уточнением. Если после него уже была реплика пользователя,
+    вопрос считается отвеченным.
+    """
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return None
+    with _connect(server) as conn:
+        owner = _thread_owner(conn, conversation_id)
+        caller = str(auditor_id or "").strip()
+        if caller and owner and owner != caller:
+            return None
+        row = conn.execute(
+            "SELECT role, payload FROM audit.chat_messages "
+            "WHERE conversation_id = %s "
+            "ORDER BY created_at DESC, message_id DESC LIMIT 1",
+            (conversation_id,),
+        ).fetchone()
+    if not row or str(row[0]) != "assistant":
+        return None
+    payload = row[1]
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(payload, dict):
+        return None
+    clarification = payload.get("clarification")
+    if isinstance(clarification, dict) and str(
+        clarification.get("question") or ""
+    ).strip():
+        return clarification
+    return None
+
+
 def load_last_analytics(
     server,
     conversation_id: str,

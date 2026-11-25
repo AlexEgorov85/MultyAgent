@@ -69,6 +69,12 @@ def _last_user_text(messages: list[Any]) -> str:
     return ""
 
 
+def _acl_content(acl: Any) -> dict[str, Any]:
+    """Содержимое ACL-ответа или пустой словарь."""
+    content = acl.get("content") if isinstance(acl, dict) else None
+    return content if isinstance(content, dict) else {}
+
+
 def _response_text(content: dict[str, Any]) -> str:
     return str(
         content.get("answer")
@@ -138,6 +144,17 @@ def build_main_graph(
             question,
             language=language,
         )
+        pending = state.get("pending_clarification")
+        if not pending:
+            try:
+                pending = dialogue_store.load_pending_clarification(
+                    server,
+                    conversation_id,
+                    auditor_id=str(state.get("auditor_id") or ""),
+                )
+            except Exception as exc:
+                logger.warning("Не удалось загрузить уточнение: %s", exc)
+                pending = None
         auditor_id = state.get("auditor_id", "")
         profile = memory_store.load_profile(server, auditor_id)
         slots = merge_slots(state.get("dialogue_slots"), question)
@@ -153,6 +170,11 @@ def build_main_graph(
             "route": "",
             "route_reason": "",
             "route_confidence": 0.0,
+            "route_error": False,
+            "pending_clarification": pending or {},
+            "clarification": {},
+            "clarification_assumption": "",
+            "answered_clarification": False,
             "guardrail": {},
             "answer_guardrail": {},
             "final_answer": "",
@@ -170,8 +192,69 @@ def build_main_graph(
         context = state.get("dialogue_context", "")
         text = question
         reason = ""
+        assumption = ""
+        resolved_answer = False
+        pending = dict(state.get("pending_clarification") or {})
 
-        if context:
+        if pending:
+            resolver = getattr(llm, "resolve_clarification", None)
+            resolution = None
+            if resolver is not None:
+                try:
+                    resolution = resolver(
+                        original_query=str(pending.get("original_query") or ""),
+                        clarification=str(pending.get("question") or ""),
+                        answer=question,
+                        context=context,
+                        profile_text=memory_store.profile_text(
+                            state.get("profile", {})
+                        ),
+                        language=str(state.get("language") or "ru"),
+                    )
+                except Exception:
+                    resolution = None
+            if resolution is None:
+                pending = {}
+            elif resolution.topic_changed:
+                pending = {}
+            elif resolution.resolved and resolution.question.strip():
+                text = " ".join(resolution.question.split()).strip()
+                reason = "ответ на уточнение"
+                pending = {}
+                resolved_answer = True
+            elif (
+                resolution.clarification_question.strip()
+                and int(pending.get("attempts", 0)) < 1
+            ):
+                next_pending = {
+                    **pending,
+                    "question": " ".join(
+                        resolution.clarification_question.split()
+                    ).strip(),
+                    "attempts": int(pending.get("attempts", 0)) + 1,
+                    # Варианты относились к предыдущему вопросу.
+                    "options": [],
+                }
+                slots = merge_slots(state.get("dialogue_slots"), question)
+                return {
+                    "pending_clarification": next_pending,
+                    "clarification": next_pending,
+                    "resolved_query": question,
+                    "answered_clarification": False,
+                    "final_answer": next_pending["question"],
+                    "dialogue_slots": slots.model_dump(),
+                }
+            else:
+                text = (
+                    " ".join(resolution.question.split()).strip()
+                    or str(pending.get("original_query") or "").strip()
+                    or question
+                )
+                assumption = " ".join(resolution.assumption.split()).strip()
+                pending = {}
+                resolved_answer = bool(text)
+
+        if not resolved_answer and context:
             resolver = getattr(llm, "resolve_followup", None)
             if resolver is not None:
                 try:
@@ -197,6 +280,9 @@ def build_main_graph(
             "resolved_query": text,
             "resolved_reason": reason,
             "dialogue_slots": slots.model_dump(),
+            "pending_clarification": pending,
+            "clarification_assumption": assumption,
+            "answered_clarification": resolved_answer,
         }
 
     def update_memory(state: MainState) -> dict[str, Any]:
@@ -524,13 +610,17 @@ def build_main_graph(
         """Финальная проверка ответа и пометка ответов без evidence."""
         route = state.get("route")
         factual_routes = {"analytics", "retrieval", "report", "investigation"}
+        clarify = bool(
+            state.get("clarification")
+            or _acl_content(state.get("acl_response")).get("clarification")
+        )
         result = check_final_answer(
             state.get("final_answer", ""),
             extract_sql(state.get("acl_response")),
             # Сообщение о недоступности модели — не ответ вне домена.
             is_domain=route != "out_of_domain" or bool(state.get("route_error")),
             evidence=state.get("evidence", []),
-            is_factual=str(route or "") in factual_routes,
+            is_factual=str(route or "") in factual_routes and not clarify,
             route=str(route or ""),
             conversation_id=str(state.get("conversation_id") or ""),
         )
@@ -556,8 +646,16 @@ def build_main_graph(
         if started is not None:
             metrics["latency_total_sec"] = round(time.perf_counter() - started, 4)
         acl = state.get("acl_response") or {}
-        content = acl.get("content") if isinstance(acl, dict) else {}
-        content = content if isinstance(content, dict) else {}
+        content = _acl_content(acl)
+        clarification = state.get("clarification") or content.get("clarification")
+        assumption = str(state.get("clarification_assumption") or "").strip()
+        if assumption:
+            note = _pick(
+                state,
+                f"Допущение: {assumption}",
+                f"Assumption: {assumption}",
+            )
+            answer = f"{answer}\n\n{note}".strip()
         payload: dict[str, Any] | None = None
         if content.get("rows") and content.get("columns"):
             payload = {
@@ -572,6 +670,9 @@ def build_main_graph(
             }
             if content.get("chart"):
                 payload["chart"] = content.get("chart")
+        if clarification:
+            payload = dict(payload or {})
+            payload["clarification"] = clarification
         try:
             dialogue_store.append_turn(
                 server,
@@ -589,6 +690,9 @@ def build_main_graph(
         return {
             "messages": [{"type": "ai", "content": answer}],
             "final_answer": answer,
+            "pending_clarification": clarification
+            if isinstance(clarification, dict) and clarification
+            else (state.get("pending_clarification") or {}),
             "metrics": metrics,
         }
 
@@ -610,7 +714,11 @@ def build_main_graph(
 
     builder.add_edge(START, "load_memory")
     builder.add_edge("load_memory", "resolve_query")
-    builder.add_edge("resolve_query", "guard_request")
+    builder.add_conditional_edges(
+        "resolve_query",
+        lambda s: "guard_answer" if s.get("clarification") else "guard_request",
+        {"guard_answer": "guard_answer", "guard_request": "guard_request"},
+    )
     builder.add_conditional_edges(
         "guard_request",
         lambda s: "refusal" if s.get("route") == "unsafe" else "router",

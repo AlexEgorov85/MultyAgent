@@ -350,6 +350,20 @@ def build_analytics_graph(server, llm: LLMClient):
                             context=state.get("conversation_context", ""),
                             profile_text=state.get("profile_text", ""),
                         )
+                        if gaps.clarification.strip():
+                            # Две равноправные трактовки: не считаем наугад.
+                            return {
+                                "status": "ok",
+                                "strategy": "clarify",
+                                "clarification": {
+                                    "question": gaps.clarification.strip(),
+                                    "missing": list(gaps.missing_dimensions),
+                                    "options": [],
+                                    "original_query": question,
+                                    "route": "analytics",
+                                    "attempts": 0,
+                                },
+                            }
                         query_plan = apply_plan_gaps(query_plan, gaps)
                     except Exception as exc:
                         logger.warning("plan review failed: %s", exc)
@@ -539,10 +553,17 @@ def build_analytics_graph(server, llm: LLMClient):
             return update
         if check.clarification.strip():
             metrics["result_check"] = "clarify"
+            metrics["clarification_asked"] = 1
             update.update(
                 {
-                    "answer": check.clarification.strip(),
-                    "answer_source": "agent",
+                    "clarification": {
+                        "question": check.clarification.strip(),
+                        "missing": issues,
+                        "options": [],
+                        "original_query": str(state.get("question") or ""),
+                        "route": "analytics",
+                        "attempts": 0,
+                    },
                     "strategy": "clarify",
                     "status": "ok",
                 }
@@ -550,11 +571,10 @@ def build_analytics_graph(server, llm: LLMClient):
             return update
         metrics["result_check"] = "warning"
         detail = "; ".join(issues) or "условие вопроса могло быть учтено не полностью"
-        update["verify_warning"] = _pick(
-            state,
-            f"Проверка полноты: {detail}.",
-            f"Completeness check: {detail}.",
-        )
+        if str(state.get("language") or "ru").lower() == "en":
+            update["verify_warning"] = f"Completeness check: {detail}."
+        else:
+            update["verify_warning"] = f"Проверка полноты: {detail}."
         return update
 
     def repair_sql(state: AnalyticsState) -> dict[str, Any]:
@@ -1019,7 +1039,7 @@ def build_analytics_graph(server, llm: LLMClient):
         if state.get("status") in ("refused", "failed"):
             return {}
 
-        if state.get("answer"):
+        if state.get("answer") or state.get("clarification"):
             return {}
 
         rows = state.get("rows", [])
@@ -1143,6 +1163,8 @@ def build_analytics_graph(server, llm: LLMClient):
             "evidence": state.get("evidence", []),
             "metrics": metrics,
         }
+        if state.get("clarification"):
+            content["clarification"] = state["clarification"]
         if metrics.get("tool_calls_truncated"):
             content["tool_calls_truncated"] = True
             content["tool_calls_requested"] = int(
@@ -1194,15 +1216,19 @@ def build_analytics_graph(server, llm: LLMClient):
     builder.add_conditional_edges(
         "plan",
         lambda s: (
-            "chart"
-            if s.get("status") == "failed" and s.get("mode") == "chart"
+            "summarize"
+            if s.get("clarification")
             else (
-                "summarize"
-                if s.get("status") == "failed"
+                "chart"
+                if s.get("status") == "failed" and s.get("mode") == "chart"
                 else (
-                    "run_script"
-                    if s.get("strategy") == "script"
-                    else "validate"
+                    "summarize"
+                    if s.get("status") == "failed"
+                    else (
+                        "run_script"
+                        if s.get("strategy") == "script"
+                        else "validate"
+                    )
                 )
             )
         ),
@@ -1243,7 +1269,7 @@ def build_analytics_graph(server, llm: LLMClient):
             if s.get("verify_retry")
             else (
                 "summarize"
-                if s.get("answer")
+                if s.get("answer") or s.get("clarification")
                 else ("chart" if s.get("mode") == "chart" else "summarize")
             )
         ),

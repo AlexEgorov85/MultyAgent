@@ -41,6 +41,7 @@ class AnalyticsState(TypedDict, total=False):
     verify_warning: str
     answer: str
     answer_source: str  # llm | agent | template
+    clarification: dict[str, Any]
     acl_response: dict[str, Any]
     metrics: dict[str, Any]
 
@@ -148,6 +149,10 @@ class MainState(TypedDict, total=False):
     route_reason: str
     route_confidence: float
     route_error: bool
+    pending_clarification: dict[str, Any]
+    clarification: dict[str, Any]
+    clarification_assumption: str
+    answered_clarification: bool
     analytics_mode: str
     profile: dict[str, str]
     memory_saved: bool

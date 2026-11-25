@@ -449,6 +449,27 @@ def build_presentation(state: dict[str, Any]) -> dict[str, Any]:
     performative = str(acl.get("performative") or "").lower()
     route = str(state.get("route") or "")
 
+    clarification = state.get("clarification")
+    if not isinstance(clarification, dict) or not clarification:
+        clarification = _content(state).get("clarification")
+    if isinstance(clarification, dict) and str(
+        clarification.get("question") or ""
+    ).strip():
+        options = [
+            str(item).strip()
+            for item in clarification.get("options") or []
+            if str(item).strip()
+        ]
+        text = str(clarification["question"]).strip()
+        if options:
+            text = text + "\n\n" + "\n".join(f"- {item}" for item in options)
+        return {
+            "kind": "clarify",
+            "text": text,
+            "options": options,
+            "facts": [],
+        }
+
     if performative in ("refuse", "failure") or route in ("unsafe", "out_of_domain"):
         text = (
             str(state.get("final_answer") or "").strip()

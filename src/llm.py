@@ -14,6 +14,7 @@ from .textscan import contains_id
 from .schemas import (
     AnswerDraft,
     ChartSpec,
+    ClarificationResolution,
     Critique,
     InvestigationAnswer,
     InvestigationPlan,
@@ -148,6 +149,17 @@ class LLMClient(Protocol):
         rows: list[dict[str, Any]],
         language: str = "ru",
     ) -> "ResultCheck": ...
+
+    def resolve_clarification(
+        self,
+        *,
+        original_query: str,
+        clarification: str,
+        answer: str,
+        context: str = "",
+        profile_text: str = "",
+        language: str = "ru",
+    ) -> "ClarificationResolution": ...
 
     def summarize(
         self,
@@ -645,6 +657,33 @@ class OpenAILLM:
                 f"Строки (до 5): {preview}"
             ),
             schema=ResultCheck,
+            max_tokens=700,
+        )
+
+    def resolve_clarification(
+        self,
+        *,
+        original_query: str,
+        clarification: str,
+        answer: str,
+        context: str = "",
+        profile_text: str = "",
+        language: str = "ru",
+    ) -> ClarificationResolution:
+        """Собирает самостоятельный вопрос из ответа на уточнение."""
+        return self._parse(
+            system=load_prompt("resolve_clarification"),
+            user=(
+                f"{self._profile_block(profile_text)}"
+                f"{self._context_block(context)}"
+                f"Язык: {language}\n"
+                f"Исходный вопрос: {original_query}\n"
+                f"Уточняющий вопрос: {clarification}\n"
+                f"Ответ пользователя: {answer}\n\n"
+                "Верни resolved, question, topic_changed, "
+                "clarification_question, assumption, reason."
+            ),
+            schema=ClarificationResolution,
             max_tokens=700,
         )
 

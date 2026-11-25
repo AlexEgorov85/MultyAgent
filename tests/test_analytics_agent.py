@@ -336,7 +336,7 @@ def test_result_verifier_asks_clarification_instead_of_guessing(
 
     content = result["acl_response"]["content"]
     assert content["strategy"] == "clarify"
-    assert "Уточните" in content["answer"]
+    assert "Уточните" in content["clarification"]["question"]
     assert content["metrics"]["result_check"] == "clarify"
 
 

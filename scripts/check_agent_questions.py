@@ -74,6 +74,19 @@ CASES: list[dict] = [
         "chart_type": "line",
         "chart_values": [2, 7, 4, 7, 5, 5, 5, 6],
     },
+    {
+        "id": "clarify_ambiguous_object",
+        "query": "Покажи закрытые по ипотеке",
+        "route": "analytics",
+        "expect_clarification": True,
+    },
+    {
+        "id": "clarify_not_needed",
+        "query": "Сколько проверок закрыто по ипотеке?",
+        "route": "analytics",
+        "expect_clarification": False,
+        "numbers": [13],
+    },
 ]
 
 
@@ -115,6 +128,12 @@ def _evaluate(case: dict, result: dict) -> list[str]:
             values = [float(point["value"]) for point in chart.get("data") or []]
             if values != [float(item) for item in case["chart_values"]]:
                 problems.append(f"точки диаграммы {values}")
+
+    clarification = content.get("clarification")
+    if case.get("expect_clarification") is True and not clarification:
+        problems.append("ожидался уточняющий вопрос")
+    if case.get("expect_clarification") is False and clarification:
+        problems.append("уточнение задано, хотя вопрос однозначен")
     return problems
 
 

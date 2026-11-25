@@ -253,3 +253,26 @@ def test_trace_is_json_serializable():
 
     json.dumps(result["presentation"], ensure_ascii=False)
     json.dumps(result["trace"], ensure_ascii=False)
+
+
+def test_clarification_is_rendered_from_acl_content():
+    state = _state(
+        acl_response={
+            "performative": "inform",
+            "sender": "analytics_agent",
+            "content": {
+                "strategy": "clarify",
+                "clarification": {
+                    "question": "Речь о проверках или о пунктах?",
+                    "options": ["проверки", "пункты"],
+                },
+            },
+        },
+        clarification={},
+    )
+
+    presentation = build_presentation(state)
+
+    assert presentation["kind"] == "clarify"
+    assert "Речь о проверках" in presentation["text"]
+    assert "пункты" in presentation["text"]

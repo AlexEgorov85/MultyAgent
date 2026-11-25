@@ -9,6 +9,7 @@ import pytest
 from src import db_runtime
 from src.graph.main_graph import build_main_graph
 from src.schemas import (
+    ClarificationResolution,
     MemoryFact,
     MemoryUpdate,
     ReportDraft,
@@ -824,3 +825,153 @@ def test_router_failure_reports_service_unavailable(server, main_data):
 
     assert result["route"] == "out_of_domain"
     assert "временно недоступен" in result["final_answer"]
+
+
+class ClarifyLLM(MainLLM):
+    """Возвращает заранее заданный разбор ответа на уточнение."""
+
+    def __init__(self, resolution: ClarificationResolution) -> None:
+        self.resolution = resolution
+        self.resolve_calls: list[dict] = []
+
+    def resolve_clarification(self, **kwargs):
+        self.resolve_calls.append(kwargs)
+        return self.resolution
+
+
+def _pending() -> dict:
+    return {
+        "question": "Уточните: нужны проверки со статусом «завершена»?",
+        "missing": ["status"],
+        "options": ["завершённые", "в работе"],
+        "original_query": "Сколько закрытых проверок?",
+        "route": "analytics",
+        "attempts": 0,
+    }
+
+
+def test_clarification_answer_is_resolved_and_used(server, main_data):
+    resolver = ClarifyLLM(
+        ClarificationResolution(
+            resolved=True,
+            question="Сколько завершённых проверок по ипотеке?",
+            reason="ответ на уточнение",
+        )
+    )
+    analytics = AnalyticsLLM()
+    graph = build_main_graph(server, resolver, analytics_llm=analytics)
+
+    result = graph.invoke(
+        {
+            "messages": [{"role": "user", "content": "Завершённые"}],
+            "auditor_id": "MAIN-001",
+            "conversation_id": "thread-clarify-resolve",
+            "pending_clarification": _pending(),
+        },
+        config={"configurable": {"thread_id": "thread-clarify-resolve"}},
+    )
+
+    assert resolver.resolve_calls
+    assert resolver.resolve_calls[0]["clarification"] in _pending()["question"]
+    assert "завершён" in result["resolved_query"].lower()
+    assert result["resolved_query"].lower().count("закрыт") == 0
+    assert result["final_answer"] == "Проверок: 1."
+    assert not result.get("pending_clarification")
+
+
+def test_clarification_is_asked_again_once(server, main_data):
+    resolver = ClarifyLLM(
+        ClarificationResolution(
+            resolved=False,
+            clarification_question="Уточните: нужны проверки или пункты?",
+            reason="ответ неоднозначен",
+        )
+    )
+    analytics = AnalyticsLLM()
+    graph = build_main_graph(server, resolver, analytics_llm=analytics)
+
+    result = graph.invoke(
+        {
+            "messages": [{"role": "user", "content": "Не знаю"}],
+            "auditor_id": "MAIN-001",
+            "conversation_id": "thread-clarify-repeat",
+            "pending_clarification": _pending(),
+        },
+        config={"configurable": {"thread_id": "thread-clarify-repeat"}},
+    )
+
+    assert result["final_answer"] == "Уточните: нужны проверки или пункты?"
+    assert result["presentation"]["kind"] == "clarify"
+    assert result["pending_clarification"]["attempts"] == 1
+    assert analytics.calls == 0
+
+
+def test_clarification_cap_uses_assumption(server, main_data):
+    resolver = ClarifyLLM(
+        ClarificationResolution(
+            resolved=False,
+            question="Сколько завершённых проверок?",
+            assumption="речь о завершённых проверках",
+            reason="пользователь отказался уточнять",
+        )
+    )
+    analytics = AnalyticsLLM()
+    graph = build_main_graph(server, resolver, analytics_llm=analytics)
+    pending = _pending()
+    pending["attempts"] = 1
+
+    result = graph.invoke(
+        {
+            "messages": [{"role": "user", "content": "Решай сам"}],
+            "auditor_id": "MAIN-001",
+            "conversation_id": "thread-clarify-cap",
+            "pending_clarification": pending,
+        },
+        config={"configurable": {"thread_id": "thread-clarify-cap"}},
+    )
+
+    assert analytics.calls == 1
+    assert "Допущение" in result["final_answer"]
+    assert "завершённых проверках" in result["final_answer"]
+
+
+def test_pending_clarification_is_loaded_from_history(server, main_data):
+    from src import dialogue_store
+
+    conversation_id = "thread-clarify-db"
+    dialogue_store.append_turn(
+        server,
+        conversation_id=conversation_id,
+        auditor_id="MAIN-001",
+        turn_id="clarify-turn-1",
+        user_text="Покажи закрытые по ипотеке",
+        assistant_text="Речь о проверках или о пунктах?",
+        payload={
+            "clarification": {
+                "question": "Речь о проверках или о пунктах?",
+                "original_query": "Покажи закрытые по ипотеке",
+                "attempts": 0,
+            }
+        },
+    )
+
+    pending = dialogue_store.load_pending_clarification(
+        server, conversation_id, auditor_id="MAIN-001"
+    )
+    assert pending is not None
+    assert pending["question"] == "Речь о проверках или о пунктах?"
+
+    dialogue_store.append_turn(
+        server,
+        conversation_id=conversation_id,
+        auditor_id="MAIN-001",
+        turn_id="clarify-turn-2",
+        user_text="Проверки",
+        assistant_text="Всего: 13.",
+    )
+    assert (
+        dialogue_store.load_pending_clarification(
+            server, conversation_id, auditor_id="MAIN-001"
+        )
+        is None
+    )
