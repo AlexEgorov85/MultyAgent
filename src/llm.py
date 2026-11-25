@@ -162,6 +162,15 @@ class LLMClient(Protocol):
         language: str = "ru",
     ) -> "ClarificationResolution": ...
 
+    def explain_previous(
+        self,
+        *,
+        question: str,
+        context: str,
+        profile_text: str = "",
+        language: str = "ru",
+    ) -> str: ...
+
     def summarize(
         self,
         *,
@@ -690,6 +699,43 @@ class OpenAILLM:
             schema=ClarificationResolution,
             max_tokens=700,
         )
+
+    def explain_previous(
+        self,
+        *,
+        question: str,
+        context: str,
+        profile_text: str = "",
+        language: str = "ru",
+    ) -> str:
+        """Поясняет предыдущий ответ, не выполняя новый запрос."""
+        try:
+            response = self._request(
+                schema_name="explain_previous",
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": load_prompt("explain_previous"),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"{self._profile_block(profile_text)}"
+                            f"{self._context_block(context)}"
+                            f"Язык: {language}\n"
+                            f"Просьба пользователя: {question}"
+                        ),
+                    },
+                ],
+                max_tokens=500,
+                temperature=0,
+            )
+            return str(
+                response.choices[0].message.content or ""
+            ).strip()
+        except Exception:
+            return ""
 
     def summarize(
         self,

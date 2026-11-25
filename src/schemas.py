@@ -11,6 +11,7 @@ Route = Literal[
     "retrieval",
     "report",
     "investigation",
+    "meta",
     "memory",
     "smalltalk",
     "out_of_domain",
@@ -82,7 +83,14 @@ class ResolvedQuery(BaseModel):
 
     question: str = Field(min_length=1)
     is_followup: bool
+    is_meta: bool = False
     reason: str
+
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs):
+        schema = super().model_json_schema(*args, **kwargs)
+        schema["required"] = ["question", "is_followup", "is_meta", "reason"]
+        return schema
 
 
 MemoryKey = Literal["focus_theme", "default_format", "signature"]

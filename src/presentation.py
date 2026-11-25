@@ -25,6 +25,7 @@ import time
 from typing import Any
 
 from .i18n import t
+from .semantic.catalog import metric_label as _metric_label
 
 _AUDIT_COUNT_COLUMNS = {
     "audit_count",
@@ -311,10 +312,19 @@ def _present_analytics(state: dict[str, Any]) -> dict[str, Any]:
                 )
             if headline is not None:
                 label = _label(headline, state)
+                metric = str(content.get("metric") or "").strip()
+                metric_label = (
+                    _metric_label(metric) if _lang(state) != "en" else ""
+                )
+                if metric_label and use_answer and metric_label.lower() not in answer.lower():
+                    # Ответ вида «Всего: 28» не говорит, что посчитано.
+                    use_answer = False
+                if metric_label and label in ("Всего", "Count", "count"):
+                    label = metric_label
                 status_value = str(
                     row.get("status") or row.get("act_status") or ""
                 ).strip().lower()
-                if headline in _AUDIT_COUNT_COLUMNS:
+                if headline in _AUDIT_COUNT_COLUMNS or metric == "audit_count":
                     if status_value in ("завершена", "completed"):
                         label = "Завершённых проверок"
                 value = _fmt(row[headline], headline, state)

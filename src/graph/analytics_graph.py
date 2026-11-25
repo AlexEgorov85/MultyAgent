@@ -1195,6 +1195,11 @@ def build_analytics_graph(server, llm: LLMClient):
         }
         if state.get("clarification"):
             content["clarification"] = state["clarification"]
+        metric = str(
+            (state.get("plan") or {}).get("query_plan", {}).get("metric") or ""
+        ).strip()
+        if metric:
+            content["metric"] = metric
         if metrics.get("tool_calls_truncated"):
             content["tool_calls_truncated"] = True
             content["tool_calls_requested"] = int(

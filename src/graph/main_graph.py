@@ -198,6 +198,7 @@ def build_main_graph(
             "clarification_assumption": "",
             "clarification_history": clarification_history[-10:],
             "answered_clarification": False,
+            "meta_query": False,
             "guardrail": {},
             "answer_guardrail": {},
             "final_answer": "",
@@ -217,6 +218,7 @@ def build_main_graph(
         reason = ""
         assumption = ""
         resolved_answer = False
+        meta_query = False
         pending = dict(state.get("pending_clarification") or {})
 
         if pending:
@@ -294,7 +296,11 @@ def build_main_graph(
                         language=str(state.get("language") or "ru"),
                     )
                     candidate = " ".join(str(resolved.question or "").split()).strip()
-                    if resolved.is_followup and candidate and len(candidate) <= 500:
+                    if resolved.is_meta:
+                        meta_query = True
+                        text = question
+                        reason = str(resolved.reason or "")
+                    elif resolved.is_followup and candidate and len(candidate) <= 500:
                         text = candidate
                         reason = str(resolved.reason or "")
                 except Exception:
@@ -310,6 +316,8 @@ def build_main_graph(
             "pending_clarification": pending,
             "clarification_assumption": assumption,
             "answered_clarification": resolved_answer,
+            "meta_query": meta_query,
+            "route": "meta" if meta_query else state.get("route", ""),
         }
 
     def update_memory(state: MainState) -> dict[str, Any]:
@@ -638,6 +646,30 @@ def build_main_graph(
                 answer = text
         return {"final_answer": answer, "evidence": []}
 
+    def explain_previous(state: MainState) -> dict[str, Any]:
+        """Поясняет предыдущий ответ, не выполняя новый запрос."""
+        explainer = getattr(llm, "explain_previous", None)
+        answer = ""
+        if explainer is not None:
+            try:
+                answer = explainer(
+                    question=state.get("user_query", ""),
+                    context=state.get("dialogue_context", ""),
+                    profile_text=memory_store.profile_text(
+                        state.get("profile", {})
+                    ),
+                    language=str(state.get("language") or "ru"),
+                )
+            except Exception:
+                answer = ""
+        if not answer:
+            answer = _pick(
+                state,
+                "Уточните, какой фрагмент предыдущего ответа объяснить.",
+                "Please specify which part of the previous answer to explain.",
+            )
+        return {"final_answer": answer, "evidence": []}
+
     def guard_answer(state: MainState) -> dict[str, Any]:
         """Финальная проверка ответа и пометка ответов без evidence."""
         route = state.get("route")
@@ -748,6 +780,7 @@ def build_main_graph(
     builder.add_node("retrieval", retrieval_branch)
     builder.add_node("report", report_branch)
     builder.add_node("investigation", investigation_branch)
+    builder.add_node("explain_previous", explain_previous)
     builder.add_node("smalltalk", smalltalk)
     builder.add_node("refusal", refusal)
     builder.add_node("guard_answer", guard_answer)
@@ -758,8 +791,16 @@ def build_main_graph(
     builder.add_edge("load_memory", "resolve_query")
     builder.add_conditional_edges(
         "resolve_query",
-        lambda s: "guard_answer" if s.get("clarification") else "guard_request",
-        {"guard_answer": "guard_answer", "guard_request": "guard_request"},
+        lambda s: (
+            "guard_answer"
+            if s.get("clarification")
+            else ("explain_previous" if s.get("meta_query") else "guard_request")
+        ),
+        {
+            "guard_answer": "guard_answer",
+            "explain_previous": "explain_previous",
+            "guard_request": "guard_request",
+        },
     )
     builder.add_conditional_edges(
         "guard_request",
@@ -774,6 +815,7 @@ def build_main_graph(
             "retrieval": "retrieval",
             "report": "report",
             "investigation": "investigation",
+            "meta": "explain_previous",
             "memory": "update_memory",
             "smalltalk": "smalltalk",
             "out_of_domain": "refusal",
@@ -785,6 +827,7 @@ def build_main_graph(
         "retrieval",
         "report",
         "investigation",
+        "explain_previous",
         "update_memory",
         "smalltalk",
         "refusal",

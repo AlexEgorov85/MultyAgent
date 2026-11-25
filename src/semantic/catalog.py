@@ -394,6 +394,8 @@ def catalog_text() -> str:
         "- для одного года/темы/статуса используй filters;",
         "- «закрытая проверка» — status=завершена, «закрытый пункт» —",
         "  status=закрыт;",
+        "- если объект вопроса не назван, считай проверки (audit_count):",
+        "  это основная сущность аудита;",
         "- для специализации аудитора: field=specialization, op=contains;",
         "- для топа видов отклонений: dimensions=[title], limit=5.",
         "",
@@ -422,3 +424,24 @@ def catalog_text() -> str:
         "  metric=auditor_count, filters=[specialization=ипотека op=contains]",
     ]
     return "\n".join(lines)
+
+METRIC_LABELS: dict[str, str] = {
+    "audit_count": "Проверок",
+    "auditor_count": "Аудиторов",
+    "act_count": "Актов",
+    "item_count": "Пунктов",
+    "critical_item_count": "Критических пунктов",
+    "overdue_item_count": "Просроченных пунктов",
+    "repeat_item_count": "Повторных пунктов",
+    "no_script_item_count": "Пунктов без скриптов",
+    "script_count": "Скриптов",
+    "run_count": "Запусков скриптов",
+    "run_script_mismatch_count": "Запусков с расхождением",
+    "deviation_count": "Отклонений",
+}
+
+
+def metric_label(metric_id: str) -> str:
+    """Короткое название того, что посчитано, для ответа пользователю."""
+    return METRIC_LABELS.get(str(metric_id or "").strip(), "")
+

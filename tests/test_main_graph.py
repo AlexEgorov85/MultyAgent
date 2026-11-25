@@ -1003,3 +1003,75 @@ def test_same_clarification_is_not_repeated(server, main_data):
     assert analytics.calls == 1
     assert result["final_answer"] != pending["question"]
     assert "Допущение" in result["final_answer"]
+
+
+class MetaLLM(MainLLM):
+    """Роутер, который просит пояснить предыдущий ответ."""
+
+    def route(self, **kwargs):
+        return RouteDecision(route="meta", reason="пояснить ответ", confidence=0.9)
+
+    def explain_previous(self, **kwargs):
+        return "Речь о 28 завершённых проверках за последний год."
+
+
+def test_meta_route_explains_previous_answer(server, main_data):
+    graph = build_main_graph(server, MetaLLM())
+
+    result = _invoke(graph, "thread-meta", "Закрыто чего?")
+
+    assert result["route"] == "meta"
+    assert "проверках" in result["final_answer"]
+    assert result["presentation"]["kind"] == "text"
+
+
+class MetaResolveLLM(MainLLM):
+    """Резолвер распознаёт просьбу объяснить предыдущий ответ."""
+
+    def resolve_followup(self, **kwargs):
+        question = kwargs["question"]
+        if "закрыто чего" in question.lower():
+            return ResolvedQuery(
+                question=question,
+                is_followup=False,
+                is_meta=True,
+                reason="пояснить предыдущий ответ",
+            )
+        return ResolvedQuery(
+            question=question,
+            is_followup=False,
+            is_meta=False,
+            reason="",
+        )
+
+    def explain_previous(self, **kwargs):
+        return "Речь о 28 завершённых проверках за последний год."
+
+
+def test_meta_resolution_skips_analytics(server, main_data):
+    analytics = AnalyticsLLM()
+    graph = build_main_graph(
+        server, MetaResolveLLM(), analytics_llm=analytics
+    )
+
+    graph.invoke(
+        {
+            "messages": [
+                {"role": "user", "content": "Сколько закрыто за последний год?"}
+            ],
+            "auditor_id": "MAIN-001",
+            "conversation_id": "thread-meta-resolve",
+        },
+        config={"configurable": {"thread_id": "thread-meta-resolve"}},
+    )
+    result = graph.invoke(
+        {
+            "messages": [{"role": "user", "content": "Закрыто чего?"}],
+            "auditor_id": "MAIN-001",
+            "conversation_id": "thread-meta-resolve",
+        },
+        config={"configurable": {"thread_id": "thread-meta-resolve"}},
+    )
+
+    assert analytics.calls == 1
+    assert "проверках" in result["final_answer"]

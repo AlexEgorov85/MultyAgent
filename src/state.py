@@ -154,6 +154,7 @@ class MainState(TypedDict, total=False):
     clarification_assumption: str
     clarification_history: list[str]
     answered_clarification: bool
+    meta_query: bool
     analytics_mode: str
     profile: dict[str, str]
     memory_saved: bool

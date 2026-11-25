@@ -212,6 +212,7 @@ _TEXTS: dict[str, dict[str, str]] = {
     "route_retrieval": {"ru": "Поиск в базе знаний", "en": "Knowledge search"},
     "route_report": {"ru": "Формирование акта", "en": "Act generation"},
     "route_investigation": {"ru": "Причинный анализ", "en": "Root-cause analysis"},
+    "route_meta": {"ru": "Пояснение ответа", "en": "Answer explanation"},
     "route_memory": {"ru": "Память", "en": "Memory"},
     "route_smalltalk": {"ru": "Общение", "en": "Small talk"},
     "route_unsafe": {"ru": "Запрос отклонён", "en": "Request blocked"},
