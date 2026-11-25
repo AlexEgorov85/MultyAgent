@@ -31,6 +31,7 @@ class AnalyticsState(TypedDict, total=False):
     max_rows: int
     chart: dict[str, Any]
     chart_source_question: str
+    chart_source: str
     facts: list[dict[str, Any]]
     evidence: list[dict[str, Any]]
     tool_calls: list[dict[str, Any]]
@@ -149,6 +150,7 @@ class MainState(TypedDict, total=False):
     route_reason: str
     route_confidence: float
     route_error: bool
+    chart_source: str
     pending_clarification: dict[str, Any]
     clarification: dict[str, Any]
     clarification_assumption: str

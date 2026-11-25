@@ -286,6 +286,11 @@ def build_analytics_graph(server, llm: LLMClient):
         mode = str(message.content.get("analytics_mode") or "sql").strip().lower()
         if mode not in ANALYTICS_MODES:
             mode = "sql"
+        chart_source = str(
+            message.content.get("chart_source") or "current"
+        ).strip().lower()
+        if chart_source not in ("current", "previous"):
+            chart_source = "current"
         if mode == "drilldown":
             # Детализация возможна только по коду проверки. Если кода нет
             # ни в вопросе, ни в контексте — это обычный агрегат.
@@ -306,6 +311,7 @@ def build_analytics_graph(server, llm: LLMClient):
             "request": message.model_dump(),
             "question": question,
             "mode": mode,
+            "chart_source": chart_source,
             "asked_clarifications": asked_clarifications,
             "conversation_context": str(
                 message.content.get("conversation_context", "")
@@ -1281,12 +1287,26 @@ def build_analytics_graph(server, llm: LLMClient):
     builder.add_edge(START, "parse_acl")
     builder.add_conditional_edges(
         "parse_acl",
-        lambda s: s.get("mode", "sql") if s.get("status") == "ok" else "pack",
+        lambda s: (
+            "pack"
+            if s.get("status") != "ok"
+            else (
+                "chart"
+                if s.get("mode") == "chart"
+                and s.get("chart_source") == "previous"
+                else (
+                    "plan"
+                    if s.get("mode") == "chart"
+                    else s.get("mode", "sql")
+                )
+            )
+        ),
         {
             "sql": "plan",
+            "plan": "plan",
             "drilldown": "drilldown",
             "multi_tool": "multi_tool",
-            "chart": "plan",
+            "chart": "chart",
             "pack": "pack",
         },
     )

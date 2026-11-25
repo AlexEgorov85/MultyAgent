@@ -625,6 +625,7 @@ def test_chart_mode_uses_previous_analytics_payload(server, sample_graph_data):
                 "question": "Построй диаграмму на основании этих данных",
                 "auditor_id": "AUD-001",
                 "analytics_mode": "chart",
+                "chart_source": "previous",
             },
             conversation_id=conversation_id,
         )
@@ -646,6 +647,7 @@ def test_chart_mode_uses_previous_analytics_payload(server, sample_graph_data):
         assert result["status"] == "ok"
         assert result["strategy"] == "chart"
         assert "plan_chart" in llm.calls
+        assert "plan_query" not in llm.calls
         chart = result["acl_response"]["content"]["chart"]
         assert chart["type"] == "pie"
         assert chart["title"] == "Закрытые проверки по карманам"
@@ -687,6 +689,7 @@ def test_chart_hallucinated_data_is_rejected(server, sample_graph_data):
                 "question": "Построй диаграмму на основании этих данных",
                 "auditor_id": "AUD-001",
                 "analytics_mode": "chart",
+                "chart_source": "previous",
             },
             conversation_id=conversation_id,
         )

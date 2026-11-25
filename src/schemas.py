@@ -28,6 +28,19 @@ class RouteDecision(BaseModel):
     reason: str = Field(min_length=1)
     confidence: float = Field(ge=0, le=1)
     analytics_mode: AnalyticsMode = "sql"
+    chart_source: Literal["current", "previous"] = "current"
+
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs):
+        schema = super().model_json_schema(*args, **kwargs)
+        schema["required"] = [
+            "route",
+            "reason",
+            "confidence",
+            "analytics_mode",
+            "chart_source",
+        ]
+        return schema
 
 
 class ChartPoint(BaseModel):

@@ -193,6 +193,7 @@ def build_main_graph(
             "route_reason": "",
             "route_confidence": 0.0,
             "route_error": False,
+            "chart_source": "current",
             "pending_clarification": pending or {},
             "clarification": {},
             "clarification_assumption": "",
@@ -459,6 +460,7 @@ def build_main_graph(
             "route_reason": decision.reason,
             "route_confidence": decision.confidence,
             "analytics_mode": decision.analytics_mode,
+            "chart_source": decision.chart_source,
         }
 
     def _fallback_route(question: str) -> dict[str, Any]:
@@ -494,6 +496,9 @@ def build_main_graph(
         }
         if receiver == "analytics_agent":
             content["analytics_mode"] = str(state.get("analytics_mode") or "sql")
+            content["chart_source"] = str(
+                state.get("chart_source") or "current"
+            )
         if receiver == "report_agent":
             content["report_format"] = str(
                 profile.get("default_format") or "подробный"
