@@ -338,3 +338,52 @@ def test_act_evidence_satisfies_item_requirement():
     assert _missing_evidence(["sql_result", "item"], {"sql_result", "act"}) == []
     assert _missing_evidence(["sql_result", "item"], {"item"}) == ["sql_result"]
     assert _missing_evidence(["item"], {"act"}) == []
+
+
+def test_retrieval_evidence_outside_query_scope_is_removed(monkeypatch):
+    from src.graph import investigation_graph
+
+    monkeypatch.setattr(
+        investigation_graph.db_tools,
+        "act_scope_map",
+        lambda server, codes: {
+            "ACT-2025-DEPOSITS-01": {
+                "theme": "вклады",
+                "audit_code": "AUD-2025-DEPOSITS-01",
+            },
+            "ACT-2025-CONSUMER-07": {
+                "theme": "потребителькредитование",
+                "audit_code": "AUD-2025-CONSUMER-07",
+            },
+        },
+    )
+    retrieval = {
+        "answer": "…",
+        "sources": [
+            {"source_type": "акт", "source_id": "ACT-2025-DEPOSITS-01"},
+            {"source_type": "акт", "source_id": "ACT-2025-CONSUMER-07"},
+            {"source_type": "методика", "source_id": "оценка_риска.md"},
+        ],
+        "citations": [
+            "ACT-2025-DEPOSITS-01",
+            "ACT-2025-CONSUMER-07",
+            "оценка_риска.md",
+        ],
+        "evidence": [
+            {"type": "акт", "source_id": "ACT-2025-CONSUMER-07"},
+        ],
+    }
+
+    filtered = investigation_graph._filter_retrieval_by_scope(
+        None, retrieval, {"theme": "вклады"}
+    )
+
+    assert [item["source_id"] for item in filtered["sources"]] == [
+        "ACT-2025-DEPOSITS-01",
+        "оценка_риска.md",
+    ]
+    assert filtered["citations"] == [
+        "ACT-2025-DEPOSITS-01",
+        "оценка_риска.md",
+    ]
+    assert filtered["evidence"] == []

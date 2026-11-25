@@ -197,3 +197,25 @@ def test_tool_call_parses_arguments_from_name():
         "audit_code": "AUD-2025-DEPOSITS-06",
         "item_type": "проблема",
     }
+
+
+def test_display_sql_substitutes_template_parameters():
+    from src.tools.db import _display_sql
+
+    sql = (
+        "SELECT count(*) FROM audit.audits "
+        "WHERE start_date >= MAKE_DATE(%(year)s, 1, 1)"
+    )
+
+    displayed = _display_sql(sql, {"year": 2026})
+
+    assert "2026" in displayed
+    assert "%(year)s" not in displayed
+
+def test_schema_documents_date_arithmetic():
+    from src.tools.db import get_schema
+
+    schema = get_schema()
+
+    assert "date - date" in schema
+    assert "EXTRACT(EPOCH FROM closed_at - deadline)" in schema

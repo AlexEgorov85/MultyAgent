@@ -94,6 +94,15 @@ Domain terms:
 - «критическое отклонение» — audit.deviations.severity = 'критический'.
 - Не использовать CURRENT_DATE: дата среза задана в audit.dataset_metadata.as_of_date
   и доступна через audit.as_of_date().
+
+PostgreSQL:
+- `date - date` возвращает целое число дней. `EXTRACT(EPOCH FROM ...)`
+  применим к timestamp/interval, но не к целому числу: для разницы дат
+  пиши `closed_at - deadline`, а не `EXTRACT(EPOCH FROM closed_at - deadline)`.
+- `timestamp - timestamp` возвращает interval; дни —
+  `EXTRACT(EPOCH FROM (closed_at - deadline)) / 86400`.
+- `percentile_cont` возвращает double precision; при необходимости
+  округляй через `round(...::numeric, 1)`.
 """.strip()
 
 
@@ -196,6 +205,30 @@ def get_act_items(
     )
 
 
+@telemetry.timed_tool("act_scope_map")
+def act_scope_map(server, act_numbers: list[str]) -> dict[str, dict[str, str]]:
+    """Тема и код проверки для акта — для проверки релевантности evidence."""
+    codes = [str(item) for item in act_numbers if str(item).strip()]
+    if not codes:
+        return {}
+    rows = _select(
+        server,
+        "SELECT ac.act_number, lower(p.theme_code) AS theme, a.audit_code "
+        "FROM audit.acts ac "
+        "JOIN audit.audits a ON a.audit_id = ac.audit_id "
+        "JOIN audit.audit_pockets p ON p.pocket_id = a.pocket_id "
+        "WHERE ac.act_number = ANY(%(codes)s)",
+        {"codes": codes},
+    )
+    return {
+        row["act_number"]: {
+            "theme": row["theme"] or "",
+            "audit_code": row["audit_code"] or "",
+        }
+        for row in rows
+    }
+
+
 @telemetry.timed_tool("search_acts")
 def search_acts(server, query: str, limit: int = 5) -> list[dict[str, Any]]:
     """Полнотекстовый поиск по актам (russian) с релевантными фрагментами."""
@@ -216,6 +249,22 @@ def search_acts(server, query: str, limit: int = 5) -> list[dict[str, Any]]:
 
 class ExecutionError(RuntimeError):
     """Запрос не выполнен или вернул некорректный результат."""
+
+
+def _display_sql(sql: str, params: Mapping[str, Any] | None) -> str:
+    """Подставляет значения в шаблон только для показа, не для выполнения."""
+    text = sql
+    for key, value in (params or {}).items():
+        if isinstance(value, bool):
+            literal = "TRUE" if value else "FALSE"
+        elif isinstance(value, (int, float)):
+            literal = str(value)
+        elif value is None:
+            literal = "NULL"
+        else:
+            literal = "'" + str(value).replace("'", "''") + "'"
+        text = text.replace(f"%({key})s", literal)
+    return text
 
 
 def _execute(
@@ -244,7 +293,7 @@ def _execute(
     truncated = limit_added and len(rows) >= max_rows
     rows = rows[:max_rows]
     return {
-        "sql": safe_sql,
+        "sql": _display_sql(safe_sql, params),
         "columns": columns,
         "rows": [dict(zip(columns, row)) for row in rows],
         "row_count": len(rows),

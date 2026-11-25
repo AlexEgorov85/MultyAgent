@@ -66,3 +66,12 @@ def test_rounded_percentage_is_grounded():
     columns = ["critical_share"]
 
     assert _summary_numbers_supported("Доля: 7,5%.", rows, columns)
+
+def test_decimal_percentage_is_grounded():
+    from decimal import Decimal
+
+    rows = [{"critical_share": Decimal("0.074626")}]
+    columns = ["critical_share"]
+
+    assert _summary_numbers_supported("Доля: 7,5%.", rows, columns)
+    assert _summary_numbers_supported("Доля: 0,0746.", rows, columns)

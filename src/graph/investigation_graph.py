@@ -103,6 +103,75 @@ def _missing_evidence(
     return missing
 
 
+def _filter_retrieval_by_scope(
+    server,
+    retrieval: dict[str, Any],
+    scope: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Убирает акты, которые не попадают в ограничения вопроса.
+
+    Scope берётся из проверенного QueryPlan Analytics (тема, код проверки),
+    а не из отдельного поля плана расследования.
+    """
+    if not scope or not isinstance(retrieval, dict):
+        return retrieval
+
+    def is_act(value: Any) -> bool:
+        return str(value or "").strip().lower() in ("act", "акт")
+
+    sources = list(retrieval.get("sources") or [])
+    act_numbers = [
+        str(item.get("source_id") or "")
+        for item in sources
+        if is_act(item.get("source_type"))
+    ]
+    if not act_numbers:
+        return retrieval
+    try:
+        act_scope = db_tools.act_scope_map(server, act_numbers)
+    except Exception:
+        return retrieval
+    if not act_scope:
+        return retrieval
+
+    def matches(code: str) -> bool:
+        data = act_scope.get(code)
+        if not data:
+            # Неизвестный акт не доказывает нерелевантность.
+            return True
+        for field, value in scope.items():
+            if field not in data:
+                continue
+            if str(data[field]).strip().lower() != str(value).strip().lower():
+                return False
+        return True
+
+    filtered_sources = [
+        item
+        for item in sources
+        if not is_act(item.get("source_type"))
+        or matches(str(item.get("source_id") or ""))
+    ]
+    kept_ids = {str(item.get("source_id") or "") for item in filtered_sources}
+    citations = [
+        item
+        for item in retrieval.get("citations") or []
+        if str(item) in kept_ids or str(item) not in act_scope
+    ]
+    evidence = [
+        item
+        for item in retrieval.get("evidence") or []
+        if str(item.get("source_id") or "") not in act_scope
+        or str(item.get("source_id") or "") in kept_ids
+    ]
+    return {
+        **retrieval,
+        "sources": filtered_sources,
+        "citations": citations,
+        "evidence": evidence,
+    }
+
+
 def build_investigation_graph(
     server,
     llm: LLMClient,
@@ -245,6 +314,9 @@ def build_investigation_graph(
         )
         analytics = a_resp.get("content", {}) if a_resp.get("performative") == "inform" else {}
         retrieval = r_resp.get("content", {}) if r_resp.get("performative") == "inform" else {}
+        retrieval = _filter_retrieval_by_scope(
+            server, retrieval, analytics.get("scope")
+        )
         evidence.extend(analytics.get("evidence", []))
         evidence.extend(retrieval.get("evidence", []))
 
@@ -324,6 +396,9 @@ def build_investigation_graph(
             )
             if resp.get("performative") == "inform":
                 retrieval = resp.get("content", {})
+                retrieval = _filter_retrieval_by_scope(
+                    server, retrieval, analytics.get("scope")
+                )
                 evidence.extend(retrieval.get("evidence", []))
 
         required = refined.required_evidence or plan_model.required_evidence

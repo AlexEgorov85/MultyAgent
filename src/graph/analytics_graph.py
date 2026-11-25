@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from decimal import Decimal
 from typing import Any, Literal
 
 import psycopg
@@ -125,7 +126,7 @@ def known_themes(server) -> list[str]:
 
 
 def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return isinstance(value, (int, float, Decimal)) and not isinstance(value, bool)
 
 
 def _summary_allowed_numbers(
@@ -1278,6 +1279,16 @@ def build_analytics_graph(server, llm: LLMClient):
         ).strip()
         if metric:
             content["metric"] = metric
+        query_plan = (state.get("plan") or {}).get("query_plan") or {}
+        scope: dict[str, Any] = {}
+        for item in query_plan.get("filters") or []:
+            field = str(item.get("field") or "")
+            # Только сущностно-независимые ограничения: они одинаково
+            # применимы к проверкам, актам и пунктам.
+            if field in ("theme", "audit_code"):
+                scope[field] = item.get("value")
+        if scope:
+            content["scope"] = scope
         if metrics.get("tool_calls_truncated"):
             content["tool_calls_truncated"] = True
             content["tool_calls_requested"] = int(

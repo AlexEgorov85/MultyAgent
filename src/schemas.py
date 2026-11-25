@@ -384,6 +384,17 @@ class InvestigationPlan(BaseModel):
     )
     reason: str = ""
 
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs):
+        schema = super().model_json_schema(*args, **kwargs)
+        schema["required"] = [
+            "analytics_question",
+            "retrieval_question",
+            "required_evidence",
+            "reason",
+        ]
+        return schema
+
 
 class InvestigationAnswer(BaseModel):
     """Итог расследования с явным признаком причинного утверждения."""
