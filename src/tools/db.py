@@ -98,7 +98,10 @@ Domain terms:
 PostgreSQL:
 - `date - date` возвращает целое число дней. `EXTRACT(EPOCH FROM ...)`
   применим к timestamp/interval, но не к целому числу: для разницы дат
-  пиши `closed_at - deadline`, а не `EXTRACT(EPOCH FROM closed_at - deadline)`.
+  пиши `closed_at - deadline`, а не `EXTRACT(EPOCH FROM closed_at - deadline)`
+  и не `EXTRACT(DAY FROM closed_at - deadline)`.
+- `audit.act_items.deadline` и `audit.act_items.closed_at` — тип `date`;
+  `audit.audits.start_date` и `audit.audits.end_date` — тоже `date`.
 - `timestamp - timestamp` возвращает interval; дни —
   `EXTRACT(EPOCH FROM (closed_at - deadline)) / 86400`.
 - `percentile_cont` возвращает double precision; при необходимости

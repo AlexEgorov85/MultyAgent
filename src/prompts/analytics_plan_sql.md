@@ -11,4 +11,6 @@ version: 5
 
 Для медианы используй `percentile_cont(0.5) WITHIN GROUP (ORDER BY ...)`, а не `row_number`, `avg` или ручной выбор средних строк.
 
+`deadline` и `closed_at` — тип `date`: `closed_at - deadline` уже даёт целое число дней. Не оборачивай эту разность в `EXTRACT(EPOCH ...)` или `EXTRACT(DAY ...)`.
+
 Alias колонок пиши по-русски: `медиана_дней`, `доля_критических`, а не `median_days` или `critical_share`.

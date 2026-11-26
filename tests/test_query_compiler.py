@@ -175,3 +175,20 @@ def test_catalog_contains_all_metrics_and_examples():
         assert get_metric(metric_id).title
     assert "не придумывай SQL" in text
     assert "dimensions" in text
+
+def test_repeated_field_values_are_alternatives_not_intersection():
+    plan = QueryPlan(
+        metric="audit_count",
+        dimensions=["year"],
+        filters=[
+            QueryFilter(field="year", value=2025),
+            QueryFilter(field="year", value=2026),
+            QueryFilter(field="theme", value="вклады"),
+        ],
+    )
+
+    sql = compile_query_plan(plan)
+
+    assert "p.pocket_year = 2025 OR p.pocket_year = 2026" in sql
+    assert "p.pocket_year = 2025) AND (p.pocket_year = 2026" not in sql
+    assert "p.theme_code = 'вклады'" in sql

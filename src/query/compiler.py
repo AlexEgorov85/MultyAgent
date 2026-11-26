@@ -126,8 +126,21 @@ def compile_query_plan(plan: QueryPlan) -> str:
         dimensions.append((field_name, expression))
 
     where_parts = list(spec.extra_where)
+    grouped: dict[str, list[QueryFilter]] = {}
     for query_filter in plan.filters:
-        where_parts.append(_condition(spec, query_filter))
+        field_name = query_filter.field.strip()
+        grouped.setdefault(field_name, []).append(query_filter)
+    for field_filters in grouped.values():
+        if len(field_filters) == 1:
+            where_parts.append(_condition(spec, field_filters[0]))
+            continue
+        # Несколько значений одного поля — это выбор одного из них,
+        # а не одновременное выполнение всех условий. AND здесь даёт
+        # пустой результат («год=2025 и год=2026»).
+        conditions = [
+            _condition(spec, query_filter) for query_filter in field_filters
+        ]
+        where_parts.append("(" + " OR ".join(conditions) + ")")
 
     select_parts = [f"{expression} AS {name}" for name, expression in dimensions]
     select_parts.append(f"{spec.count_expr} AS cnt")
