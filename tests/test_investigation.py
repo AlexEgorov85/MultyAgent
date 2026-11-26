@@ -174,13 +174,29 @@ def investigation_data(server, tmp_path):
         conn.execute("DELETE FROM audit.auditors WHERE auditor_id = 'INV-001'")
 
 
-def _plan(retrieval_question="просроченная оценка залога"):
+def _plan(retrieval_focus="causes"):
     return InvestigationPlan(
-        analytics_question="Сколько отклонений выявлено в ипотеке в 2026 году?",
-        retrieval_question=retrieval_question,
+        analytics_focus="compare",
+        retrieval_focus=retrieval_focus,
         required_evidence=["sql_result", "item"],
         reason="нужны числа и подтверждение",
     )
+
+
+def _fail_first_search(monkeypatch, times: int = 1):
+    """Первые ``times`` поисков не находят чанков — проверяем второй раунд."""
+    from src.graph import retrieval_graph
+
+    real_search = retrieval_graph.search
+    calls = {"count": 0}
+
+    def flaky(server, query, **kwargs):
+        calls["count"] += 1
+        if calls["count"] <= times:
+            return {"chunks": [], "mode": "fts"}
+        return real_search(server, query, **kwargs)
+
+    monkeypatch.setattr(retrieval_graph, "search", flaky)
 
 
 def test_two_agents_in_one_round(server, investigation_data):
@@ -264,16 +280,17 @@ def test_acl_journal_persists_round_correlation(
     assert content["metrics"]["acl_log_path"] == str(acl_log_path)
 
 
-def test_second_round_when_evidence_missing(server, investigation_data):
+def test_second_round_when_evidence_missing(server, investigation_data, monkeypatch):
+    _fail_first_search(monkeypatch)
     coordinator = CoordinatorLLM(
-        plans=[_plan(retrieval_question="квантовая физика")],
+        plans=[_plan(retrieval_focus="causes")],
         answers=[
             InvestigationAnswer(text="Причина подтверждена.", causal_claim=True)
         ],
         refined=[
             InvestigationPlan(
-                analytics_question="Сколько отклонений выявлено в ипотеке в 2026 году?",
-                retrieval_question="просроченная оценка залога",
+                analytics_focus="compare",
+                retrieval_focus="causes",
                 required_evidence=["sql_result", "item"],
                 reason="уточнение retrieval",
             )
@@ -299,16 +316,17 @@ def test_second_round_when_evidence_missing(server, investigation_data):
     assert len(result["acl_log"]) == 6
 
 
-def test_causal_claim_is_rejected_without_evidence(server, investigation_data):
+def test_causal_claim_is_rejected_without_evidence(server, investigation_data, monkeypatch):
+    _fail_first_search(monkeypatch, times=2)
     coordinator = CoordinatorLLM(
-        plans=[_plan(retrieval_question="квантовая физика")],
+        plans=[_plan(retrieval_focus="causes")],
         answers=[
             InvestigationAnswer(text="Причина установлена.", causal_claim=True)
         ],
         refined=[
             InvestigationPlan(
-                analytics_question="Сколько отклонений выявлено в ипотеке в 2026 году?",
-                retrieval_question="теория струн",
+                analytics_focus="compare",
+                retrieval_focus="causes",
                 required_evidence=["sql_result", "item"],
                 reason="ничего не найдено",
             )

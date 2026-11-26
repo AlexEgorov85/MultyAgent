@@ -213,3 +213,23 @@ def test_query_plan_tolerates_llm_shape_noise():
     assert plan.limit == 200
     assert plan.template_key == ""
     assert plan.reason == ""
+
+def test_plan_gaps_tolerates_range_year_and_string_issues():
+    from src.query.plan import PlanGaps
+
+    gaps = PlanGaps.model_validate(
+        {
+            "metric": "",
+            "clarification": "",
+            "missing_dimensions": ["year"],
+            "missing_filters": [],
+            "period": "year",
+            "year": "2025, 2026",
+            "last_years": "",
+            "issues": "нужно сравнить два года",
+        }
+    )
+
+    assert gaps.year is None
+    assert gaps.last_years is None
+    assert gaps.issues == ["нужно сравнить два года"]

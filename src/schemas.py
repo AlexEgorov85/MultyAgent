@@ -375,10 +375,14 @@ class ReportDraft(BaseModel):
 
 
 class InvestigationPlan(BaseModel):
-    """План расследования: подвопросы и обязательные доказательства."""
+    """План расследования: фокус подвопросов и обязательные доказательства.
 
-    analytics_question: str = Field(min_length=1)
-    retrieval_question: str = Field(min_length=1)
+    Фокус — это код, а не текст. Тема, объект и метрика остаются в исходном
+    вопросе, поэтому планировщик не может подменить их формулировкой.
+    """
+
+    analytics_focus: Literal["compare", "aggregate", "none"] = "aggregate"
+    retrieval_focus: Literal["causes", "confirmations", "none"] = "causes"
     required_evidence: list[str] = Field(
         default_factory=lambda: ["sql_result", "item"]
     )
@@ -388,8 +392,8 @@ class InvestigationPlan(BaseModel):
     def model_json_schema(cls, *args, **kwargs):
         schema = super().model_json_schema(*args, **kwargs)
         schema["required"] = [
-            "analytics_question",
-            "retrieval_question",
+            "analytics_focus",
+            "retrieval_focus",
             "required_evidence",
             "reason",
         ]

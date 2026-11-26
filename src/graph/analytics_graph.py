@@ -334,6 +334,7 @@ def build_analytics_graph(server, llm: LLMClient):
             "dialogue_slots": dict(message.content.get("dialogue_slots") or {}),
             "auditor_id": str(message.content.get("auditor_id", "")),
             "profile_text": str(message.content.get("profile_text", "")),
+            "analysis_focus": str(message.content.get("analysis_focus", "")),
             "language": str(message.content.get("language", "ru")),
             "conversation_id": message.conversation_id,
             "retries": 0,
@@ -345,6 +346,7 @@ def build_analytics_graph(server, llm: LLMClient):
         """Строит план запроса: Query IR/шаблон или свободный SQL."""
         templates = db_tools.list_script_templates(server)
         question = state["question"]
+        focus = str(state.get("analysis_focus") or "")
         latest_year = db_tools.latest_pocket_year(server)
 
         def template_by_key(key: str) -> dict[str, Any]:
@@ -401,6 +403,7 @@ def build_analytics_graph(server, llm: LLMClient):
                     context=state.get("conversation_context", ""),
                     profile_text=state.get("profile_text", ""),
                     templates=templates,
+                    focus=focus,
                 )
             except Exception:
                 query_plan = None
@@ -492,6 +495,7 @@ def build_analytics_graph(server, llm: LLMClient):
                 schema_text=db_tools.get_schema(),
                 context=state.get("conversation_context", ""),
                 profile_text=state.get("profile_text", ""),
+                focus=focus,
             )
         except Exception as exc:
             detail = str(exc).strip() or repr(exc)

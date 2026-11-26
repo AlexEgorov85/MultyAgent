@@ -197,6 +197,7 @@ def build_investigation_graph(
         language: str = "ru",
         conversation_context: str = "",
         profile_text: str = "",
+        focus: str = "",
     ):
         request = make_acl_message(
             performative="request",
@@ -204,6 +205,7 @@ def build_investigation_graph(
             receiver=receiver,
             content={
                 "question": question,
+                "analysis_focus": focus,
                 "conversation_context": conversation_context,
                 # Не подставляем чужой профиль: пустой id означает «нет
                 # аудитора», а не «аудитор AUD-001».
@@ -261,7 +263,7 @@ def build_investigation_graph(
         }
 
     def plan(state: InvestigationState) -> dict[str, Any]:
-        """Декомпозирует вопрос на analytics_question и retrieval_question."""
+        """Определяет фокус подвопросов, не переформулируя исходный вопрос."""
         try:
             plan_model = llm.plan_investigation(
                 question=state["question"],
@@ -286,23 +288,25 @@ def build_investigation_graph(
             analytics_graph,
             sender="investigation_coordinator",
             receiver="analytics_agent",
-            question=plan_model.analytics_question,
+            question=state["question"],
             conversation_id=state["conversation_id"],
             auditor_id=state.get("auditor_id", ""),
             language=state.get("language", "ru"),
             conversation_context=state.get("conversation_context", ""),
             profile_text=state.get("profile_text", ""),
+            focus=plan_model.analytics_focus,
         )
         r_req, r_resp = _call(
             retrieval_graph,
             sender="investigation_coordinator",
             receiver="retrieval_agent",
-            question=plan_model.retrieval_question,
+            question=state["question"],
             conversation_id=state["conversation_id"],
             auditor_id=state.get("auditor_id", ""),
             language=state.get("language", "ru"),
             conversation_context=state.get("conversation_context", ""),
             profile_text=state.get("profile_text", ""),
+            focus=plan_model.retrieval_focus,
         )
         log.extend(
             [
@@ -359,12 +363,13 @@ def build_investigation_graph(
                 analytics_graph,
                 sender="investigation_coordinator",
                 receiver="analytics_agent",
-                question=refined.analytics_question,
+                question=state["question"],
                 conversation_id=state["conversation_id"],
                 auditor_id=state.get("auditor_id", ""),
                 language=state.get("language", "ru"),
                 conversation_context=state.get("conversation_context", ""),
                 profile_text=state.get("profile_text", ""),
+                focus=refined.analytics_focus,
             )
             log.extend(
                 [
@@ -381,12 +386,13 @@ def build_investigation_graph(
                 retrieval_graph,
                 sender="investigation_coordinator",
                 receiver="retrieval_agent",
-                question=refined.retrieval_question,
+                question=state["question"],
                 conversation_id=state["conversation_id"],
                 auditor_id=state.get("auditor_id", ""),
                 language=state.get("language", "ru"),
                 conversation_context=state.get("conversation_context", ""),
                 profile_text=state.get("profile_text", ""),
+                focus=refined.retrieval_focus,
             )
             log.extend(
                 [

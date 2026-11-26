@@ -91,6 +91,7 @@ class LLMClient(Protocol):
         context: str = "",
         profile_text: str = "",
         templates: list[dict[str, Any]] | None = None,
+        focus: str = "",
     ) -> QueryPlan: ...
 
     def review_query_plan(
@@ -122,6 +123,7 @@ class LLMClient(Protocol):
         schema_text: str,
         context: str = "",
         profile_text: str = "",
+        focus: str = "",
     ) -> SQLPlan: ...
 
     def repair_sql(
@@ -207,6 +209,7 @@ class LLMClient(Protocol):
         chunks: list[dict[str, Any]],
         context: str = "",
         profile_text: str = "",
+        focus: str = "",
     ) -> "RetrievalAnswer": ...
 
     def critique_answer(
@@ -526,6 +529,7 @@ class OpenAILLM:
         context: str = "",
         profile_text: str = "",
         templates: list[dict[str, Any]] | None = None,
+        focus: str = "",
     ) -> QueryPlan:
         """Строит QueryPlan по семантическому каталогу."""
         template_lines = "\n".join(
@@ -538,7 +542,8 @@ class OpenAILLM:
             user=(
                 f"{self._profile_block(profile_text)}"
                 f"{self._context_block(context)}"
-                f"Вопрос: {question}\n\n"
+                f"Вопрос: {question}\n"
+                f"Фокус: {focus or '(нет)'}\n\n"
                 f"Каталог метрик и измерений:\n{catalog_text}\n\n"
                 f"Готовые шаблоны:\n{template_lines or '(нет)'}\n\n"
                 "Верни QueryPlan: metric, dimensions, filters, order_by, limit, "
@@ -610,6 +615,7 @@ class OpenAILLM:
         schema_text: str,
         context: str = "",
         profile_text: str = "",
+        focus: str = "",
     ) -> SQLPlan:
         """Строит свободный SQL-план, если QueryPlan не поддержан."""
         return self._parse(
@@ -617,7 +623,8 @@ class OpenAILLM:
             user=(
                 f"{self._profile_block(profile_text)}"
                 f"{self._context_block(context)}"
-                f"Вопрос: {question}\n\n"
+                f"Вопрос: {question}\n"
+                f"Фокус: {focus or '(нет)'}\n\n"
                 f"Схема:\n{schema_text}\n\n"
                 "Верни SQLPlan со strategy=generated, sql и reason. "
                 "Не выбирай готовый шаблон: шаблоны подбирает код."
@@ -824,6 +831,7 @@ class OpenAILLM:
         chunks: list[dict[str, Any]],
         context: str = "",
         profile_text: str = "",
+        focus: str = "",
     ) -> RetrievalAnswer:
         """Отвечает по найденным чанкам с цитатами."""
         return self._parse(
@@ -835,7 +843,9 @@ class OpenAILLM:
             user=(
                 f"{self._profile_block(profile_text)}"
                 f"{self._context_block(context)}"
-                f"Вопрос: {question}\n\nФрагменты:\n{self._chunks_text(chunks)}\n\n"
+                f"Вопрос: {question}\n"
+                f"Фокус поиска: {focus or '(нет)'}\n\n"
+                f"Фрагменты:\n{self._chunks_text(chunks)}\n\n"
                 "Верни RetrievalAnswer: text, citations (список source_id)."
             ),
             schema=RetrievalAnswer,
@@ -1037,8 +1047,8 @@ class OpenAILLM:
                 f"{self._profile_block(profile_text)}"
                 f"{self._context_block(context)}"
                 f"Вопрос: {question}\nСхема:\n{schema_text}\n\n"
-                "Верни InvestigationPlan: analytics_question, retrieval_question, "
-                "required_evidence, reason."
+                "Верни InvestigationPlan: analytics_focus, retrieval_focus, "
+                "required_evidence, reason. Не переформулируй вопрос."
             ),
             schema=InvestigationPlan,
         )

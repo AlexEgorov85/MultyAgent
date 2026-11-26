@@ -73,6 +73,7 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
             ),
             "auditor_id": str(message.content.get("auditor_id", "")),
             "profile_text": str(message.content.get("profile_text", "")),
+            "analysis_focus": str(message.content.get("analysis_focus", "")),
             "language": str(message.content.get("language", "ru")),
             "conversation_id": message.conversation_id,
             "iterations": 0,
@@ -118,6 +119,7 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
                 chunks=state["chunks"],
                 context=state.get("conversation_context", ""),
                 profile_text=state.get("profile_text", ""),
+                focus=str(state.get("analysis_focus") or ""),
             )
         except Exception as exc:
             return {

@@ -95,6 +95,27 @@ class PlanGaps(BaseModel):
     last_years: int | None = None
     issues: list[str] = Field(default_factory=list)
 
+    @field_validator("missing_dimensions", "issues", mode="before")
+    @classmethod
+    def _missing_list(cls, value: Any) -> Any:
+        """Модель иногда присылает строку вместо списка."""
+        if value is None:
+            return []
+        return [value] if isinstance(value, str) else value
+
+    @field_validator("year", "last_years", mode="before")
+    @classmethod
+    def _optional_int(cls, value: Any) -> Any:
+        """Одно число — ок; диапазон или пустая строка — не добавляем год."""
+        if value in (None, ""):
+            return None
+        if isinstance(value, bool):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
     @classmethod
     def model_json_schema(cls, *args, **kwargs):
         schema = super().model_json_schema(*args, **kwargs)
