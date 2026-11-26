@@ -1048,7 +1048,7 @@ class OpenAILLM:
                 f"{self._context_block(context)}"
                 f"Вопрос: {question}\nСхема:\n{schema_text}\n\n"
                 "Верни InvestigationPlan: analytics_focus, retrieval_focus, "
-                "required_evidence, reason. Не переформулируй вопрос."
+                "required_evidence. Не переформулируй вопрос."
             ),
             schema=InvestigationPlan,
         )

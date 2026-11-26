@@ -179,7 +179,6 @@ def _plan(retrieval_focus="causes"):
         analytics_focus="compare",
         retrieval_focus=retrieval_focus,
         required_evidence=["sql_result", "item"],
-        reason="нужны числа и подтверждение",
     )
 
 
@@ -292,7 +291,6 @@ def test_second_round_when_evidence_missing(server, investigation_data, monkeypa
                 analytics_focus="compare",
                 retrieval_focus="causes",
                 required_evidence=["sql_result", "item"],
-                reason="уточнение retrieval",
             )
         ],
     )
@@ -328,7 +326,6 @@ def test_causal_claim_is_rejected_without_evidence(server, investigation_data, m
                 analytics_focus="compare",
                 retrieval_focus="causes",
                 required_evidence=["sql_result", "item"],
-                reason="ничего не найдено",
             )
         ],
     )

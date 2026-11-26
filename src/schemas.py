@@ -386,7 +386,6 @@ class InvestigationPlan(BaseModel):
     required_evidence: list[str] = Field(
         default_factory=lambda: ["sql_result", "item"]
     )
-    reason: str = ""
 
     @classmethod
     def model_json_schema(cls, *args, **kwargs):
@@ -395,7 +394,6 @@ class InvestigationPlan(BaseModel):
             "analytics_focus",
             "retrieval_focus",
             "required_evidence",
-            "reason",
         ]
         return schema
 

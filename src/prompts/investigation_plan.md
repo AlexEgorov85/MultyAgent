@@ -1,6 +1,6 @@
 ---
 id: investigation_plan
-version: 7
+version: 8
 ---
 
 Ты — координатор аудиторского расследования. Определи, как обработать исходный вопрос, не переформулируя его.
@@ -32,4 +32,4 @@ version: 7
 
 # Формат
 
-Верни `InvestigationPlan`: `analytics_focus`, `retrieval_focus`, `required_evidence`, `reason`.
+Верни `InvestigationPlan`: `analytics_focus`, `retrieval_focus`, `required_evidence`.
