@@ -46,7 +46,7 @@ def test_count_answer_uses_human_label_and_hides_aliases():
     presentation = build_presentation(state)
 
     assert presentation["kind"] == "count"
-    assert presentation["text"] == "Завершённых проверок: 5."
+    assert presentation["text"] == "Проверок: 5."
     assert "pocket_year" not in presentation["text"]
     assert "ипотека" not in presentation["text"]
 
@@ -288,11 +288,13 @@ def test_metric_label_names_what_was_measured():
                 "rows": [{"cnt": 922.79}],
                 "columns": ["cnt"],
                 "answer": "Всего: 922.79",
+                "answer_source": "template",
             },
         }
     )
 
     presentation = build_presentation(state)
 
+    assert presentation["kind"] == "count"
     assert "Разрыв с порогом" in presentation["text"]
 

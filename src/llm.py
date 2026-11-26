@@ -330,10 +330,22 @@ class OpenAILLM:
                 return response
             except Exception as exc:
                 last_error = exc
-                text = str(exc)
-                if "429" in text and attempt < 2:
+                status = getattr(exc, "status_code", None)
+                if status is None:
+                    response = getattr(exc, "response", None)
+                    status = getattr(response, "status_code", None)
+                if status == 429 and attempt < 2:
                     telemetry.record_llm_retry()
-                    time.sleep(25)
+                    retry_after = None
+                    response = getattr(exc, "response", None)
+                    headers = getattr(response, "headers", None)
+                    if headers:
+                        try:
+                            retry_after = float(headers.get("retry-after", ""))
+                        except (TypeError, ValueError):
+                            retry_after = None
+                    delay = retry_after if retry_after is not None else 2 ** attempt
+                    time.sleep(max(0.0, min(delay, 60.0)))
                     continue
                 telemetry.record_llm_error(
                     model=self.model,

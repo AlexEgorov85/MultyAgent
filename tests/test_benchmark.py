@@ -431,3 +431,8 @@ def test_summary_counts_sql_queries():
     ]
     summary = summarize(rows)
     assert summary["sql_queries_total"] == 3
+
+def test_number_matcher_accepts_comma_decimals():
+    assert answer_has_number("Доля составила 7,46%.", 7.46)
+    assert answer_has_number("Доля составила 7.46%.", 7.46)
+    assert not answer_has_number("Доля составила 17,46%.", 7.46)

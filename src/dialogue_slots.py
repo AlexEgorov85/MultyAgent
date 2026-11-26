@@ -86,7 +86,11 @@ def merge_slots(
     return merged
 
 
-def augment_query(query: str, source_text: str) -> str:
+def augment_query(
+    query: str,
+    source_text: str,
+    language: str = "ru",
+) -> str:
     """Возвращает год и код проверки, которые резолвер потерял.
 
     Дописываются только однозначные токены из текущей реплики
@@ -98,16 +102,24 @@ def augment_query(query: str, source_text: str) -> str:
     explicit = extract_slots(source_text)
     text = " ".join((query or "").split())
     lower = _normalise(text)
+    english = str(language or "").lower() == "en"
     additions: list[str] = []
 
     if explicit.year is not None and str(explicit.year) not in lower:
-        additions.append(f"год {explicit.year}")
+        additions.append(
+            f"year {explicit.year}" if english else f"год {explicit.year}"
+        )
     if explicit.audit_code and explicit.audit_code.lower() not in lower:
-        additions.append(f"проверка {explicit.audit_code}")
+        additions.append(
+            f"audit {explicit.audit_code}"
+            if english
+            else f"проверка {explicit.audit_code}"
+        )
 
     if not additions:
         return text
-    suffix = "Уточнение: " + ", ".join(additions) + "."
+    prefix = "Clarification: " if english else "Уточнение: "
+    suffix = prefix + ", ".join(additions) + "."
     return f"{text} {suffix}".strip()
 
 

@@ -41,6 +41,7 @@ def build_report_graph(server, llm: LLMClient):
     """Собирает граф Report + Inspector."""
 
     def parse_acl(state: ReportState) -> dict[str, Any]:
+        """Проверяет ACL-запрос и извлекает вопрос и параметры отчёта."""
         try:
             message = validate_acl(state.get("acl_request", {}))
         except ACLValidationError as exc:
@@ -81,6 +82,7 @@ def build_report_graph(server, llm: LLMClient):
         }
 
     def collect_facts(state: ReportState) -> dict[str, Any]:
+        """Собирает факты по коду проверки: пункты, скрипты, запуски."""
         codes = audit_codes(state["question"])
         audit_code = (
             codes[0]
@@ -102,7 +104,11 @@ def build_report_graph(server, llm: LLMClient):
             }
 
         act = db_tools.get_act(server, audit_code)
-        items = db_tools.get_act_items(server, audit_code, limit=50)
+        # Один лишний пункт нужен только чтобы отличить «ровно 50» от
+        # «больше 50»: отчёт не должен молча терять данные.
+        items = db_tools.get_act_items(server, audit_code, limit=51)
+        items_truncated = len(items) > 50
+        items = items[:50]
 
         facts = [{"type": "audit", **audit}]
         if act:
@@ -135,6 +141,10 @@ def build_report_graph(server, llm: LLMClient):
             )
         if not items:
             lines.append("- пунктов нет")
+        if items_truncated:
+            lines.append(
+                "- показаны первые 50 пунктов; в проверке есть и другие"
+            )
 
         return {
             "audit_code": audit_code,
@@ -144,6 +154,7 @@ def build_report_graph(server, llm: LLMClient):
         }
 
     def draft(state: ReportState) -> dict[str, Any]:
+        """Просит LLM написать проект раздела акта по собранным фактам."""
         try:
             draft_model = llm.draft_report(
                 question=state["question"],
@@ -161,6 +172,7 @@ def build_report_graph(server, llm: LLMClient):
         return {"draft": draft_model.model_dump(), "status": "ok"}
 
     def validate_citations(state: ReportState) -> dict[str, Any]:
+        """Проверяет, что все ID в черновике есть среди фактов."""
         allowed_ids = [str(item) for item in state.get("allowed_ids", [])]
         canonical = {item.upper(): item for item in allowed_ids}
         draft_model = state.get("draft", {})
@@ -200,6 +212,7 @@ def build_report_graph(server, llm: LLMClient):
         }
 
     def review(state: ReportState) -> dict[str, Any]:
+        """Inspector проверяет обоснованность черновика и возвращает замечания."""
         draft_model = ReportDraft.model_validate(state["draft"])
         try:
             review_model = llm.review_report(
@@ -223,21 +236,14 @@ def build_report_graph(server, llm: LLMClient):
             and not review_model.missing_sections
             and not issues
         )
-        structure_only = (
-            int(state.get("iterations", 0)) >= 1
-            and review_model.verdict == "ok"
-            and review_model.citations_ok
-            and not review_model.unsupported_claims
-            and bool(issues)
-            and all(issue.startswith("Нет раздела:") for issue in issues)
-        )
         return {
             "review": review_model.model_dump(),
             "review_issues": issues,
-            "status": "ok" if ok else ("finalize" if structure_only else "needs_revision"),
+            "status": "ok" if ok else "needs_revision",
         }
 
     def revise(state: ReportState) -> dict[str, Any]:
+        """Исправляет черновик по замечаниям Inspector (до 2 итераций)."""
         draft_model = ReportDraft.model_validate(state["draft"])
         review_model = ReportReview.model_validate(state.get("review", {}))
         try:
@@ -268,6 +274,7 @@ def build_report_graph(server, llm: LLMClient):
         }
 
     def finalize(state: ReportState) -> dict[str, Any]:
+        """Добавляет к черновику оговорку, если замечания остались."""
         draft_model = dict(state.get("draft", {}))
         issues = state.get("review_issues", []) + state.get("citation_issues", [])
         if issues:
@@ -283,6 +290,7 @@ def build_report_graph(server, llm: LLMClient):
         return {"draft": draft_model, "status": "ok"}
 
     def pack_response(state: ReportState) -> dict[str, Any]:
+        """Упаковывает проект акта в ACL-ответ."""
         status = state.get("status")
         if status == "refused":
             return _reply(
@@ -356,11 +364,10 @@ def build_report_graph(server, llm: LLMClient):
         {"validate": "validate", "pack": "pack"},
     )
     def after_review(state: ReportState) -> str:
+        """Выбирает следующий узел после Inspector: pack/revise/finalize."""
         status = state.get("status")
         if status in ("ok", "failed"):
             return "pack"
-        if status == "finalize":
-            return "finalize"
         return "revise" if int(state.get("iterations", 0)) < 2 else "finalize"
 
     builder.add_edge("validate", "review")

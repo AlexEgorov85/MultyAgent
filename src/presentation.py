@@ -24,122 +24,13 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from .i18n import t
-from .semantic.catalog import metric_label as _metric_label
-
-_AUDIT_COUNT_COLUMNS = {
-    "audit_count",
-    "completed_count",
-    "completed_audits_count",
-}
-
-_HEADLINE_COLUMNS = (
-    "completed_audits_count",
-    "completed_count",
-    "audit_count",
-    "overdue_open_items_count",
-    "critical_open_count",
-    "deviations_count",
-    "items_count",
-    "total_items",
-    "count",
-    "total",
+from .display import (
+    display_label,
+    format_value,
+    headline_column,
+    headline_label,
 )
-
-_LABELS_RU: dict[str, str] = {
-    "audit_id": "проверка",
-    "audit_code": "проверка",
-    "act_id": "акт",
-    "act_number": "акт",
-    "item_id": "ID пункта",
-    "item_number": "пункт",
-    "item_type": "тип пункта",
-    "test_type": "тип проверки",
-    "title": "название",
-    "risk_level": "уровень риска",
-    "status": "статус",
-    "act_status": "статус акта",
-    "item_status": "статус пункта",
-    "deadline": "срок",
-    "closed_at": "закрыт",
-    "act_date": "дата акта",
-    "year": "год",
-    "month": "месяц",
-    "period_year": "год",
-    "pocket_year": "год",
-    "pocket_id": "карман",
-    "pocket_title": "карман",
-    "pocket": "карман",
-    "theme_code": "тема",
-    "theme": "тема",
-    "theme_name": "тема",
-    "audit_count": "Проверок",
-    "completed_count": "Завершённых проверок",
-    "completed_audits": "Завершённых проверок",
-    "completed_audits_count": "Завершённых проверок",
-    "closed_audits_count": "Завершённых проверок",
-    "count": "Всего",
-    "total": "Всего",
-    "cnt": "Всего",
-    "items_count": "Пунктов",
-    "total_items": "Всего пунктов",
-    "deviations_count": "Отклонений",
-    "overdue_open_items": "Просроченных открытых пунктов",
-    "overdue_open_items_count": "Просроченных открытых пунктов",
-    "critical_open_count": "Критичных открытых пунктов",
-    "overdue_share_pct": "Доля просроченных, %",
-    "avg_risk": "Средний риск",
-    "source_id": "источник",
-    "source_type": "тип источника",
-}
-
-_LABELS_EN: dict[str, str] = {
-    "audit_id": "audit",
-    "audit_code": "audit",
-    "act_id": "act",
-    "act_number": "act",
-    "item_id": "item ID",
-    "item_number": "item",
-    "item_type": "item type",
-    "test_type": "test type",
-    "title": "title",
-    "risk_level": "risk level",
-    "status": "status",
-    "act_status": "act status",
-    "item_status": "item status",
-    "deadline": "deadline",
-    "closed_at": "closed at",
-    "act_date": "act date",
-    "year": "year",
-    "month": "month",
-    "period_year": "year",
-    "pocket_year": "year",
-    "pocket_id": "pocket",
-    "pocket_title": "pocket",
-    "pocket": "pocket",
-    "theme_code": "theme",
-    "theme": "theme",
-    "theme_name": "theme",
-    "audit_count": "Audits",
-    "completed_count": "Completed audits",
-    "completed_audits": "Completed audits",
-    "completed_audits_count": "Completed audits",
-    "closed_audits_count": "Completed audits",
-    "count": "Total",
-    "total": "Total",
-    "cnt": "Total",
-    "items_count": "Items",
-    "total_items": "Total items",
-    "deviations_count": "Deviations",
-    "overdue_open_items": "Overdue open items",
-    "overdue_open_items_count": "Overdue open items",
-    "critical_open_count": "Critical open items",
-    "overdue_share_pct": "Overdue share, %",
-    "avg_risk": "Average risk",
-    "source_id": "source",
-    "source_type": "source type",
-}
-
+from .i18n import t
 
 _ROUTE_KEYS = {
     "analytics": "route_analytics",
@@ -226,37 +117,6 @@ def _chips(*pairs: tuple[str, Any]) -> list[dict[str, str]]:
     ]
 
 
-def _english(state: dict[str, Any]) -> bool:
-    return _lang(state).lower() == "en"
-
-
-def _label(column: str, state: dict[str, Any]) -> str:
-    labels = _LABELS_EN if _english(state) else _LABELS_RU
-    return labels.get(column, column.replace("_", " ").strip().capitalize())
-
-
-def _fmt(value: Any, column: str, state: dict[str, Any]) -> str:
-    from decimal import Decimal
-
-    if value is None:
-        return "—"
-    if isinstance(value, bool):
-        return t(_lang(state), "yes" if value else "no")
-    if isinstance(value, Decimal):
-        value = float(value)
-    if isinstance(value, float):
-        number = f"{value:.1f}" if column.endswith("_pct") else f"{value:g}"
-        if not _english(state):
-            number = number.replace(".", ",")
-        return f"{number} %" if column.endswith("_pct") else number
-    if isinstance(value, int):
-        if "year" in column or abs(value) < 1000:
-            return str(value)
-        text = f"{value:,}"
-        return text.replace(",", " ") if not _english(state) else text
-    return str(value)
-
-
 def _content(state: dict[str, Any]) -> dict[str, Any]:
     acl = state.get("acl_response") or {}
     content = acl.get("content")
@@ -298,79 +158,55 @@ def _present_analytics(state: dict[str, Any]) -> dict[str, Any]:
     if rows:
         if len(rows) == 1:
             row = rows[0]
-            # Не показываем технические имена колонок, даже если они попали
-            # в шаблонный ответ. Это проверка формата, а не угадывание смысла.
-            use_answer = bool(answer) and not any(
-                column and column in answer for column in columns
-            )
+            row_columns = [column for column in columns if column] or list(row)
             metric = str(content.get("metric") or "").strip()
-            metric_label = (
-                _metric_label(metric) if _lang(state) != "en" else ""
-            )
-            headline = next(
-                (key for key in _HEADLINE_COLUMNS if key in row and row[key] is not None),
-                None,
-            )
-            single_numeric = False
-            if headline is None and len(row) == 1:
-                headline = next(iter(row))
-                value = row[headline]
-                single_numeric = isinstance(value, (int, float)) and not isinstance(
-                    value, bool
-                )
+            # Шаблонный ответ мог сохранить техническое имя колонки:
+            # детерминированную подпись строим сами. Ответ LLM уже
+            # сформулирован по данным, его не переписываем.
+            use_answer = bool(answer) and str(
+                content.get("answer_source") or ""
+            ) != "template"
+            headline = headline_column(row, row_columns, metric)
             if headline is not None:
-                label = _label(headline, state)
-                if metric_label and use_answer and metric_label.lower() not in answer.lower():
-                    # Ответ вида «Всего: 28» не говорит, что посчитано.
-                    use_answer = False
-                if metric_label and label in ("Всего", "Count", "count"):
-                    label = metric_label
-                status_value = str(
-                    row.get("status") or row.get("act_status") or ""
-                ).strip().lower()
-                if headline in _AUDIT_COUNT_COLUMNS or metric == "audit_count":
-                    if status_value in ("завершена", "completed"):
-                        label = "Завершённых проверок"
-                value = _fmt(row[headline], headline, state)
-                is_count = headline in _HEADLINE_COLUMNS or single_numeric
+                label = headline_label(headline, metric, _lang(state))
+                value = format_value(row[headline], headline, _lang(state))
                 return {
-                    "kind": "count" if is_count else "scalar",
+                    "kind": "count",
                     "text": answer if use_answer else f"{label}: {value}.",
                     "facts": [{"label": label, "value": value}],
                     "sql": sql,
                 }
-            parts: list[str] = []
-            for column in columns:
-                if row.get(column) is None:
-                    continue
-                column_label = _label(column, state)
-                if metric_label and column in ("cnt", "count", "total"):
-                    column_label = metric_label
-                parts.append(
-                    f"{column_label}: {_fmt(row[column], column, state)}"
-                )
+            if use_answer:
+                return {"kind": "text", "text": answer, "facts": [], "sql": sql}
+            parts = [
+                f"{display_label(column, _lang(state))}: "
+                f"{format_value(row[column], column, _lang(state))}"
+                for column in row_columns
+                if row.get(column) is not None
+            ]
             if parts:
-                body = ", ".join(parts)
                 return {
                     "kind": "scalar",
-                    "text": answer if use_answer else t(_lang(state), "result", body=body),
+                    "text": t(_lang(state), "result", body=", ".join(parts)),
                     "facts": [],
                     "sql": sql,
                 }
 
-        shown_columns = [column for column in columns if column][:5]
+        shown_columns = [column for column in columns if column]
         lines: list[str] = []
         if answer:
             lines.extend([answer, ""])
         lines.extend([t(_lang(state), "present_table_title", count=len(rows)), ""])
         if shown_columns:
-            headers = [_label(column, state) for column in shown_columns]
+            headers = [display_label(column, _lang(state)) for column in shown_columns]
             lines.append("| " + " | ".join(_escape_md(item) for item in headers) + " |")
             lines.append("| " + " | ".join("---" for _ in headers) + " |")
             preview_rows = 20
             for row in rows[:preview_rows]:
                 cells = [
-                    _escape_md(_fmt(row.get(column), column, state))
+                    _escape_md(
+                        format_value(row.get(column), column, _lang(state))
+                    )
                     for column in shown_columns
                 ]
                 lines.append("| " + " | ".join(cells) + " |")

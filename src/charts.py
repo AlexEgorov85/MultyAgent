@@ -7,11 +7,12 @@ ChartSpec строит модель. Код не придумывает тип �
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
 
 def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return isinstance(value, (int, float, Decimal)) and not isinstance(value, bool)
 
 
 def _is_year_field(field: str) -> bool:

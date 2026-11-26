@@ -15,6 +15,12 @@ from .. import config, dialogue_store
 from ..acl import ACLMessage, ACLValidationError, make_reply, validate_acl
 from ..charts import ground_chart_points
 from ..dialogue import last_audit_code
+from ..display import (
+    display_label,
+    format_value,
+    headline_column,
+    headline_label,
+)
 from ..i18n import t
 from ..llm import LLMClient
 from ..query.compiler import QueryCompileError, compile_query_plan
@@ -65,27 +71,16 @@ def _complete_metric_dimensions(plan):
     return plan.model_copy(update=update) if update else plan
 
 
-def _split_tool_call(name: str) -> tuple[str, dict[str, str]]:
-    """Разбирает форму `tool(arg=value, ...)`, если модель положила туда аргументы.
-
-    Модель иногда пишет аргументы в `name`, а `arguments` оставляет пустым.
-    Формат простой (пары ключ=значение через запятую), поэтому разбираем его
-    без регулярных выражений и не теряем `item_type` и другие фильтры.
-    """
-    text = str(name or "").strip()
-    if not text.endswith(")") or "(" not in text:
-        return text, {}
-    head, _, tail = text.partition("(")
-    parsed: dict[str, str] = {}
-    for part in tail[:-1].split(","):
-        if "=" not in part:
+def _mentions_count(text: str, count: int) -> bool:
+    """Есть ли число ``count`` в тексте отдельным числом, а не подстрокой."""
+    for token in number_tokens(text):
+        try:
+            value = float(token.replace(",", "."))
+        except ValueError:
             continue
-        key, _, value = part.partition("=")
-        key = key.strip()
-        value = value.strip().strip("\"'")
-        if key and value:
-            parsed[key] = value
-    return head.strip(), parsed
+        if value == count:
+            return True
+    return False
 
 
 def _template_parameters(
@@ -117,7 +112,7 @@ def known_themes(server) -> list[str]:
     """Возвращает список тем (theme_code) из карманов аудита."""
     from .. import db_runtime
 
-    with db_runtime.connect(server, role=db_runtime.APP_ROLE) as conn:
+    with db_runtime.connect(server, role=db_runtime.READ_ONLY_ROLE) as conn:
         rows = conn.execute(
             "SELECT DISTINCT lower(theme_code) AS theme FROM audit.audit_pockets "
             "ORDER BY theme"
@@ -750,7 +745,7 @@ def build_analytics_graph(server, llm: LLMClient):
         )
         # Модель иногда пересчитывает итог по видимому списку (5 из 9).
         # Если исходное число потерялось — отдаём детерминированный черновик.
-        if answer_source == "llm" and str(len(items)) not in answer:
+        if answer_source == "llm" and not _mentions_count(answer, len(items)):
             answer, answer_source = draft, "agent"
         return {
             "answer": answer,
@@ -805,8 +800,8 @@ def build_analytics_graph(server, llm: LLMClient):
                 hints = None
         lines: list[str] = [f"Проверка {audit_code}:" if audit_code else "Результаты:"]
         for call in plan.calls[:limit]:
-            name, inline_arguments = _split_tool_call(call.name)
-            arguments = {**inline_arguments, **call.arguments.as_call_arguments()}
+            name = str(call.name or "").strip()
+            arguments = call.arguments.as_call_arguments()
             if name in ("get_audit", "get_act", "get_act_items"):
                 if not arguments.get("audit_code"):
                     arguments["audit_code"] = (
@@ -844,6 +839,14 @@ def build_analytics_graph(server, llm: LLMClient):
                             )
             elif isinstance(result, dict):
                 lines.append(f"{call.name}: 1 результат")
+                if result.get("audit_code"):
+                    evidence.append(
+                        {"type": "act", "audit_code": result["audit_code"]}
+                    )
+                elif result.get("pocket_id"):
+                    evidence.append(
+                        {"type": "pocket", "pocket_id": result["pocket_id"]}
+                    )
             else:
                 lines.append(f"{call.name}: выполнено")
             evidence.append({"type": "tool", "name": call.name})
@@ -880,100 +883,28 @@ def build_analytics_graph(server, llm: LLMClient):
             "metrics": truncation_metrics,
         }
 
-    COLUMN_LABELS = {
-        "year": "год",
-        "month": "месяц",
-        "period_year": "год",
-        "pocket_year": "год",
-        "theme_code": "тема",
-        "theme": "тема",
-        "pocket": "карман",
-        "pocket_title": "карман",
-        "status": "статус",
-        "act_status": "статус акта",
-        "item_status": "статус пункта",
-        "risk_level": "уровень риска",
-        "audit_code": "проверка",
-        "audit_count": "Проверок",
-        "completed_count": "Завершённых проверок",
-        "completed_audits_count": "Завершённых проверок",
-        "cnt": "Всего",
-        "count": "Всего",
-        "total": "Всего",
-        "items_count": "Пунктов",
-        "total_items": "Всего пунктов",
-        "deviations_count": "Отклонений",
-        "overdue_open_items": "Просроченных открытых пунктов",
-        "overdue_open_items_count": "Просроченных открытых пунктов",
-        "critical_open_count": "Критичных открытых пунктов",
-        "overdue_share_pct": "Доля просроченных, %",
-    }
-    HEADLINE_COLUMNS = (
-        "completed_audits_count",
-        "completed_count",
-        "audit_count",
-        "overdue_open_items_count",
-        "critical_open_count",
-        "deviations_count",
-        "items_count",
-        "total_items",
-        "count",
-        "total",
-    )
-
     def _format_rows(
         rows: list[dict[str, Any]],
         columns: list[str],
         language: str | None = None,
+        metric: str = "",
     ) -> str:
-        english = str(language).lower() == "en"
-
-        def label(column: str) -> str:
-            """Человекочитаемая подпись колонки для табличного fallback."""
-            return (
-                column.replace("_", " ").capitalize()
-                if english
-                else COLUMN_LABELS.get(column, column)
-            )
-
+        """????????????????? fallback, ???? LLM ?? ?????????????? ?????."""
         if not rows:
-            return (
-                "No rows match the given conditions."
-                if english
-                else "По заданным условиям ничего не найдено."
-            )
+            return t(language, "present_empty")
         if len(rows) == 1:
             row = rows[0]
-            headline = next(
-                (
-                    key
-                    for key in HEADLINE_COLUMNS
-                    if key in row and row[key] is not None
-                ),
-                None,
-            )
+            names = [column for column in columns if column] or list(row)
+            headline = headline_column(row, names, metric)
             if headline is not None:
-                headline_label = label(headline)
-                status_value = str(
-                    row.get("status") or row.get("act_status") or ""
-                ).strip().lower()
-                if headline in (
-                    "audit_count",
-                    "completed_count",
-                    "completed_audits_count",
-                ) and status_value in ("завершена", "completed"):
-                    headline_label = (
-                        "Completed audits"
-                        if english
-                        else "Завершённых проверок"
-                    )
-                # Условия вопроса (год, тема, статус) пользователь уже знает:
-                # не дублируем их и не показываем технические имена колонок.
-                return f"{headline_label}: {row[headline]}."
+                label = headline_label(headline, metric, language)
+                value = format_value(row[headline], headline, language)
+                return f"{label}: {value}."
             parts = [
-                f"{label(column)}: {rows[0].get(column)}"
-                for column in columns
-                if rows[0].get(column) is not None
+                f"{display_label(column, language)}: "
+                f"{format_value(row[column], column, language)}"
+                for column in names
+                if row.get(column) is not None
             ]
             if parts:
                 return t(language, "result", body=", ".join(parts))
@@ -1220,7 +1151,12 @@ def build_analytics_graph(server, llm: LLMClient):
             # «Найдено строк: N» дублировала бы её заголовок.
             answer = f"{template_header}." if template_header else ""
         else:
-            answer = _format_rows(rows, columns, state.get("language"))
+            metric = str(
+                (state.get("plan") or {}).get("query_plan", {}).get("metric") or ""
+            ).strip()
+            answer = _format_rows(
+                rows, columns, state.get("language"), metric=metric
+            )
             if template_header:
                 answer = f"{template_header}. {answer}"
         if state.get("truncated"):
@@ -1285,7 +1221,7 @@ def build_analytics_graph(server, llm: LLMClient):
             field = str(item.get("field") or "")
             # Только сущностно-независимые ограничения: они одинаково
             # применимы к проверкам, актам и пунктам.
-            if field in ("theme", "audit_code"):
+            if field in db_tools.ACT_SCOPE_FIELDS:
                 scope[field] = item.get("value")
         if scope:
             content["scope"] = scope

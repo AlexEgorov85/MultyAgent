@@ -215,3 +215,38 @@ def test_series_is_preserved_for_multi_line_charts():
     )
 
     assert [point["series"] for point in points] == ["Ипотека", "Карты"]
+
+def test_decimal_measure_is_grounded():
+    from decimal import Decimal
+
+    rows = [{"status": "завершена", "cnt": Decimal("28.0")}]
+
+    points = ground_chart_points(
+        {
+            "data": [
+                {"label": "Завершена", "value": 28, "row_index": 0, "measure": "cnt"}
+            ]
+        },
+        rows,
+        ["status", "cnt"],
+    )
+
+    # Одна точка не проходит порог диаграммы, но значение распознано:
+    # добавляем вторую строку, чтобы проверить именно Decimal.
+    assert points is None
+
+    rows.append({"status": "в работе", "cnt": Decimal("10.0")})
+    points = ground_chart_points(
+        {
+            "data": [
+                {"label": "Завершена", "value": 28, "row_index": 0, "measure": "cnt"},
+                {"label": "В работе", "value": 10, "row_index": 1, "measure": "cnt"},
+            ]
+        },
+        rows,
+        ["status", "cnt"],
+    )
+    assert points == [
+        {"label": "Завершена", "value": 28.0},
+        {"label": "В работе", "value": 10.0},
+    ]

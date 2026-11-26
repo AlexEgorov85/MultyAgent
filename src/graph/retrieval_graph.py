@@ -15,9 +15,6 @@ from ..state import RetrievalState
 from ..textscan import reference_ids
 
 EMPTY_ANSWER = "Подходящих формулировок в актах и методичках не найдено."
-# ID, которые агент может упомянуть в тексте ответа. Проверяем не только
-# массив citations, но и сам текст: модель иногда пишет «см. ITM-...».
-SOURCE_ID_PREFIXES = ("ITM", "ACT")
 
 
 def _reply(
@@ -45,6 +42,7 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
     """Собирает граф Retrieval-агента."""
 
     def parse_acl(state: RetrievalState) -> dict[str, Any]:
+        """Проверяет ACL-запрос и извлекает вопрос и контекст."""
         try:
             message = validate_acl(state.get("acl_request", {}))
         except ACLValidationError as exc:
@@ -82,6 +80,7 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
         }
 
     def retrieve(state: RetrievalState) -> dict[str, Any]:
+        """Ищет чанки гибридным поиском (pgvector + FTS)."""
         result = search(server, state["question"], embeddings=embeddings, top_k=top_k)
         chunks = result["chunks"]
         if not chunks:
@@ -112,6 +111,7 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
         )
 
     def generate(state: RetrievalState) -> dict[str, Any]:
+        """Просит LLM ответить по чанкам; при сбое — fallback по top-чанку."""
         try:
             answer = llm.answer_from_chunks(
                 question=state["question"],
@@ -125,18 +125,24 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
                 "error": t(state.get("language"), "answer_failed", error=exc),
             }
         text = answer.text.strip().lower()
-        if not answer.citations or "corrected text" in text or len(text) < 5:
+        if not answer.citations or len(text) < 5:
             answer = _fallback_answer(state["chunks"], state.get("language"))
         return {"answer": answer.model_dump(), "citations": answer.citations}
 
     def validate_citations(state: RetrievalState) -> dict[str, Any]:
+        """Проверяет, что цитаты и ID в тексте есть среди чанков."""
         allowed = {chunk["source_id"] for chunk in state.get("chunks", [])}
         answer = state.get("answer", {})
         citations = [item for item in answer.get("citations", []) if item in allowed]
         invalid = [item for item in answer.get("citations", []) if item not in allowed]
         # Проверяем и ID, упомянутые в тексте, а не только citations.
         text = str(answer.get("text", "") or "")
-        text_ids = reference_ids(text, SOURCE_ID_PREFIXES)
+        prefixes = {
+            str(item).split("-", 1)[0].upper()
+            for item in allowed
+            if "-" in str(item) and str(item).split("-", 1)[0]
+        }
+        text_ids = reference_ids(text, prefixes)
         known = {str(item).upper() for item in allowed}
         invalid_text_ids = [
             item for item in dict.fromkeys(text_ids) if item not in known
@@ -170,6 +176,7 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
         }
 
     def critic(state: RetrievalState) -> dict[str, Any]:
+        """LLM-критик проверяет обоснованность ответа и цитаты."""
         answer = RetrievalAnswer.model_validate(state["answer"])
         try:
             critique = llm.critique_answer(
@@ -205,6 +212,7 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
         }
 
     def rewrite(state: RetrievalState) -> dict[str, Any]:
+        """Переписывает ответ по замечаниям критика."""
         answer = RetrievalAnswer.model_validate(state["answer"])
         try:
             rewritten = llm.rewrite_answer(
@@ -230,6 +238,7 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
         }
 
     def finalize(state: RetrievalState) -> dict[str, Any]:
+        """Добавляет оговорку к ответу, если замечания остались."""
         answer = dict(state.get("answer", {}))
         issues = state.get("critic_issues", []) + state.get("citation_issues", [])
         if issues:
@@ -245,6 +254,7 @@ def build_retrieval_graph(server, llm: LLMClient, embeddings=None, top_k: int = 
         return {"answer": answer, "status": "ok"}
 
     def pack_response(state: RetrievalState) -> dict[str, Any]:
+        """Упаковывает ответ Retrieval в ACL-сообщение."""
         status = state.get("status")
         if status == "refused":
             return _reply(

@@ -348,10 +348,9 @@ METRICS: dict[str, MetricSpec] = {
         },
         description=(
             "Крупнейшее отклонение: максимальный разрыв между фактическим "
-            "(metric_value) и пороговым (threshold_value) значением. Для "
-            "вопроса «какое отклонение самое крупное» используй "
-            "dimensions=[title, audit_code, severity, metric_name], "
-            "order_by=count_desc, limit=1."
+            "(metric_value) и пороговым (threshold_value) значением. "
+            "Для идентификации результата нужны название пункта и код "
+            "проверки; остальные разрезы выбирай по вопросу."
         ),
         required_dimensions=("title", "audit_code"),
         single_row=True,

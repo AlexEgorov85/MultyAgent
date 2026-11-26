@@ -319,7 +319,9 @@ def build_main_graph(
                     reason = ""
 
         slots = merge_slots(state.get("dialogue_slots"), question, text)
-        text = augment_query(text, question)
+        text = augment_query(
+            text, question, str(state.get("language") or "ru")
+        )
         return {
             "resolved_query": text,
             "resolved_reason": reason,
@@ -589,26 +591,15 @@ def build_main_graph(
         return {"final_answer": answer, "evidence": []}
 
     def _smalltalk_kind(state: MainState) -> str:
-        """Подтип smalltalk из reason, с запасным разбором вопроса.
+        """Подтип smalltalk из reason; без reason — нейтральный ответ.
 
-        Основной контракт — ``smalltalk:<kind>`` из router.md. Если модель
-        вернула свободный текст, не показываем приветствие на «что умеешь?»
-        и благодарность: это ошибка формата, а не повод потерять смысл.
+        Контракт `smalltalk:<kind>` задан router.md. Если модель вернула
+        свободный текст, код не угадывает подтип по словам вопроса.
         """
         reason = str(state.get("route_reason") or "").strip().lower()
         if reason.startswith("smalltalk:") and ":" in reason:
             return reason.split(":", 1)[-1] or "greeting"
-        question = str(
-            state.get("resolved_query") or state.get("user_query") or ""
-        ).lower()
-        if any(word in question for word in ("спасибо", "благодар")):
-            return "thanks"
-        if any(
-            word in question
-            for word in ("что ты умеешь", "что ты можешь", "возможност")
-        ):
-            return "capabilities"
-        return "greeting"
+        return ""
 
     def smalltalk(state: MainState) -> dict[str, Any]:
         """Отвечает на приветствие, благодарность или вопрос о возможностях."""

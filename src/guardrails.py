@@ -41,19 +41,6 @@ PROMPT_PATTERNS = (
     r"reveal prompt",
 )
 
-DOMAIN_HINTS = (
-    "аудит",
-    "проверк",
-    "акт",
-    "пункт",
-    "отклонен",
-    "ипотек",
-    "вклад",
-    "платеж",
-    "карт",
-    "кредит",
-)
-
 
 def _matches(patterns: tuple[str, ...], text: str) -> str | None:
     for pattern in patterns:

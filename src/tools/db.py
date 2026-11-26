@@ -205,6 +205,9 @@ def get_act_items(
     )
 
 
+ACT_SCOPE_FIELDS: tuple[str, ...] = ("theme", "audit_code")
+
+
 @telemetry.timed_tool("act_scope_map")
 def act_scope_map(server, act_numbers: list[str]) -> dict[str, dict[str, str]]:
     """Тема и код проверки для акта — для проверки релевантности evidence."""
